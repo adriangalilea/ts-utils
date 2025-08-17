@@ -6,6 +6,7 @@ export * from './dir.js';
 export * from './path.js';
 export * from './project.js';
 export * from './kev.js';
+export * from './format.js';
 declare const _default: {
     logger: {
         wait: typeof import("./logger.js").wait;
@@ -180,6 +181,26 @@ declare const _default: {
     };
     KEV: import("./kev.js").KevOps;
     kev: import("./kev.js").KevOps;
+    format: {
+        number(value: number, decimals: number): string;
+        usd(value: number): string;
+        btc(value: number): string;
+        eth(value: number): string;
+        auto(value: number, currencyCode: string): string;
+        percentage(value: number): string;
+        withCommas(value: number, decimals?: number): string;
+        compact(value: number): string;
+    };
+    Format: {
+        number(value: number, decimals: number): string;
+        usd(value: number): string;
+        btc(value: number): string;
+        eth(value: number): string;
+        auto(value: number, currencyCode: string): string;
+        percentage(value: number): string;
+        withCommas(value: number, decimals?: number): string;
+        compact(value: number): string;
+    };
 };
 export default _default;
 //# sourceMappingURL=index.d.ts.map
