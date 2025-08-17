@@ -49,6 +49,5 @@ declare class FileOps {
     mtime(path: string): Date;
 }
 export declare const file: FileOps;
-export declare const File: FileOps;
-export default file;
+export {};
 //# sourceMappingURL=file.d.ts.map

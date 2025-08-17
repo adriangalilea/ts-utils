@@ -105,6 +105,4 @@ class DirOps {
     }
 }
 export const dir = new DirOps();
-export const Dir = dir; // Capitalized alias to match Go style
-export default dir;
 //# sourceMappingURL=dir.js.map

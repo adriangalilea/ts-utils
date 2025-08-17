@@ -151,5 +151,4 @@ export const project = {
     getPackageJson,
     isTypeScriptProject,
 };
-export default project;
 //# sourceMappingURL=project.js.map

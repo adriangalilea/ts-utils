@@ -1,6 +1,6 @@
 {
   "name": "@adriangalilea/utils",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "TypeScript utilities - logger, currency, formatter, and more",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,9 +19,9 @@
   "keywords": [
     "typescript",
     "utils",
-    "logger",
+    "log",
     "currency",
-    "formatter"
+    "format"
   ],
   "author": "Adrian Galilea <adriangalilea@gmail.com>",
   "license": "MIT",

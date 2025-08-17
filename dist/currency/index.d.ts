@@ -81,5 +81,4 @@ export declare const currency: {
         readonly BUSD: "$";
     };
 };
-export default currency;
 //# sourceMappingURL=index.d.ts.map

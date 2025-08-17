@@ -36,6 +36,5 @@ declare class FormatOps {
     compact(value: number): string;
 }
 export declare const format: FormatOps;
-export declare const Format: FormatOps;
-export default format;
+export {};
 //# sourceMappingURL=format.d.ts.map

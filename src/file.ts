@@ -220,6 +220,3 @@ class FileOps {
 }
 
 export const file = new FileOps()
-export const File = file // Capitalized alias to match Go style
-
-export default file

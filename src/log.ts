@@ -239,8 +239,8 @@ export function createLogger(prefix: string) {
   }
 }
 
-// Export a default logger instance
-const logger = {
+// Export a default log instance
+const log = {
   wait,
   error,
   warn,
@@ -278,7 +278,7 @@ const logger = {
   },
 }
 
-export default logger
+export { log }
 
 // Example usage helper
 export function logAppStartup(options: {

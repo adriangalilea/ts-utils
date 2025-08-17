@@ -171,5 +171,3 @@ export const project = {
   getPackageJson,
   isTypeScriptProject,
 }
-
-export default project

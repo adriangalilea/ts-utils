@@ -32,5 +32,4 @@ export declare const project: {
     getPackageJson: typeof getPackageJson;
     isTypeScriptProject: typeof isTypeScriptProject;
 };
-export default project;
 //# sourceMappingURL=project.d.ts.map

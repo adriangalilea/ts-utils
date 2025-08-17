@@ -63,6 +63,5 @@ declare class PathOps {
     cwd(): string;
 }
 export declare const path: PathOps;
-export declare const Path: PathOps;
-export default path;
+export {};
 //# sourceMappingURL=path.d.ts.map

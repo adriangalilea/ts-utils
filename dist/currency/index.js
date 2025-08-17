@@ -227,5 +227,4 @@ export const currency = {
     formatBasisPoints,
     symbols: CurrencySymbols,
 };
-export default currency;
 //# sourceMappingURL=index.js.map

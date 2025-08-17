@@ -70,5 +70,4 @@ export declare const offensive: {
     check: typeof check;
     panic: typeof panic;
 };
-export default offensive;
 //# sourceMappingURL=offensive.d.ts.map

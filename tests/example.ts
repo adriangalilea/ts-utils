@@ -1,33 +1,33 @@
 import { 
-  wait, error, warn, ready, info, success, event, trace, 
-  createLogger, warnOnce, time, timeEnd,
-  currency, isCrypto, isStablecoin, isFiat, getSymbol, getOptimalDecimals 
+  log,
+  currency,
+  format
 } from '../src/index.js'
 
 console.log('\n=== Logger Examples ===\n')
 
 // Basic logging
-wait('Loading resources...')
-info('This is an info message')
-success('Operation completed successfully')
-warn('This is a warning')
-error('This is an error')
-event('User logged in')
-trace('Trace: function called')
-ready('Server is ready')
+log.wait('Loading resources...')
+log.info('This is an info message')
+log.success('Operation completed successfully')
+log.warn('This is a warning')
+log.error('This is an error')
+log.event('User logged in')
+log.trace('Trace: function called')
+log.ready('Server is ready')
 
 // Warn once
-warnOnce('This warning appears only once')
-warnOnce('This warning appears only once') // Won't show again
+log.warnOnce('This warning appears only once')
+log.warnOnce('This warning appears only once') // Won't show again
 
 // Timer
-time('dataFetch')
+log.time('dataFetch')
 setTimeout(() => {
-  timeEnd('dataFetch')
+  log.timeEnd('dataFetch')
 }, 100)
 
 // Prefixed logger
-const apiLogger = createLogger('API')
+const apiLogger = log.createLogger('API')
 apiLogger.info('Request received')
 apiLogger.success('Response sent')
 apiLogger.error('Connection failed')
@@ -35,30 +35,40 @@ apiLogger.error('Connection failed')
 console.log('\n=== Currency Examples ===\n')
 
 // Currency type checking
-console.log('isCrypto("BTC"):', isCrypto('BTC'))
-console.log('isCrypto("XBT"):', isCrypto('XBT')) // Alternative for BTC
-console.log('isCrypto("WBTC"):', isCrypto('WBTC')) // Wrapped BTC
-console.log('isCrypto("USD"):', isCrypto('USD'))
-console.log('isStablecoin("USDT"):', isStablecoin('USDT'))
-console.log('isStablecoin("BTC"):', isStablecoin('BTC'))
-console.log('isFiat("USD"):', isFiat('USD'))
-console.log('isFiat("EUR"):', isFiat('EUR'))
-console.log('isFiat("BTC"):', isFiat('BTC'))
+console.log('isCrypto("BTC"):', currency.isCrypto('BTC'))
+console.log('isCrypto("XBT"):', currency.isCrypto('XBT')) // Alternative for BTC
+console.log('isCrypto("WBTC"):', currency.isCrypto('WBTC')) // Wrapped BTC
+console.log('isCrypto("USD"):', currency.isCrypto('USD'))
+console.log('isStablecoin("USDT"):', currency.isStablecoin('USDT'))
+console.log('isStablecoin("BTC"):', currency.isStablecoin('BTC'))
+console.log('isFiat("USD"):', currency.isFiat('USD'))
+console.log('isFiat("EUR"):', currency.isFiat('EUR'))
+console.log('isFiat("BTC"):', currency.isFiat('BTC'))
 
 // Currency symbols
 console.log('\nCurrency Symbols:')
-console.log('BTC:', getSymbol('BTC'))
-console.log('ETH:', getSymbol('ETH'))
-console.log('USD:', getSymbol('USD'))
-console.log('EUR:', getSymbol('EUR'))
-console.log('JPY:', getSymbol('JPY'))
+console.log('BTC:', currency.getSymbol('BTC'))
+console.log('ETH:', currency.getSymbol('ETH'))
+console.log('USD:', currency.getSymbol('USD'))
+console.log('EUR:', currency.getSymbol('EUR'))
+console.log('JPY:', currency.getSymbol('JPY'))
 
 // Optimal decimals
 console.log('\nOptimal Decimals:')
-console.log('0.00001234 BTC:', getOptimalDecimals(0.00001234, 'BTC'), 'decimals')
-console.log('1234.56 USD:', getOptimalDecimals(1234.56, 'USD'), 'decimals')
-console.log('0.123 ETH:', getOptimalDecimals(0.123, 'ETH'), 'decimals')
-console.log('999999 JPY:', getOptimalDecimals(999999, 'JPY'), 'decimals')
+console.log('0.00001234 BTC:', currency.getOptimalDecimals(0.00001234, 'BTC'), 'decimals')
+console.log('1234.56 USD:', currency.getOptimalDecimals(1234.56, 'USD'), 'decimals')
+console.log('0.123 ETH:', currency.getOptimalDecimals(0.123, 'ETH'), 'decimals')
+console.log('999999 JPY:', currency.getOptimalDecimals(999999, 'JPY'), 'decimals')
+
+// Format examples
+console.log('\nFormat Examples:')
+console.log('USD:', format.usd(1234.56))
+console.log('BTC:', format.btc(0.00001234))
+console.log('ETH:', format.eth(0.123))
+console.log('Auto USD:', format.auto(1234.56, 'USD'))
+console.log('Percentage:', format.percentage(12.5))
+console.log('With commas:', format.withCommas(1234567.89, 2))
+console.log('Compact:', format.compact(1234567))
 
 // Percentage calculations
 console.log('\nPercentage Calculations:')

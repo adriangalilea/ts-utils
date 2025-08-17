@@ -36,6 +36,5 @@ declare class DirOps {
     isEmpty(path: string): boolean;
 }
 export declare const dir: DirOps;
-export declare const Dir: DirOps;
-export default dir;
+export {};
 //# sourceMappingURL=dir.d.ts.map

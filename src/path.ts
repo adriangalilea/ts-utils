@@ -125,6 +125,3 @@ class PathOps {
 }
 
 export const path = new PathOps()
-export const Path = path // Capitalized alias
-
-export default path

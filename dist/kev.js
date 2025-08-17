@@ -757,7 +757,5 @@ export class KevOps {
     }
 }
 // Create singleton instance
-export const KEV = new KevOps();
-export const kev = KEV; // lowercase alias
-export default KEV;
+export const kev = new KevOps();
 //# sourceMappingURL=kev.js.map

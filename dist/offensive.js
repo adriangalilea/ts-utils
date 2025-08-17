@@ -19,6 +19,7 @@
  *
  * The only acceptable response to confusion is to scream and die.
  */
+import { log } from './log.js';
 /**
  * Assert exits with error if condition is false.
  * Use for validating preconditions and invariants.
@@ -33,7 +34,7 @@
 export function assert(condition, ...msg) {
     if (!condition) {
         const message = msg.length > 0 ? msg.join(' ') : 'assertion failed';
-        console.error(`⨯ ${message}`);
+        log.error(message);
         process.exit(1);
     }
 }
@@ -50,7 +51,7 @@ export function must(fn) {
         return fn();
     }
     catch (error) {
-        console.error(`⨯ ${error}`);
+        log.error(error);
         process.exit(1);
     }
 }
@@ -68,10 +69,10 @@ export function must(fn) {
 export function check(err, ...messages) {
     if (err) {
         if (messages.length > 0) {
-            console.error(`⨯ ${messages.join(' ')}`);
+            log.error(messages.join(' '));
         }
         else {
-            console.error(`⨯ ${err}`);
+            log.error(err);
         }
         process.exit(1);
     }
@@ -98,5 +99,4 @@ export const offensive = {
     check,
     panic,
 };
-export default offensive;
 //# sourceMappingURL=offensive.js.map

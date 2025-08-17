@@ -144,7 +144,6 @@ export declare class KevOps {
      */
     dump(): void;
 }
-export declare const KEV: KevOps;
 export declare const kev: KevOps;
-export default KEV;
+export {};
 //# sourceMappingURL=kev.d.ts.map

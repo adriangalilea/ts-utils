@@ -88,6 +88,3 @@ class FormatOps {
 }
 
 export const format = new FormatOps()
-export const Format = format // Capitalized alias
-
-export default format
