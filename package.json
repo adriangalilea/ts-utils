@@ -1,6 +1,6 @@
 {
   "name": "@adriangalilea/utils",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "TypeScript utilities - logger, currency, formatter, and more",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,6 +19,14 @@
     "./runtime": {
       "types": "./dist/runtime.d.ts",
       "default": "./dist/runtime.js"
+    },
+    "./format": {
+      "types": "./dist/universal/format.d.ts",
+      "default": "./dist/universal/format.js"
+    },
+    "./currency": {
+      "types": "./dist/universal/currency/index.d.ts",
+      "default": "./dist/universal/currency/index.js"
     }
   },
   "files": [
