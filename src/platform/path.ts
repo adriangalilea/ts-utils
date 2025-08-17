@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'url'
 import { dirname, join, resolve, isAbsolute, relative, basename, extname, parse } from 'path'
+import { runtime } from '../runtime.js'
 
 /**
  * Path utilities for consistent path handling across the library
@@ -34,7 +35,7 @@ class PathOps {
     }
 
     // Default to resolving from current working directory
-    return resolve(process.cwd(), targetPath)
+    return resolve(runtime.cwd(), targetPath)
   }
 
   /**
@@ -120,7 +121,7 @@ class PathOps {
    * Get current working directory
    */
   cwd(): string {
-    return process.cwd()
+    return runtime.cwd()
   }
 }
 

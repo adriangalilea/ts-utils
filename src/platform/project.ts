@@ -1,3 +1,4 @@
+import { runtime } from '../runtime.js'
 import { file } from './file.js'
 import { dir } from './dir.js'
 import { path } from './path.js'
@@ -7,7 +8,7 @@ import { path } from './path.js'
  * Checks for: package.json, tsconfig.json, .git, deno.json
  */
 export function findProjectRoot(): string {
-  const cwd = process.cwd()
+  const cwd = runtime.cwd()
   return findProjectRootFrom(cwd)
 }
 
@@ -54,7 +55,7 @@ export function findProjectRootFrom(startDir: string): string {
  * Checks for: turbo.json, pnpm-workspace.yaml, lerna.json
  */
 export function findMonorepoRoot(): string {
-  const cwd = process.cwd()
+  const cwd = runtime.cwd()
   return findMonorepoRootFrom(cwd)
 }
 

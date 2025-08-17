@@ -1,11 +1,26 @@
 {
   "name": "@adriangalilea/utils",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "TypeScript utilities - logger, currency, formatter, and more",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "type": "module",
-  "exports": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "browser": "./dist/browser.js",
+      "node": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
+    }
+  },
   "files": [
     "dist"
   ],
@@ -13,8 +28,10 @@
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "test": "tsx tests/test.ts",
+    "test:runtime": "tsx tests/runtime-test.ts",
+    "test:browser": "open tests/browser-test.html",
     "example": "tsx tests/example.ts",
-    "update-crypto": "tsx src/currency/download-crypto-list.ts"
+    "update-crypto": "tsx src/universal/currency/download-crypto-list.ts"
   },
   "keywords": [
     "typescript",

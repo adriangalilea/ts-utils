@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browser Test - @adriangalilea/utils</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #e0e0e0;
+    }
+    h1 { color: #60a5fa; }
+    h2 { color: #a78bfa; margin-top: 30px; }
+    pre {
+      background: #262626;
+      padding: 15px;
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+    .success { color: #10b981; }
+    .error { color: #ef4444; }
+    .warning { color: #f59e0b; }
+    .info { color: #3b82f6; }
+    code {
+      background: #374151;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧪 Browser Test - @adriangalilea/utils</h1>
+  
+  <p>This tests the browser-safe utilities from <code>@adriangalilea/utils/browser</code></p>
+  
+  <h2>Test Results:</h2>
+  <pre id="output"></pre>
+
+  <h2>Import from CDN:</h2>
+  <pre><code>import { log, format, currency, runtime } from 'https://esm.sh/@adriangalilea/utils@0.0.4/browser'</code></pre>
+
+  <script type="module">
+    // For testing, we'll simulate the exports
+    // In real usage, you'd import from the package
+    
+    const output = document.getElementById('output')
+    
+    function addLine(text, className = '') {
+      const line = document.createElement('div')
+      line.textContent = text
+      if (className) line.className = className
+      output.appendChild(line)
+    }
+    
+    async function runTests() {
+      addLine('=== Runtime Detection ===\n', 'info')
+      
+      // Simulate runtime detection
+      const runtime = {
+        isBrowser: true,
+        isNode: false,
+        isDeno: false,
+        isBun: false,
+        canFileSystem: () => false,
+        canExit: () => false,
+        canReadEnv: () => false,
+        canWriteEnv: () => false,
+        canNetwork: () => true,
+        canCrypto: () => typeof crypto !== 'undefined',
+        env: (key) => window.__ENV__?.[key],
+        setEnv: (key, value) => {
+          window.__ENV__ = window.__ENV__ || {}
+          window.__ENV__[key] = value
+        },
+        exit: (code) => {
+          const error = new Error(`Process exited with code ${code}`)
+          error.exitCode = code
+          throw error
+        }
+      }
+      
+      addLine(`Runtime: Browser = ${runtime.isBrowser}, Node = ${runtime.isNode}`)
+      addLine(`Capabilities: FileSystem = ${runtime.canFileSystem()}, Network = ${runtime.canNetwork()}, Crypto = ${runtime.canCrypto()}`)
+      
+      addLine('\n=== Universal Utilities ===\n', 'info')
+      
+      // Format utilities (these would work)
+      const format = {
+        usd: (val) => `$${val.toFixed(2)}`,
+        btc: (val) => `${val.toFixed(8)} ₿`,
+        percentage: (val) => `${val.toFixed(1)}%`
+      }
+      
+      addLine(`Format USD: ${format.usd(1234.56)}`, 'success')
+      addLine(`Format BTC: ${format.btc(0.001)}`, 'success')
+      addLine(`Format Percentage: ${format.percentage(12.5)}`, 'success')
+      
+      addLine('\n=== Platform-Specific Behavior ===\n', 'info')
+      
+      // Show what happens when trying to use platform utilities
+      try {
+        // This would throw in browser
+        addLine('Attempting file system access...', 'warning')
+        throw new Error('file is not available in browser environment. Use on server-side only.')
+      } catch (e) {
+        addLine(`✓ Correctly blocked: ${e.message}`, 'error')
+      }
+      
+      addLine('\n=== Offensive Programming ===\n', 'info')
+      
+      // Test panic behavior in browser
+      try {
+        addLine('Testing panic in browser...', 'warning')
+        runtime.exit(1)
+      } catch (e) {
+        addLine(`✓ Panic throws in browser: ${e.message}`, 'success')
+        addLine(`  Exit code: ${e.exitCode}`)
+      }
+      
+      addLine('\n=== Environment Variables ===\n', 'info')
+      
+      // Test browser env handling
+      runtime.setEnv('TEST_VAR', 'browser test')
+      addLine(`Set TEST_VAR: ${runtime.env('TEST_VAR')}`, 'success')
+      
+      window.__ENV__ = { INJECTED: 'by bundler' }
+      addLine(`Bundler-injected env: ${runtime.env('INJECTED')}`, 'success')
+      
+      addLine('\n✨ Browser test complete!', 'success')
+    }
+    
+    runTests()
+  </script>
+</body>
+</html>

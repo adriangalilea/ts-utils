@@ -3,6 +3,8 @@
  * Provides colored output with Unicode symbols for different log levels
  */
 
+import { runtime } from '../runtime.js'
+
 // ANSI escape codes for colors
 const ANSI = {
   reset: '\x1b[0m',
@@ -33,12 +35,14 @@ const ANSI = {
   bgWhite: '\x1b[47m',
 } as const
 
+
 // Detect if colors should be enabled
 const isColorEnabled = (): boolean => {
-  const env = process.env
-  if (env.NO_COLOR) return false
-  if (env.FORCE_COLOR) return true
-  return process.stdout?.isTTY && !env.CI && env.TERM !== 'dumb'
+  if (runtime.isBrowser) return true // Always enable colors in browser (CSS will handle it)
+  
+  if (runtime.env('NO_COLOR')) return false
+  if (runtime.env('FORCE_COLOR')) return true
+  return runtime.stdout.isTTY && !runtime.env('CI') && runtime.env('TERM') !== 'dumb'
 }
 
 const colorEnabled = isColorEnabled()
@@ -99,7 +103,7 @@ const LOG_LEVELS = {
 
 // Get current log level from environment
 function getCurrentLogLevel(): number {
-  const level = process.env.LOG_LEVEL?.toLowerCase()
+  const level = runtime.env('LOG_LEVEL')?.toLowerCase()
   if (!level) return LOG_LEVELS.info // Default to info
   
   switch (level) {
@@ -341,15 +345,21 @@ export function logAppStartup(options: {
 
 // Helper to get network address
 function getNetworkAddress(): string {
-  const os = require('os')
-  const interfaces = os.networkInterfaces()
+  if (!runtime.canFileSystem()) return 'localhost' // Can't get network address without file system access
   
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]!) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address
+  try {
+    const os = require('os')
+    const interfaces = os.networkInterfaces()
+    
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name]!) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          return iface.address
+        }
       }
     }
+  } catch {
+    // If os module is not available, fallback
   }
   
   return 'localhost'

@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync, unlinkSync, statSync } from 'fs'
-import { check } from './offensive.js'
+import { check } from '../offensive.js'
 import { path } from './path.js'
 
 /**

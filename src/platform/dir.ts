@@ -1,5 +1,5 @@
 import { mkdirSync, existsSync, statSync, rmSync, readdirSync } from 'fs'
-import { check } from './offensive.js'
+import { check } from '../offensive.js'
 import { path } from './path.js'
 
 /**

@@ -34,7 +34,8 @@
  *   KEV.export("backup.env")                              // Includes # from: comments
  */
 
-import { panic } from './offensive.js'
+import { runtime } from '../runtime.js'
+import { panic } from '../offensive.js'
 import { file } from './file.js'
 import { path } from './path.js'
 import { findProjectRoot, findMonorepoRoot } from './project.js'
@@ -270,7 +271,7 @@ export class KevOps {
   getFromNamespace(namespace: string, key: string): string {
     switch (namespace) {
       case 'os':
-        return process.env[key] || ''
+        return runtime.env(key) || ''
       default:
         // File namespace (.env, .env.local, etc)
         if (namespace.startsWith('.') || namespace.includes('/')) {
@@ -334,7 +335,7 @@ export class KevOps {
   setToNamespace(namespace: string, key: string, value: string): void {
     switch (namespace) {
       case 'os':
-        process.env[key] = value
+        runtime.setEnv(key, value)
         break
       default:
         // File namespace - update or append to file
@@ -422,7 +423,7 @@ export class KevOps {
   hasInNamespace(namespace: string, key: string): boolean {
     switch (namespace) {
       case 'os':
-        return key in process.env
+        return runtime.hasEnv(key)
       default:
         // File namespace
         if (namespace.startsWith('.') || namespace.includes('/')) {
@@ -489,7 +490,7 @@ export class KevOps {
 
     switch (namespace) {
       case 'os':
-        for (const [key, value] of Object.entries(process.env)) {
+        for (const [key, value] of Object.entries(runtime.allEnv())) {
           if (this.matchPattern(key, pattern)) {
             result[key] = keysOnly ? '' : value || ''
           }
@@ -706,7 +707,7 @@ export class KevOps {
           }
           const keys = this.keysFromNamespace('os', keyPattern)
           for (const key of keys) {
-            delete process.env[key]
+            runtime.deleteEnv(key)
           }
           break
         default:
@@ -726,7 +727,7 @@ export class KevOps {
         // Namespaced unset
         switch (namespace) {
           case 'os':
-            delete process.env[realKey]
+            runtime.deleteEnv(realKey)
             break
           default:
             panic('Unsetting from files not yet implemented')
