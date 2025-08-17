@@ -1,0 +1,9 @@
+{
+  "name": "@adriangalilea/utils",
+  "version": "0.0.1",
+  "license": "MIT",
+  "exports": "./dist/index.js",
+  "publish": {
+    "include": ["dist/**/*", "README.md", "package.json"]
+  }
+}

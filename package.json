@@ -1,0 +1,36 @@
+{
+  "name": "@adriangalilea/utils",
+  "version": "0.0.1",
+  "description": "TypeScript utilities - logger, currency, formatter, and more",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "exports": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "test": "tsx tests/test.ts",
+    "example": "tsx tests/example.ts",
+    "update-crypto": "tsx src/currency/download-crypto-list.ts"
+  },
+  "keywords": [
+    "typescript",
+    "utils",
+    "logger",
+    "currency",
+    "formatter"
+  ],
+  "author": "Adrian Galilea <adriangalilea@gmail.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsx": "^4.20.4",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "chalk": "^5.6.0"
+  }
+}

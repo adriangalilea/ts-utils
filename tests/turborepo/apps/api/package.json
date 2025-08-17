@@ -1,0 +1,17 @@
+{
+  "name": "@test-monorepo/api",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@adriangalilea/utils": "file:../../../../"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.0.0"
+  }
+}
