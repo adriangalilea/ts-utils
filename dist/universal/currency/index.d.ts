@@ -30,6 +30,9 @@ export declare const CurrencySymbols: {
 export type CurrencyCode = keyof typeof CurrencySymbols | string;
 export declare function getSymbol(code: string): string;
 export declare function getOptimalDecimals(value: number, currencyCode: string): number;
+export declare function normalize(symbol: string): string;
+export declare function areEquivalent(symbol1: string, symbol2: string): boolean;
+export declare function getVariations(symbol: string): string[];
 export declare function isCrypto(code: string): boolean;
 export declare function isStablecoin(code: string): boolean;
 export declare function isFiat(code: string): boolean;
@@ -42,6 +45,9 @@ export declare function formatBasisPoints(bps: number): string;
 export declare const currency: {
     getSymbol: typeof getSymbol;
     getOptimalDecimals: typeof getOptimalDecimals;
+    normalize: typeof normalize;
+    areEquivalent: typeof areEquivalent;
+    getVariations: typeof getVariations;
     isCrypto: typeof isCrypto;
     isStablecoin: typeof isStablecoin;
     isFiat: typeof isFiat;

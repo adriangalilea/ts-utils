@@ -153,6 +153,48 @@ const cryptoAlternatives = {
     'STETH': 'STETH', // Lido staked ETH
     'WSTETH': 'WSTETH', // Wrapped stETH
 };
+// Build reverse mapping for normalization
+const symbolReverseMap = new Map();
+for (const [normalized, alternative] of Object.entries(cryptoAlternatives)) {
+    symbolReverseMap.set(alternative.toUpperCase(), normalized);
+    symbolReverseMap.set(alternative.toLowerCase(), normalized);
+}
+export function normalize(symbol) {
+    const upperSymbol = symbol.toUpperCase();
+    // Check if it's a known alternative
+    if (cryptoAlternatives[upperSymbol]) {
+        return cryptoAlternatives[upperSymbol];
+    }
+    // Check reverse mapping
+    const normalized = symbolReverseMap.get(upperSymbol) || symbolReverseMap.get(symbol.toLowerCase());
+    if (normalized) {
+        return normalized;
+    }
+    // Handle wrapped/bridged tokens
+    const unwrapped = upperSymbol
+        .replace(/^W/, '') // Remove W prefix (WBTC -> BTC)
+        .replace(/\.E$/, '') // Remove .e suffix (USDT.e -> USDT)
+        .replace(/\.B$/, ''); // Remove .b suffix (BTC.b -> BTC)
+    if (unwrapped !== upperSymbol && cryptoAlternatives[unwrapped]) {
+        return cryptoAlternatives[unwrapped];
+    }
+    return upperSymbol;
+}
+export function areEquivalent(symbol1, symbol2) {
+    return normalize(symbol1) === normalize(symbol2);
+}
+export function getVariations(symbol) {
+    const normalized = normalize(symbol);
+    const variations = new Set([normalized]);
+    // Add all known alternatives
+    for (const [key, value] of Object.entries(cryptoAlternatives)) {
+        if (value === normalized || key === normalized) {
+            variations.add(key);
+            variations.add(value);
+        }
+    }
+    return Array.from(variations);
+}
 export function isCrypto(code) {
     const upperCode = code.toUpperCase();
     // Check if it's a known alternative
@@ -216,6 +258,9 @@ export function formatBasisPoints(bps) {
 export const currency = {
     getSymbol,
     getOptimalDecimals,
+    normalize,
+    areEquivalent,
+    getVariations,
     isCrypto,
     isStablecoin,
     isFiat,
