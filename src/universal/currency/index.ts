@@ -91,8 +91,7 @@ export function getOptimalDecimals(value: number, currencyCode: string): number 
     else if (absValue < 0.01) return 4
     else if (absValue < 0.1) return 3
     else if (absValue < 1) return 3
-    else if (absValue < 100) return 2
-    else return 0
+    else return 2
   } else {
     if (absValue < 0.01) return 4
     else if (absValue < 0.1) return 3
