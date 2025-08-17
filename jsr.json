@@ -1,8 +1,12 @@
 {
   "name": "@adriangalilea/utils",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "license": "MIT",
-  "exports": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./format": "./dist/universal/format.js",
+    "./currency": "./dist/universal/currency/index.js"
+  },
   "publish": {
     "include": ["dist/**/*", "README.md", "package.json"]
   }
