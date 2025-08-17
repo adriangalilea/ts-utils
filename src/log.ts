@@ -85,6 +85,35 @@ const prefixes = {
 
 type LogLevel = keyof typeof prefixes
 
+// Log level priority (lower number = higher priority)
+const LOG_LEVELS = {
+  error: 0,
+  warn: 1,
+  info: 2,
+  ready: 2,
+  success: 2,
+  event: 2,
+  wait: 3,
+  trace: 4,
+} as const
+
+// Get current log level from environment
+function getCurrentLogLevel(): number {
+  const level = process.env.LOG_LEVEL?.toLowerCase()
+  if (!level) return LOG_LEVELS.info // Default to info
+  
+  switch (level) {
+    case 'error': return LOG_LEVELS.error
+    case 'warn': return LOG_LEVELS.warn
+    case 'info': return LOG_LEVELS.info
+    case 'debug':
+    case 'trace': return LOG_LEVELS.trace
+    default: return LOG_LEVELS.info
+  }
+}
+
+const currentLogLevel = getCurrentLogLevel()
+
 // LRU Cache for warn-once functionality
 class LRUCache<K, V> {
   private cache = new Map<K, V>()
@@ -128,6 +157,12 @@ const warnOnceCache = new LRUCache<string, boolean>(10_000)
 
 // Core logging function
 function prefixedLog(level: LogLevel, ...messages: any[]): void {
+  // Check if this log level should be displayed
+  const levelPriority = LOG_LEVELS[level as keyof typeof LOG_LEVELS] ?? LOG_LEVELS.info
+  if (levelPriority > currentLogLevel) {
+    return // Skip this log
+  }
+  
   // Remove empty first message
   if ((messages[0] === '' || messages[0] === undefined) && messages.length === 1) {
     messages.shift()
