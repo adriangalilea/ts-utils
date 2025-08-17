@@ -133,11 +133,14 @@ const cryptoAlternatives: Record<string, string> = {
   'WSTETH': 'WSTETH',  // Wrapped stETH
 }
 
-// Build reverse mapping for normalization
+// Build reverse mapping for normalization (alternative -> normalized)
 const symbolReverseMap: Map<string, string> = new Map()
-for (const [normalized, alternative] of Object.entries(cryptoAlternatives)) {
-  symbolReverseMap.set(alternative.toUpperCase(), normalized)
-  symbolReverseMap.set(alternative.toLowerCase(), normalized)
+for (const [alternative, normalized] of Object.entries(cryptoAlternatives)) {
+  // Only map if it's actually an alternative, not the same
+  if (alternative !== normalized) {
+    symbolReverseMap.set(alternative.toUpperCase(), normalized)
+    symbolReverseMap.set(alternative.toLowerCase(), normalized)
+  }
 }
 
 export function normalize(symbol: string): string {
