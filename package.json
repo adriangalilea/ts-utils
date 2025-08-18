@@ -39,7 +39,10 @@
     "test:runtime": "tsx tests/runtime-test.ts",
     "test:browser": "open tests/browser-test.html",
     "example": "tsx tests/example.ts",
-    "update-crypto": "tsx src/universal/currency/download-crypto-list.ts"
+    "update-crypto": "tsx src/universal/currency/download-crypto-list.ts",
+    "type-check": "tsc --noEmit",
+    "lint": "echo 'No linter configured yet'",
+    "prepublishOnly": "pnpm run build"
   },
   "keywords": [
     "typescript",
@@ -57,5 +60,17 @@
   },
   "dependencies": {
     "chalk": "^5.6.0"
-  }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adriangalilea/ts-utils.git"
+  },
+  "bugs": {
+    "url": "https://github.com/adriangalilea/ts-utils/issues"
+  },
+  "homepage": "https://github.com/adriangalilea/ts-utils#readme"
 }
