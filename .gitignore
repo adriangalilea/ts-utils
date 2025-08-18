@@ -39,4 +39,4 @@ temp/
 *.tmp
 
 # Package manager lock files
-pnpm-lock.yaml
+# pnpm-lock.yaml - needed for CI/CD
