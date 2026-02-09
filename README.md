@@ -5,12 +5,10 @@ TypeScript utilities - logger, currency, offensive programming, file operations,
 ## Installation
 
 ```bash
-# Using JSR (recommended)
-pnpm dlx jsr add @adriangalilea/utils
-
-# or with npm
-npx jsr add @adriangalilea/utils
+pnpm add @adriangalilea/utils
 ```
+
+Also available on [JSR](https://jsr.io/@adriangalilea/utils) but the JSR publish pipeline is not automated — versions may lag behind npm.
 
 ## Usage
 
