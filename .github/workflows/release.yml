@@ -95,24 +95,9 @@ jobs:
         
       - name: Publish to npm
         if: steps.check.outputs.exists == 'false'
-        run: |
-          # Configure npm for publishing
-          npm config set //registry.npmjs.org/:_authToken=$NODE_AUTH_TOKEN
-          
-          # Check if it's a scoped package
-          if [[ "${{ steps.package.outputs.name }}" == @* ]]; then
-            # For scoped packages, ensure public access if not private
-            IS_PRIVATE=$(node -p "require('./package.json').private || false")
-            if [ "$IS_PRIVATE" = "false" ]; then
-              pnpm publish --access public --no-git-checks
-            else
-              pnpm publish --no-git-checks
-            fi
-          else
-            pnpm publish --no-git-checks
-          fi
+        run: pnpm publish --access public --no-git-checks
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
         
       - name: Create git tag
         if: steps.check.outputs.exists == 'false'

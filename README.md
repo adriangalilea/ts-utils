@@ -164,6 +164,17 @@ expect(() => assert(false, 'boom')).toThrow(Panic)
 - **KEV**: Redis-style environment variable management with monorepo support
 - **Project Discovery**: Find project/monorepo roots, detect JS/TS projects
 
+## Release
+
+Bump version in `package.json` (and `jsr.json`), push to `main`. CI handles everything:
+
+1. Type-check, lint, build
+2. Publish to npm via [OIDC trusted publishing](https://docs.npmjs.com/generating-provenance-statements) (no tokens — GitHub Actions proves identity directly to npm)
+3. Create git tag `vX.Y.Z`
+4. Generate changelog via [git-cliff](https://github.com/orhun/git-cliff) and create GitHub release
+
+JSR publishing is not automated — see `jsr.json` TODO.
+
 ## License
 
 MIT
