@@ -95,9 +95,7 @@ jobs:
         
       - name: Publish to npm
         if: steps.check.outputs.exists == 'false'
-        run: pnpm publish --access public --no-git-checks
-        env:
-          NPM_CONFIG_PROVENANCE: true
+        run: npm publish --provenance --access public
         
       - name: Create git tag
         if: steps.check.outputs.exists == 'false'
