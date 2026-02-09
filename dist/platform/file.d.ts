@@ -1,5 +1,5 @@
 /**
- * File operations that exit on error (offensive programming style)
+ * File operations that throw on error (offensive programming style)
  */
 declare class FileOps {
     /**
@@ -7,16 +7,15 @@ declare class FileOps {
      * This allows us to resolve relative paths from the calling module
      */
     getCallerUrl(): string | undefined;
+    private resolvePath;
     /**
-     * Read a file and exit on error
-     * Relative paths (./file.txt) are resolved from the calling module
-     * Absolute paths are used as-is
+     * Read a file as Buffer. Throws on error.
+     * Relative paths resolved from calling module.
      */
     read(filePath: string): Buffer;
     /**
-     * Read a file as string and exit on error
-     * Relative paths (./file.txt) are resolved from the calling module
-     * Absolute paths are used as-is
+     * Read a file as string. Throws on error.
+     * Relative paths resolved from calling module.
      *
      * @param filePath - Path to the file
      * @param encodingOrUrl - Optional: encoding (e.g. 'utf-8') or import.meta.url for explicit resolution
@@ -24,27 +23,24 @@ declare class FileOps {
      */
     readText(filePath: string, encodingOrUrl?: BufferEncoding | string, encoding?: BufferEncoding): string;
     /**
-     * Write data to a file and exit on error
-     * Relative paths (./file.txt) are resolved from the calling module
-     * Absolute paths are used as-is
+     * Write data to a file. Throws on error.
+     * Relative paths resolved from calling module.
      */
     write(filePath: string, data: string | Buffer): void;
     /**
      * Check if file exists (not a directory)
-     * Relative paths (./file.txt) are resolved from the calling module
-     * Absolute paths are used as-is
      */
     exists(filePath: string): boolean;
     /**
-     * Remove a file and exit on error
+     * Remove a file. Throws on error.
      */
     remove(path: string): void;
     /**
-     * Get file size in bytes
+     * Get file size in bytes. Throws on error.
      */
     size(path: string): number;
     /**
-     * Get file modification time
+     * Get file modification time. Throws on error.
      */
     mtime(path: string): Date;
 }

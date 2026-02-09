@@ -105,6 +105,49 @@ format.percentage(0.05)  // "0.05%"
 format.percentage(123.456)  // "123%"
 ```
 
+### Offensive Programming
+
+Fail loud, fail fast. All primitives throw `Panic` — an uncaught `Panic` crashes the process with a full stack trace. Zero dependencies, works identically in Node, Deno, Bun, and browsers.
+
+```typescript
+import { assert, panic, must, unwrap, Panic } from '@adriangalilea/utils'
+
+// Assert invariants — narrows types
+assert(port > 0 && port < 65536, 'invalid port:', port)
+
+// Impossible state
+switch (state) {
+  case 'ready': handleReady(); break
+  default: panic('impossible state:', state)
+}
+
+// Unwrap operations that shouldn't fail (sync + async)
+const data = must(() => JSON.parse(staticJsonString))
+const file = must(() => readFileSync(path))
+const resp = await must(() => fetch(url))
+
+// Unwrap nullable values — type narrows T | null | undefined → T in one expression
+// (assert needs two statements, unwrap does it inline)
+const user = unwrap(db.findUser(id), 'user not found:', id)
+const el = unwrap(document.getElementById('app'))
+
+// must() replaces try/catch boilerplate:
+//   try { return readFileSync(path, 'utf-8') }
+//   catch (err) { check(err) }
+// becomes:
+return must(() => readFileSync(path, 'utf-8'))
+
+// Panic is a distinct error class — distinguishes bugs from runtime errors
+// In a server: let Panics crash, handle everything else
+app.use((err, req, res, next) => {
+  if (err instanceof Panic) throw err  // bug, re-throw, let it crash
+  res.status(500).json({ error: 'internal error' })
+})
+
+// In tests: assert that code panics
+expect(() => assert(false, 'boom')).toThrow(Panic)
+```
+
 ## Features
 
 - **Logger**: Next.js-style colored console output with symbols
@@ -115,7 +158,7 @@ format.percentage(123.456)  // "123%"
   - Percentage and basis point utilities
   - Fiat and stablecoin detection
 - **Format**: Number and currency formatting with compact notation
-- **Offensive Programming**: Assert, must, check, panic utilities
+- **Offensive Programming**: assert, panic, must, unwrap — all throw `Panic` with full stack traces
 - **File Operations**: Read, write with automatic path resolution
 - **Directory Operations**: Create, list, walk directories
 - **KEV**: Redis-style environment variable management with monorepo support

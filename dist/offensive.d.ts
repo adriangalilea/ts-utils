@@ -3,58 +3,55 @@
  *
  * "A confused program SHOULD scream" - John Carmack
  *
- * These utilities are the ANTITHESIS of defensive programming.
+ * Throw, always. An uncaught Panic crashes the process with a full stack trace.
+ * Zero dependencies. Works identically in Node, Deno, Bun, and browsers.
  *
- * Defensive programming: try/catch, error recovery, graceful degradation, silent failures
- * Offensive programming: FAIL LOUD, FAIL FAST, NO RECOVERY, CRASH EARLY
+ * Four primitives:
+ *   assert(cond, ...msg)   - invariant checking, narrows types
+ *   panic(...msg)          - impossible state reached
+ *   must(() => expr)       - unwrap-or-die for operations (sync + async)
+ *   unwrap(value, ...msg)  - unwrap nullable values
  *
- * We don't handle errors - we make them catastrophic.
- * We don't recover - we crash.
- * We don't validate and continue - we assert and panic.
+ * must() replaces the old try/catch/check pattern:
  *
- * This approach makes bugs IMPOSSIBLE to ignore:
- * - Wrong assumptions? CRASH
- * - Invalid state? CRASH
- * - "Impossible" error? CRASH
+ *   // before: 5 lines
+ *   try {
+ *     const data = readFileSync(path, 'utf-8')
+ *     return data
+ *   } catch (err) {
+ *     check(err)
+ *   }
  *
- * The only acceptable response to confusion is to scream and die.
+ *   // after: 1 line
+ *   return must(() => readFileSync(path, 'utf-8'))
  */
 /**
- * Assert exits with error if condition is false.
- * Use for validating preconditions and invariants.
+ * Distinct error class for offensive programming failures.
+ * Distinguishes bugs from runtime errors at catch boundaries.
  *
  * @example
- * function sendPacket(data: Buffer, port: number) {
- *   assert(data.length > 0, 'empty packet')
- *   assert(port > 0 && port < 65536, 'invalid port:', port)
- *   // Now safe to proceed
- * }
+ * // In a server — let Panics crash, handle everything else
+ * app.use((err, req, res, next) => {
+ *   if (err instanceof Panic) throw err  // bug, re-throw, let it crash
+ *   res.status(500).json({ error: 'internal error' })
+ * })
+ *
+ * // In tests — assert that code panics
+ * expect(() => assert(false, 'boom')).toThrow(Panic)
+ */
+export declare class Panic extends Error {
+    constructor(message: string);
+}
+/**
+ * Assert throws if condition is false. Narrows types via `asserts condition`.
+ *
+ * @example
+ * assert(data.length > 0, 'empty packet')
+ * assert(port > 0 && port < 65536, 'invalid port:', port)
  */
 export declare function assert(condition: boolean, ...msg: any[]): asserts condition;
 /**
- * Must unwraps a value that may throw and exits if error occurs.
- * Use for operations that should never fail in correct code.
- *
- * @example
- * const data = must(() => JSON.parse(staticJsonString))
- * const regex = must(() => new RegExp('^\\d+$'))
- */
-export declare function must<T>(fn: () => T): T;
-/**
- * Check exits cleanly with formatted error message if error is not null/undefined.
- * Use for expected errors: file not found, network issues, permissions, etc.
- *
- * @example
- * try {
- *   const data = await fs.readFile(userFile)
- * } catch (err) {
- *   check(err) // exits with error message
- * }
- */
-export declare function check(err: any, ...messages: string[]): void;
-/**
- * Panic immediately exits with error message.
- * Use when the program reaches an impossible state.
+ * Panic throws immediately. Use when the program reaches an impossible state.
  *
  * @example
  * switch (state) {
@@ -64,10 +61,35 @@ export declare function check(err: any, ...messages: string[]): void;
  * }
  */
 export declare function panic(...msg: any[]): never;
+/**
+ * Must unwraps an operation that should never fail. Handles sync and async.
+ *
+ * @example
+ * const data = must(() => JSON.parse(staticJsonString))
+ * const file = await must(() => fs.promises.readFile(path))
+ * const buf = must(() => readFileSync(path))
+ */
+export declare function must<T>(fn: () => Promise<T>): Promise<T>;
+export declare function must<T>(fn: () => T): T;
+/**
+ * Unwrap a nullable value or throw. Like Rust's .unwrap()/.expect().
+ * Returns T from T | null | undefined with type narrowing in one expression.
+ *
+ * @example
+ * // assert needs two statements:
+ * const user = db.findUser(id)
+ * assert(user !== null, 'user not found:', id)
+ *
+ * // unwrap does it inline:
+ * const user = unwrap(db.findUser(id), 'user not found:', id)
+ * const el = unwrap(document.getElementById('app'))
+ */
+export declare function unwrap<T>(value: T | null | undefined, ...msg: any[]): T;
 export declare const offensive: {
+    Panic: typeof Panic;
     assert: typeof assert;
-    must: typeof must;
-    check: typeof check;
     panic: typeof panic;
+    must: typeof must;
+    unwrap: typeof unwrap;
 };
 //# sourceMappingURL=offensive.d.ts.map

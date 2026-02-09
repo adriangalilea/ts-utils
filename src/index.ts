@@ -12,7 +12,7 @@ export * from './universal/log.js'
 export * from './universal/format.js'
 export * from './universal/currency/index.js'
 
-// Offensive programming - uses runtime.exit() so it adapts to environment
+// Offensive programming - pure throws, zero dependencies
 export * from './offensive.js'
 
 // Platform-specific utilities
