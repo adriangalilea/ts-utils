@@ -170,7 +170,7 @@ expect(() => assert(false, 'boom')).toThrow(Panic)
 XDG paths that respect env vars from [xdg-dirs](https://github.com/adriangalilea/xdg-dirs) with spec-compliant fallbacks:
 
 ```typescript
-import { xdg } from '@adriangalilea/utils'
+import { xdg, dir } from '@adriangalilea/utils'
 
 xdg.state('notify')                    // ~/.local/state/notify
 xdg.state('notify', 'watchers.json')   // ~/.local/state/notify/watchers.json
@@ -178,6 +178,9 @@ xdg.config('myapp')                    // ~/.config/myapp
 xdg.data('myapp')                      // ~/.local/share/myapp
 xdg.cache('myapp')                     // ~/.cache/myapp
 xdg.runtime('myapp')                   // $XDG_RUNTIME_DIR/myapp
+
+// Ensure the directory exists before writing
+dir.create(xdg.state('notify'))
 ```
 
 ## Release
