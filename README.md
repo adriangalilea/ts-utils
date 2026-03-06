@@ -162,7 +162,23 @@ expect(() => assert(false, 'boom')).toThrow(Panic)
 - **File Operations**: Read, write with automatic path resolution
 - **Directory Operations**: Create, list, walk directories
 - **KEV**: Redis-style environment variable management with monorepo support
+- **XDG**: XDG Base Directory paths — reads env vars set by [xdg-dirs](https://github.com/adriangalilea/xdg-dirs), falls back to spec defaults
 - **Project Discovery**: Find project/monorepo roots, detect JS/TS projects
+
+### XDG Base Directories
+
+XDG paths that respect env vars from [xdg-dirs](https://github.com/adriangalilea/xdg-dirs) with spec-compliant fallbacks:
+
+```typescript
+import { xdg } from '@adriangalilea/utils'
+
+xdg.state('notify')                    // ~/.local/state/notify
+xdg.state('notify', 'watchers.json')   // ~/.local/state/notify/watchers.json
+xdg.config('myapp')                    // ~/.config/myapp
+xdg.data('myapp')                      // ~/.local/share/myapp
+xdg.cache('myapp')                     // ~/.cache/myapp
+xdg.runtime('myapp')                   // $XDG_RUNTIME_DIR/myapp
+```
 
 ## Release
 

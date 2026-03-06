@@ -17,4 +17,5 @@ export * from './platform/dir.js';
 export * from './platform/path.js';
 export * from './platform/project.js';
 export * from './platform/kev.js';
+export * from './platform/xdg.js';
 //# sourceMappingURL=index.js.map
