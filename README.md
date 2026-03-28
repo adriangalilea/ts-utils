@@ -186,23 +186,17 @@ dir.create(xdg.state('notify'))
 
 ### Unseen
 
-Persistent dedup filter for arrays of objects. Remembers which IDs it has seen across runs, returns only the new ones.
+Filters an array of objects to only the ones you haven't seen before. Remembers across runs.
 
 ```typescript
 import { unseen } from '@adriangalilea/utils'
 
-type Message = { id: string, text: string }
-
-const messages: Message[] = await fetchMessages()
+const messages = await fetchMessages()
 const newMessages = await unseen('messages', messages, 'id')
-// 1st run: 3 messages → returns 3. 2nd run: same 3 → returns []. 3rd run: 5 → returns 2 new.
-
-for (const m of newMessages) console.log(m.text)
+// First run → all messages. Second run → only new ones.
 ```
 
-The third argument is the field name that uniquely identifies each item (e.g. `'id'`, `'messageId'`, `'bdnsCode'`). Type-safe — autocompletes valid fields, catches typos at compile time.
-
-State persists at `~/.local/state/unseen/{namespace}.json`.
+State: `$XDG_STATE_HOME/unseen/{name}.json` (defaults to `~/.local/state/unseen/`)
 
 ## Release
 
