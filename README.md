@@ -186,17 +186,24 @@ dir.create(xdg.state('notify'))
 
 ### Unseen
 
-Filters an array of objects to only the ones you haven't seen before. Remembers across runs.
+"What's new since last time?" — filters an array of objects to only the ones you haven't seen before. Remembers across runs.
 
 ```typescript
 import { unseen } from '@adriangalilea/utils'
 
 const messages = await fetchMessages()
 const newMessages = await unseen('messages', messages, 'id')
-// First run → all messages. Second run → only new ones.
+
+// 1st run: messages = [{ id: '1', from: 'alice' }, { id: '2', from: 'bob' }]
+//          newMessages = [{ id: '1', from: 'alice' }, { id: '2', from: 'bob' }]
+// 2nd run: messages = [{ id: '1', from: 'alice' }, { id: '2', from: 'bob' }]
+//          newMessages = []
+// 3rd run: messages = [{ id: '1', ... }, { id: '2', ... }, { id: '3', from: 'bob' }]
+//          newMessages = [{ id: '3', from: 'bob' }]
 ```
 
-State: `$XDG_STATE_HOME/unseen/{name}.json` (defaults to `~/.local/state/unseen/`)
+Idempotent — safe to re-run.
+State: `$XDG_STATE_HOME/unseen/{name}.json`
 
 ## Release
 

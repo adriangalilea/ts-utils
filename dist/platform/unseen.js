@@ -4,15 +4,22 @@ import { file } from './file.js';
 import { join, dirname } from 'node:path';
 const STORE_DIR = xdg.state('unseen');
 /**
- * Filters an array of objects to only the ones you haven't seen before.
- * Remembers across runs. Safe to re-run on any schedule.
+ * "What's new since last time?" — filters an array of objects to only
+ * the ones you haven't seen before. Remembers across runs.
  *
  * ```ts
  * const messages = await fetchMessages()
  * const newMessages = await unseen('messages', messages, 'id')
- * // First run → all messages. Second run → only new ones.
+ *
+ * // 1st run: messages = [{ id: '1', from: 'alice' }, { id: '2', from: 'bob' }]
+ * //          newMessages = [{ id: '1', from: 'alice' }, { id: '2', from: 'bob' }]
+ * // 2nd run: messages = [{ id: '1', from: 'alice' }, { id: '2', from: 'bob' }]
+ * //          newMessages = []
+ * // 3rd run: messages = [{ id: '1', ... }, { id: '2', ... }, { id: '3', from: 'bob' }]
+ * //          newMessages = [{ id: '3', from: 'bob' }]
  * ```
  *
+ * Idempotent — safe to re-run.
  * State: `$XDG_STATE_HOME/unseen/{namespace}.json`
  *
  * @param namespace - Name for this seen-set (e.g. 'messages', 'orders')
