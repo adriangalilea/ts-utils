@@ -1,26 +1,29 @@
 /**
- * Persistent dedup filter — "what's new since last time?"
+ * Persistent dedup filter for arrays of objects.
  *
- * Makes any script idempotent. Run it once, run it a thousand times —
- * you only process each item once. This means any scheduling works:
- * manual `tsx check.ts`, a fish loop, a cron job, whatever.
- * Can't double-notify, can't miss items, can't corrupt state.
- *
- *   1st run: 5 orders exist  → returns 5
- *   2nd run: same 5 orders   → returns 0
- *   3rd run: 7 orders exist  → returns 2
+ * You have objects with IDs. `unseen` remembers which IDs it has
+ * seen across runs and returns only the new ones.
  *
  * ```ts
- * const fresh = await unseen('orders', allOrders, o => o.id)
- * for (const o of fresh) await notify(o.summary)
+ * type Message = { id: string, text: string }
+ *
+ * const messages: Message[] = await fetchMessages()
+ * const newMessages = await unseen('messages', messages, 'id')
+ *
+ * // 1st run: 3 messages exist  → returns all 3
+ * // 2nd run: same 3 messages   → returns []
+ * // 3rd run: 5 messages exist  → returns the 2 new ones
  * ```
+ *
+ * Makes any script idempotent — run it once or a thousand times,
+ * you only process each item once. Any scheduling works.
  *
  * State persists at `~/.local/state/unseen/{namespace}.json`
  *
- * @param namespace - Seen-set name (e.g. 'messages', 'github-issues', 'orders')
- * @param items - Items to filter
- * @param key - Extract a unique string key from each item
- * @returns Only items whose key hasn't been seen before
+ * @param namespace - Name for this seen-set (e.g. 'messages', 'orders')
+ * @param items - Array of objects to filter
+ * @param key - Which field is the unique ID (e.g. 'id', 'messageId', 'bdnsCode')
+ * @returns Only items not seen in previous runs
  */
-export declare function unseen<T>(namespace: string, items: T[], key: (item: T) => string): Promise<T[]>;
+export declare function unseen<T>(namespace: string, items: T[], key: keyof T & string): Promise<T[]>;
 //# sourceMappingURL=unseen.d.ts.map

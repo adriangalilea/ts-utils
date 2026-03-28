@@ -4,28 +4,31 @@ import { file } from './file.js';
 import { join, dirname } from 'node:path';
 const STORE_DIR = xdg.state('unseen');
 /**
- * Persistent dedup filter — "what's new since last time?"
+ * Persistent dedup filter for arrays of objects.
  *
- * Makes any script idempotent. Run it once, run it a thousand times —
- * you only process each item once. This means any scheduling works:
- * manual `tsx check.ts`, a fish loop, a cron job, whatever.
- * Can't double-notify, can't miss items, can't corrupt state.
- *
- *   1st run: 5 orders exist  → returns 5
- *   2nd run: same 5 orders   → returns 0
- *   3rd run: 7 orders exist  → returns 2
+ * You have objects with IDs. `unseen` remembers which IDs it has
+ * seen across runs and returns only the new ones.
  *
  * ```ts
- * const fresh = await unseen('orders', allOrders, o => o.id)
- * for (const o of fresh) await notify(o.summary)
+ * type Message = { id: string, text: string }
+ *
+ * const messages: Message[] = await fetchMessages()
+ * const newMessages = await unseen('messages', messages, 'id')
+ *
+ * // 1st run: 3 messages exist  → returns all 3
+ * // 2nd run: same 3 messages   → returns []
+ * // 3rd run: 5 messages exist  → returns the 2 new ones
  * ```
+ *
+ * Makes any script idempotent — run it once or a thousand times,
+ * you only process each item once. Any scheduling works.
  *
  * State persists at `~/.local/state/unseen/{namespace}.json`
  *
- * @param namespace - Seen-set name (e.g. 'messages', 'github-issues', 'orders')
- * @param items - Items to filter
- * @param key - Extract a unique string key from each item
- * @returns Only items whose key hasn't been seen before
+ * @param namespace - Name for this seen-set (e.g. 'messages', 'orders')
+ * @param items - Array of objects to filter
+ * @param key - Which field is the unique ID (e.g. 'id', 'messageId', 'bdnsCode')
+ * @returns Only items not seen in previous runs
  */
 export async function unseen(namespace, items, key) {
     const storePath = join(STORE_DIR, `${namespace}.json`);
@@ -33,9 +36,9 @@ export async function unseen(namespace, items, key) {
     const seen = new Set(file.exists(storePath) ? JSON.parse(file.readText(storePath)) : []);
     const result = [];
     for (const item of items) {
-        const k = key(item);
-        if (!seen.has(k)) {
-            seen.add(k);
+        const id = String(item[key]);
+        if (!seen.has(id)) {
+            seen.add(id);
             result.push(item);
         }
     }

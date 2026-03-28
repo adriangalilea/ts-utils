@@ -1,7 +1,7 @@
 {
   "_comment": "TODO: JSR is stale — exports point to dist/ instead of src/, missing ./browser and ./runtime subpaths, and CI only publishes to npm. Fix the pipeline if you want to keep using JSR.",
   "name": "@adriangalilea/utils",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "license": "MIT",
   "exports": {
     ".": "./dist/index.js",

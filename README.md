@@ -186,16 +186,21 @@ dir.create(xdg.state('notify'))
 
 ### Unseen
 
-Persistent dedup filter — makes any script idempotent. Run it once or a thousand times, you only process each item once. Any scheduling works: manual, cron, a loop, whatever.
+Persistent dedup filter for arrays of objects. Remembers which IDs it has seen across runs, returns only the new ones.
 
 ```typescript
 import { unseen } from '@adriangalilea/utils'
 
-// only notifies on NEW orders — safe to run on any schedule
-const fresh = await unseen('orders', allOrders, o => o.id)
-for (const o of fresh) await notify(o.summary)
-// 1st run: 5 orders → notifies 5. 2nd run: same 5 → notifies 0. 3rd run: 7 → notifies 2.
+type Message = { id: string, text: string }
+
+const messages: Message[] = await fetchMessages()
+const newMessages = await unseen('messages', messages, 'id')
+// 1st run: 3 messages → returns 3. 2nd run: same 3 → returns []. 3rd run: 5 → returns 2 new.
+
+for (const m of newMessages) console.log(m.text)
 ```
+
+The third argument is the field name that uniquely identifies each item (e.g. `'id'`, `'messageId'`, `'bdnsCode'`). Type-safe — autocompletes valid fields, catches typos at compile time.
 
 State persists at `~/.local/state/unseen/{namespace}.json`.
 
