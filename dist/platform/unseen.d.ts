@@ -5,17 +5,20 @@
  * ```ts
  * const messages = await fetchMessages()
  * const newMessages = await unseen('messages', messages, 'id')
- *
- * // 1st run: messages = [{ id: '1', from: 'alice' }, { id: '2', from: 'bob' }]
- * //          newMessages = [{ id: '1', from: 'alice' }, { id: '2', from: 'bob' }]
- * // 2nd run: messages = [{ id: '1', from: 'alice' }, { id: '2', from: 'bob' }]
- * //          newMessages = []
- * // 3rd run: messages = [{ id: '1', ... }, { id: '2', ... }, { id: '3', from: 'bob' }]
- * //          newMessages = [{ id: '3', from: 'bob' }]
  * ```
  *
- * Idempotent — safe to re-run.
- * State: `$XDG_STATE_HOME/unseen/{namespace}.json`
+ * 1st run:
+ *   messages    = [{ id: '1', from: 'alice', text: 'hi' }]
+ *   newMessages = [{ id: '1', from: 'alice', text: 'hi' }]
+ *
+ * 2nd run, no new message:
+ *   newMessages = []
+ *
+ * 3rd run, bob replied:
+ *   messages    = [{ id: '1', ... }, { id: '2', from: 'bob', text: 'hey' }]
+ *   newMessages = [{ id: '2', from: 'bob', text: 'hey' }]
+ *
+ * Saves state to: `$XDG_STATE_HOME/unseen/{namespace}.json`
  *
  * @param namespace - Name for this seen-set (e.g. 'messages', 'orders')
  * @param items - Array of objects to filter
