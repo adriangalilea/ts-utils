@@ -1,7 +1,7 @@
 import { xdg } from './xdg.js';
 import { dir } from './dir.js';
 import { file } from './file.js';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 const STORE_DIR = xdg.state('unseen');
 /**
  * Persistent dedup filter — "what's new since last time?"
@@ -28,8 +28,8 @@ const STORE_DIR = xdg.state('unseen');
  * @returns Only items whose key hasn't been seen before
  */
 export async function unseen(namespace, items, key) {
-    dir.create(STORE_DIR);
     const storePath = join(STORE_DIR, `${namespace}.json`);
+    dir.create(dirname(storePath));
     const seen = new Set(file.exists(storePath) ? JSON.parse(file.readText(storePath)) : []);
     const result = [];
     for (const item of items) {

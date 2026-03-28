@@ -1,7 +1,7 @@
 import { xdg } from './xdg.js'
 import { dir } from './dir.js'
 import { file } from './file.js'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 
 const STORE_DIR = xdg.state('unseen')
 
@@ -30,8 +30,8 @@ const STORE_DIR = xdg.state('unseen')
  * @returns Only items whose key hasn't been seen before
  */
 export async function unseen<T>(namespace: string, items: T[], key: (item: T) => string): Promise<T[]> {
-  dir.create(STORE_DIR)
   const storePath = join(STORE_DIR, `${namespace}.json`)
+  dir.create(dirname(storePath))
 
   const seen: Set<string> = new Set(
     file.exists(storePath) ? JSON.parse(file.readText(storePath)) as string[] : []
