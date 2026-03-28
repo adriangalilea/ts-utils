@@ -14,4 +14,5 @@ export * from './platform/path.js';
 export * from './platform/project.js';
 export * from './platform/kev.js';
 export * from './platform/xdg.js';
+export * from './platform/unseen.js';
 //# sourceMappingURL=index.d.ts.map

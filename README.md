@@ -163,6 +163,7 @@ expect(() => assert(false, 'boom')).toThrow(Panic)
 - **Directory Operations**: Create, list, walk directories
 - **KEV**: Redis-style environment variable management with monorepo support
 - **XDG**: XDG Base Directory paths — reads env vars set by [xdg-dirs](https://github.com/adriangalilea/xdg-dirs), falls back to spec defaults
+- **Unseen**: Persistent dedup filter — "what's new since last time?" for cron/monitoring workflows
 - **Project Discovery**: Find project/monorepo roots, detect JS/TS projects
 
 ### XDG Base Directories
@@ -182,6 +183,21 @@ xdg.runtime('myapp')                   // $XDG_RUNTIME_DIR/myapp
 // Ensure the directory exists before writing
 dir.create(xdg.state('notify'))
 ```
+
+### Unseen
+
+Persistent dedup filter — makes any script idempotent. Run it once or a thousand times, you only process each item once. Any scheduling works: manual, cron, a loop, whatever.
+
+```typescript
+import { unseen } from '@adriangalilea/utils'
+
+// only notifies on NEW orders — safe to run on any schedule
+const fresh = await unseen('orders', allOrders, o => o.id)
+for (const o of fresh) await notify(o.summary)
+// 1st run: 5 orders → notifies 5. 2nd run: same 5 → notifies 0. 3rd run: 7 → notifies 2.
+```
+
+State persists at `~/.local/state/unseen/{namespace}.json`.
 
 ## Release
 
