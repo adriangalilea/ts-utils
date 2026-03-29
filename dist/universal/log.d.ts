@@ -1,6 +1,20 @@
 /**
  * A Next.js-style logger for TypeScript applications
  * Provides colored output with Unicode symbols for different log levels
+ *
+ * Known limitations:
+ * - Global level is frozen at import time (const). No runtime setLevel().
+ * - createLogger() is just a prefix wrapper, not a real scoped instance.
+ *   No per-scope level control (can't silence 'bor' but keep 'bdns' verbose).
+ * - No withTag/child pattern — consumer can't control library log levels.
+ *
+ * Candidate replacement: consola (unjs). Same DX goals, solves all the above:
+ *   - consola.level = N at runtime
+ *   - consola.withTag('bdns') for scoped loggers that inherit global level
+ *   - Pretty dev output, JSON in prod, browser support, 0 deps
+ *   - https://github.com/unjs/consola
+ *
+ * TODO: test consola in dokploy instance before migrating.
  */
 export declare const bold: (str: string) => string;
 export declare const dim: (str: string) => string;
@@ -20,6 +34,9 @@ export declare const bgBlue: (str: string) => string;
 export declare const bgMagenta: (str: string) => string;
 export declare const bgCyan: (str: string) => string;
 export declare const bgWhite: (str: string) => string;
+type LogLevelName = 'error' | 'warn' | 'info' | 'trace';
+/** Set the global log level at runtime. Overrides LOG_LEVEL env var. */
+export declare function setLogLevel(level: LogLevelName): void;
 export declare function bootstrap(...messages: string[]): void;
 export declare function wait(...messages: any[]): void;
 export declare function error(...messages: any[]): void;
@@ -59,6 +76,7 @@ declare const log: {
     timeEnd: typeof timeEnd;
     bootstrap: typeof bootstrap;
     createLogger: typeof createLogger;
+    setLogLevel: typeof setLogLevel;
     colors: {
         bold: (str: string) => string;
         dim: (str: string) => string;

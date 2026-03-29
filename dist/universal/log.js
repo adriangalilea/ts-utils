@@ -1,6 +1,20 @@
 /**
  * A Next.js-style logger for TypeScript applications
  * Provides colored output with Unicode symbols for different log levels
+ *
+ * Known limitations:
+ * - Global level is frozen at import time (const). No runtime setLevel().
+ * - createLogger() is just a prefix wrapper, not a real scoped instance.
+ *   No per-scope level control (can't silence 'bor' but keep 'bdns' verbose).
+ * - No withTag/child pattern — consumer can't control library log levels.
+ *
+ * Candidate replacement: consola (unjs). Same DX goals, solves all the above:
+ *   - consola.level = N at runtime
+ *   - consola.withTag('bdns') for scoped loggers that inherit global level
+ *   - Pretty dev output, JSON in prod, browser support, 0 deps
+ *   - https://github.com/unjs/consola
+ *
+ * TODO: test consola in dokploy instance before migrating.
  */
 import { runtime } from '../runtime.js';
 // ANSI escape codes for colors
@@ -88,12 +102,8 @@ const LOG_LEVELS = {
     wait: 3,
     trace: 4,
 };
-// Get current log level from environment
-function getCurrentLogLevel() {
-    const level = runtime.env('LOG_LEVEL')?.toLowerCase();
-    if (!level)
-        return LOG_LEVELS.info; // Default to info
-    switch (level) {
+function parseLogLevel(level) {
+    switch (level?.toLowerCase()) {
         case 'error': return LOG_LEVELS.error;
         case 'warn': return LOG_LEVELS.warn;
         case 'info': return LOG_LEVELS.info;
@@ -102,7 +112,11 @@ function getCurrentLogLevel() {
         default: return LOG_LEVELS.info;
     }
 }
-const currentLogLevel = getCurrentLogLevel();
+let currentLogLevel = parseLogLevel(runtime.env('LOG_LEVEL'));
+/** Set the global log level at runtime. Overrides LOG_LEVEL env var. */
+export function setLogLevel(level) {
+    currentLogLevel = parseLogLevel(level);
+}
 // LRU Cache for warn-once functionality
 class LRUCache {
     cache = new Map();
@@ -250,6 +264,7 @@ const log = {
     timeEnd,
     bootstrap,
     createLogger,
+    setLogLevel,
     // Color utilities
     colors: {
         bold,
