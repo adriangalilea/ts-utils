@@ -107,12 +107,14 @@ format.percentage(123.456)  // "123%"
 
 ### Offensive Programming
 
-Fail loud, fail fast. All primitives throw `Panic` — an uncaught `Panic` crashes the process with a full stack trace. Zero dependencies, works identically in Node, Deno, Bun, and browsers.
+Fail loud, fail fast. Zero dependencies, works in Node, Deno, Bun, and browsers.
+
+Two kinds of errors, kept separate: **`Panic`** (bugs in us — crash the process) and **`SourcedError`** (boundary failures — handle per-source).
 
 ```typescript
-import { assert, panic, must, unwrap, Panic } from '@adriangalilea/utils'
+import { assert, panic, assertNever, must, unwrap, Panic, SourcedError, isSourcedError } from '@adriangalilea/utils'
 
-// Assert invariants — narrows types
+// Assert invariants — narrows types via `asserts condition`
 assert(port > 0 && port < 65536, 'invalid port:', port)
 
 // Impossible state
@@ -121,32 +123,65 @@ switch (state) {
   default: panic('impossible state:', state)
 }
 
+// Exhaustiveness check — TS compile error if you miss a case
+type Event = { kind: 'click' } | { kind: 'hover' } | { kind: 'scroll' }
+function handle(e: Event) {
+  switch (e.kind) {
+    case 'click': return handleClick()
+    case 'hover': return handleHover()
+    // forgot 'scroll' → TS error: Argument of type '{ kind: "scroll" }' not assignable to 'never'
+    default: return assertNever(e)
+  }
+}
+// Add a new variant to Event → every assertNever site lights up at compile time.
+
 // Unwrap operations that shouldn't fail (sync + async)
 const data = must(() => JSON.parse(staticJsonString))
 const file = must(() => readFileSync(path))
 const resp = await must(() => fetch(url))
 
-// Unwrap nullable values — type narrows T | null | undefined → T in one expression
-// (assert needs two statements, unwrap does it inline)
+// Unwrap nullable values — T | null | undefined → T in one expression
 const user = unwrap(db.findUser(id), 'user not found:', id)
 const el = unwrap(document.getElementById('app'))
-
-// must() replaces try/catch boilerplate:
-//   try { return readFileSync(path, 'utf-8') }
-//   catch (err) { check(err) }
-// becomes:
-return must(() => readFileSync(path, 'utf-8'))
-
-// Panic is a distinct error class — distinguishes bugs from runtime errors
-// In a server: let Panics crash, handle everything else
-app.use((err, req, res, next) => {
-  if (err instanceof Panic) throw err  // bug, re-throw, let it crash
-  res.status(500).json({ error: 'internal error' })
-})
-
-// In tests: assert that code panics
-expect(() => assert(false, 'boom')).toThrow(Panic)
 ```
+
+#### Typed boundary errors — `SourcedError`
+
+Every external system call should wear its source. When it fails, carry forensics:
+
+```typescript
+import { SourcedError, isSourcedError, Panic } from '@adriangalilea/utils'
+
+try {
+  return await stripe.charges.create({ customer, amount })
+} catch (e) {
+  throw new SourcedError({
+    source: 'stripe',
+    operation: 'charge_customer',
+    message: e instanceof Error ? e.message : String(e),
+    status: (e as any)?.statusCode,
+    cause: e,
+    context: { customer, amount },
+  })
+}
+
+// At catch boundaries — keep Panics and SourcedErrors separate:
+try { await doWork() }
+catch (e) {
+  if (e instanceof Panic) throw e                            // bug in us — crash
+  if (isSourcedError(e, 'stripe') && e.status === 402) {
+    // TS knows e.source === 'stripe' here (generic narrows)
+    return { error: 'card declined' }
+  }
+  if (isSourcedError(e)) {
+    logger.error(`[${e.source}:${e.operation}]`, e.toJSON())  // structured forensics
+    throw e
+  }
+  throw e                                                     // unknown — re-throw
+}
+```
+
+Every `SourcedError` carries `source`, `operation`, `status`, `context`, and the original exception via `cause`. Call `.toJSON()` for serialization across process boundaries.
 
 ## Features
 
@@ -158,7 +193,7 @@ expect(() => assert(false, 'boom')).toThrow(Panic)
   - Percentage and basis point utilities
   - Fiat and stablecoin detection
 - **Format**: Number and currency formatting with compact notation
-- **Offensive Programming**: assert, panic, must, unwrap — all throw `Panic` with full stack traces
+- **Offensive Programming**: assert, panic, assertNever, must, unwrap (throw `Panic`) + SourcedError for typed boundary failures
 - **File Operations**: Read, write with automatic path resolution
 - **Directory Operations**: Create, list, walk directories
 - **KEV**: Redis-style environment variable management with monorepo support

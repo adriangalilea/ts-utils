@@ -1,29 +1,31 @@
 /**
- * OFFENSIVE PROGRAMMING PRIMITIVES
+ * Offensive programming primitives + typed boundary errors.
  *
- * "A confused program SHOULD scream" - John Carmack
+ * "A confused program SHOULD scream." — John Carmack
  *
  * Throw, always. An uncaught Panic crashes the process with a full stack trace.
  * Zero dependencies. Works identically in Node, Deno, Bun, and browsers.
  *
- * Four primitives:
- *   assert(cond, ...msg)   - invariant checking, narrows types
- *   panic(...msg)          - impossible state reached
- *   must(() => expr)       - unwrap-or-die for operations (sync + async)
- *   unwrap(value, ...msg)  - unwrap nullable values
+ * Fail-fast primitives (throw Panic — bugs in us):
+ *   assert(cond, ...msg)          invariant checking, narrows types via `asserts`
+ *   panic(...msg)                 impossible state reached
+ *   assertNever(value, ...msg)    exhaustiveness check — compile error on missed cases
+ *   must(() => expr)              unwrap-or-die for operations (sync + async)
+ *   unwrap(value, ...msg)         unwrap nullable T | null | undefined → T
  *
- * must() replaces the old try/catch/check pattern:
+ * Typed boundary errors (throw SourcedError — the external system failed):
+ *   SourcedError                  typed error with source/operation/status/context
+ *   isSourcedError(e, source?)    type guard for catch-site narrowing
  *
- *   // before: 5 lines
- *   try {
- *     const data = readFileSync(path, 'utf-8')
- *     return data
- *   } catch (err) {
- *     check(err)
+ * Panics are bugs. SourcedErrors are boundary failures. Keep them separate at
+ * catch boundaries:
+ *
+ *   try { await doWork() }
+ *   catch (e) {
+ *     if (e instanceof Panic) throw e            // bug in us — crash
+ *     if (isSourcedError(e, 'stripe')) { ... }   // stripe failed — handle
+ *     throw e                                    // unknown — re-throw
  *   }
- *
- *   // after: 1 line
- *   return must(() => readFileSync(path, 'utf-8'))
  */
 /**
  * Distinct error class for offensive programming failures.
@@ -69,6 +71,25 @@ export function assert(condition, ...msg) {
 export function panic(...msg) {
     throw new Panic(msg.join(' ') || 'panic');
 }
+/**
+ * Exhaustiveness check — compile error if a switch/if misses a case.
+ * The `never` type means TS won't let you call this if all cases are handled.
+ * Add a new variant to a union → every assertNever site lights up at compile time.
+ *
+ * @example
+ * type Event = { kind: 'click' } | { kind: 'hover' } | { kind: 'scroll' }
+ * function handle(e: Event) {
+ *   switch (e.kind) {
+ *     case 'click': return handleClick()
+ *     case 'hover': return handleHover()
+ *     // forgot 'scroll' → TS error: Argument of type '{ kind: "scroll" }' not assignable to 'never'
+ *     default: assertNever(e)
+ *   }
+ * }
+ */
+export function assertNever(value, ...msg) {
+    throw new Panic(msg.join(' ') || `assertNever: unexpected value: ${JSON.stringify(value)}`);
+}
 export function must(fn) {
     try {
         const result = fn();
@@ -101,11 +122,76 @@ export function unwrap(value, ...msg) {
         throw new Panic(msg.join(' ') || `unwrap: got ${value}`);
     return value;
 }
+/**
+ * Typed error from a named external source with structured context.
+ *
+ * Raise at boundaries with the messy world (HTTP APIs, databases, external
+ * processes). Every SourcedError carries enough context to reconstruct the
+ * failure without a debugger.
+ *
+ * @example
+ * try {
+ *   return await stripe.charges.create({ customer, amount })
+ * } catch (e) {
+ *   throw new SourcedError({
+ *     source: 'stripe',
+ *     operation: 'charge_customer',
+ *     message: e instanceof Error ? e.message : String(e),
+ *     status: (e as any)?.statusCode,
+ *     cause: e,
+ *     context: { customer, amount },
+ *   })
+ * }
+ */
+export class SourcedError extends Error {
+    source;
+    operation;
+    status;
+    context;
+    constructor(args) {
+        const status = args.status != null ? ` status=${args.status}` : '';
+        super(`[${args.source}:${args.operation}${status}] ${args.message}`, { cause: args.cause });
+        this.name = 'SourcedError';
+        this.source = args.source;
+        this.operation = args.operation;
+        this.status = args.status;
+        this.context = args.context ?? {};
+    }
+    toJSON() {
+        return {
+            source: this.source,
+            operation: this.operation,
+            status: this.status,
+            message: this.message,
+            context: this.context,
+            cause: this.cause instanceof Error ? this.cause.message : this.cause != null ? String(this.cause) : null,
+        };
+    }
+}
+/**
+ * Type guard for SourcedError. Optionally narrows to a specific source.
+ *
+ * @example
+ * try { await charge(customer, amount) }
+ * catch (e) {
+ *   if (isSourcedError(e, 'stripe') && e.status === 402) {
+ *     // TS knows e.source === 'stripe' here
+ *     return 'card declined'
+ *   }
+ *   throw e
+ * }
+ */
+export function isSourcedError(e, source) {
+    return e instanceof SourcedError && (source === undefined || e.source === source);
+}
 export const offensive = {
     Panic,
     assert,
     panic,
+    assertNever,
     must,
     unwrap,
+    SourcedError,
+    isSourcedError,
 };
 //# sourceMappingURL=offensive.js.map
