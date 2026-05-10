@@ -83,42 +83,6 @@ export const gracefulStart = async (
   await bot.start()
 }
 
-// ─── inThread ──────────────────────────────────────────────────────
-
-/**
- * Helper to keep an outgoing message in the same thread as the
- * incoming one. Returns `{ message_thread_id }` when `ctx.threadId`
- * is set, `{}` otherwise — so it always spreads cleanly.
- *
- * **Why this exists.** gramio's `ctx.send` auto-injects
- * `message_thread_id` only when `ctx.isTopicMessage()` is true — i.e.
- * forum-supergroup topics. For BotFather's Threaded Mode (private
- * chats with multiple topics), `is_topic_message` is not set, so
- * gramio's auto-thread skips. This helper closes that gap.
- *
- * `ctx.say.send` / `.reply` / `.edit` from `bot/language` already
- * apply this internally; use `inThread` when you call gramio methods
- * directly (`ctx.send`, `ctx.sendDocument`, etc.).
- *
- * @example
- * await ctx.send('hi', inThread(ctx))
- *
- * @example
- * await ctx.send('hi', { ...inThread(ctx), reply_markup: kb })
- *
- * @example
- * await ctx.sendDocument(file, { caption: 'export', ...inThread(ctx) })
- */
-export const inThread = (
-  ctx: { threadId?: number; message?: { threadId?: number } },
-): { message_thread_id?: number } => {
-  // Message events expose `ctx.threadId` directly. Callback-query events
-  // wrap the originating message at `ctx.message`, so we fall back to
-  // `ctx.message.threadId` to pick up the thread the callback fired in.
-  const tid = ctx.threadId ?? ctx.message?.threadId
-  return tid !== undefined ? { message_thread_id: tid } : {}
-}
-
 // ─── adminContext ──────────────────────────────────────────────────
 
 export type AdminContextOptions = {

@@ -91,10 +91,9 @@ export class MarkdownStreamer {
     opts: StreamOptions,
   ) {
     this.chatId = ctx.chat.id
-    // Captured at construction so the streamed reply stays in the same
-    // thread as the message that started it (forum-supergroup topics and
-    // BotFather Threaded Mode). editMessageText inherits the thread via
-    // message_id, so only the initial sendMessage needs it.
+    // Captured so the streamed reply stays in the same thread.
+    // We call bot.api.sendMessage directly (no ctx.send), so the
+    // SendMixin's auto-thread doesn't help us here.
     this.threadId = ctx.threadId
     this.bot = ctx.bot
     this.opts = {

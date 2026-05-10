@@ -1,6 +1,6 @@
 {
   "name": "@adriangalilea/utils",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "TypeScript utilities - logger, currency, formatter, GramIO bot plugins, and more",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -129,6 +129,14 @@
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
+  },
+  "pnpm": {
+    "overrides": {
+      "@gramio/contexts": "github:adriangalilea/contexts#fix/auto-thread-private-chat-threaded-mode"
+    },
+    "onlyBuiltDependencies": [
+      "@gramio/contexts"
+    ]
   },
   "repository": {
     "type": "git",

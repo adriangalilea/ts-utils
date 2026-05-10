@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@gramio/contexts': github:adriangalilea/contexts#fix/auto-thread-private-chat-threaded-mode
+
 importers:
 
   .:
@@ -201,8 +204,9 @@ packages:
   '@gramio/composer@0.4.1':
     resolution: {integrity: sha512-oGW1Kj0wiAD1NpORhxDSt9/WId2GANOwYmwlI3bivf4LGEEWB1kokcDW6Ji5/s3FwcK17YjTq1wWtgk0Z/uHnQ==}
 
-  '@gramio/contexts@0.7.0':
-    resolution: {integrity: sha512-WN1T0kNwFRszSXS6pMKTN+QRP+vgXKj27yQ7B7V5FTTJ0gnLKQX+niMc0a/7Ga4elcM8hqpFAfkkF9qRzSiSZA==}
+  '@gramio/contexts@https://codeload.github.com/adriangalilea/contexts/tar.gz/efb81059b4096918025aec24c39c077be30e0208':
+    resolution: {tarball: https://codeload.github.com/adriangalilea/contexts/tar.gz/efb81059b4096918025aec24c39c077be30e0208}
+    version: 0.7.0
     peerDependencies:
       '@gramio/types': ^10.0.0
       inspectable: ^3.0.1
@@ -379,7 +383,7 @@ snapshots:
 
   '@gramio/composer@0.4.1': {}
 
-  '@gramio/contexts@0.7.0(@gramio/types@10.0.0)(inspectable@3.0.2)':
+  '@gramio/contexts@https://codeload.github.com/adriangalilea/contexts/tar.gz/efb81059b4096918025aec24c39c077be30e0208(@gramio/types@10.0.0)(inspectable@3.0.2)':
     dependencies:
       '@gramio/types': 10.0.0
       inspectable: 3.0.2
@@ -457,7 +461,7 @@ snapshots:
     dependencies:
       '@gramio/callback-data': 0.1.0
       '@gramio/composer': 0.4.1
-      '@gramio/contexts': 0.7.0(@gramio/types@10.0.0)(inspectable@3.0.2)
+      '@gramio/contexts': https://codeload.github.com/adriangalilea/contexts/tar.gz/efb81059b4096918025aec24c39c077be30e0208(@gramio/types@10.0.0)(inspectable@3.0.2)
       '@gramio/files': 0.5.0
       '@gramio/format': 0.8.0(marked@15.0.12)
       '@gramio/keyboards': 1.4.0

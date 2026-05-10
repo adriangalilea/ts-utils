@@ -74,7 +74,6 @@ import {
 import type { Storage } from '@gramio/storage'
 
 import { say, type Polyglot } from '../say/index.js'
-import { inThread } from './kit.js'
 
 // ─── public types ──────────────────────────────────────────────────
 
@@ -483,15 +482,6 @@ const buildMenuPlugin = (menu: BotMenu) => {
           caption: say(
             { en: '📥 Your data export', es: '📥 Exportación de tus datos' },
             lang,
-          ),
-          // Land the file in the same thread the menu was opened from.
-          // Callback ctx exposes the thread via ctx.message.threadId;
-          // inThread() handles both shapes.
-          ...inThread(
-            ctx as unknown as {
-              threadId?: number
-              message?: { threadId?: number }
-            },
           ),
         })
       } catch (e) {

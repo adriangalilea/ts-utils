@@ -27,17 +27,11 @@
  *
  * With Threaded Mode enabled for the bot, your private chat can have
  * multiple parallel topic threads. Each incoming message carries
- * `message_thread_id`. gramio surfaces it as:
- *
- *   ctx.threadId            — number | undefined
- *   ctx.isTopicMessage()    — true only for forum-supergroup topics
- *   ctx.directMessagesTopic — set in private-chat threaded mode
- *
- * **gramio gap** — `ctx.send` auto-injects `message_thread_id` only
- * when `isTopicMessage()` is true (`@gramio/contexts SendMixin`).
- * Private-chat threaded mode doesn't set that flag, so we forward
- * `message_thread_id: ctx.threadId` explicitly below to keep echo
- * replies in the same thread.
+ * `message_thread_id`, surfaced as `ctx.threadId`. With this repo's
+ * pinned fork of `@gramio/contexts`, the SendMixin auto-forwards
+ * `message_thread_id` on every `ctx.send` family call — replies stay
+ * in their thread automatically. Per-thread `message-history` shards
+ * give each thread its own rolling buffer.
  */
 import { Bot } from 'gramio'
 import { session } from '@gramio/session'
@@ -89,15 +83,18 @@ const menu = botMenu({
       id: 'recent',
       label: '📜 Show last 3 messages',
       action: async (ctx) => {
-        const recent =
-          (ctx as unknown as { history?: ReadonlyArray<{ text: string }> }).history ?? []
-        const last = recent
+        // message-history is sharded per thread → this shows the
+        // current thread's last 3 entries, not the global feed.
+        type Helpers = {
+          history?: ReadonlyArray<{ text: string }>
+          send: (t: string, params?: object) => Promise<unknown>
+        }
+        const c = ctx as unknown as Helpers
+        const last = (c.history ?? [])
           .slice(-3)
           .map((e, i) => `${i + 1}. ${e.text}`)
           .join('\n')
-        await (ctx as unknown as { send: (t: string) => Promise<unknown> }).send(
-          last || '(no history)',
-        )
+        await c.send(last || '(no history in this thread)')
       },
     },
   ],

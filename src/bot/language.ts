@@ -60,7 +60,6 @@ import { CallbackData, type DeriveDefinitions, Plugin } from 'gramio'
 import { session } from '@gramio/session'
 
 import { say, type Polyglot } from '../say/index.js'
-import { inThread } from './kit.js'
 import type { MenuItem } from './menu.js'
 
 // ─── public types ──────────────────────────────────────────────────
@@ -173,29 +172,18 @@ const buildSayer = <L extends string>(
     resolve(value)) as Sayer<L>
 
   type CtxLike = {
-    threadId?: number
-    message?: { threadId?: number }
     send?: (text: string, params?: object) => Promise<unknown>
     editText?: (text: string, params?: object) => Promise<unknown>
     answer?: (params: object) => Promise<unknown>
   }
   const c = ctx as CtxLike
 
-  // Forward `message_thread_id` for outgoing messages so replies stay
-  // in the same thread under both forum-supergroup topics and
-  // BotFather's Threaded Mode. User-passed params win (their override
-  // is the escape hatch). See `bot/kit:inThread` for the same helper
-  // exposed for direct ctx.send / ctx.sendDocument call sites.
-  const threaded = (params?: object): object => ({
-    ...inThread(c),
-    ...(params ?? {}),
-  })
-
   fn.send = (value, params) => {
     if (typeof c.send !== 'function') {
       throw new TypeError('ctx.say.send: ctx.send is not available on this event')
     }
-    return c.send(resolve(value), threaded(params))
+    // ctx.send auto-forwards message_thread_id (gramio SendMixin).
+    return c.send(resolve(value), params)
   }
   fn.edit = (value, params) => {
     if (typeof c.editText !== 'function') {
@@ -203,8 +191,6 @@ const buildSayer = <L extends string>(
         'ctx.say.edit: ctx.editText is only available on callback_query events',
       )
     }
-    // editText edits an existing message — thread already implied by
-    // the message id, no need to forward message_thread_id.
     return c.editText(resolve(value), params)
   }
   fn.answer = (value, params) => {
@@ -213,7 +199,6 @@ const buildSayer = <L extends string>(
         'ctx.say.answer: ctx.answer is only available on callback_query events',
       )
     }
-    // answer is a callback acknowledgement — no thread routing.
     return c.answer({ text: resolve(value), ...(params ?? {}) })
   }
 
