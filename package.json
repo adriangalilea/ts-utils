@@ -1,7 +1,7 @@
 {
   "name": "@adriangalilea/utils",
-  "version": "0.5.0",
-  "description": "TypeScript utilities - logger, currency, formatter, and more",
+  "version": "0.6.0",
+  "description": "TypeScript utilities - logger, currency, formatter, GramIO bot plugins, and more",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "type": "module",
@@ -27,6 +27,22 @@
     "./currency": {
       "types": "./dist/universal/currency/index.d.ts",
       "default": "./dist/universal/currency/index.js"
+    },
+    "./bot": {
+      "types": "./dist/bot/index.d.ts",
+      "default": "./dist/bot/index.js"
+    },
+    "./bot/access-control": {
+      "types": "./dist/bot/access-control.d.ts",
+      "default": "./dist/bot/access-control.js"
+    },
+    "./bot/kit": {
+      "types": "./dist/bot/kit.d.ts",
+      "default": "./dist/bot/kit.js"
+    },
+    "./bot/llm-stream": {
+      "types": "./dist/bot/llm-stream.d.ts",
+      "default": "./dist/bot/llm-stream.js"
     }
   },
   "files": [
@@ -54,12 +70,41 @@
   "author": "Adrian Galilea <adriangalilea@gmail.com>",
   "license": "MIT",
   "devDependencies": {
+    "@gramio/format": "^0.8.0",
+    "@gramio/session": "^0.2.0",
+    "@gramio/storage": "^2.0.1",
     "@types/node": "^24.3.0",
+    "gramio": "^0.10.0",
+    "marked": "^15.0.11",
     "tsx": "^4.20.4",
     "typescript": "^5.9.2"
   },
   "dependencies": {
     "chalk": "^5.6.0"
+  },
+  "peerDependencies": {
+    "@gramio/format": ">=0.8.0",
+    "@gramio/session": ">=0.2.0",
+    "@gramio/storage": ">=2.0.0",
+    "gramio": ">=0.10.0",
+    "marked": ">=12"
+  },
+  "peerDependenciesMeta": {
+    "@gramio/format": {
+      "optional": true
+    },
+    "@gramio/session": {
+      "optional": true
+    },
+    "@gramio/storage": {
+      "optional": true
+    },
+    "gramio": {
+      "optional": true
+    },
+    "marked": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public",

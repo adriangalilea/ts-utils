@@ -200,6 +200,7 @@ Every `SourcedError` carries `source`, `operation`, `status`, `context`, and the
 - **XDG**: XDG Base Directory paths — reads env vars set by [xdg-dirs](https://github.com/adriangalilea/xdg-dirs), falls back to spec defaults
 - **Unseen**: Persistent dedup filter — "what's new since last time?" for cron/monitoring workflows
 - **Project Discovery**: Find project/monorepo roots, detect JS/TS projects
+- **Bot plugins (GramIO)**: `kit` (graceful shutdown + admin context), `access-control` (gate + approve/deny menu, backed by sessions), `llm-stream` (streaming LLM markdown to Telegram with graceful degradation)
 
 ### XDG Base Directories
 
@@ -248,6 +249,50 @@ newMessages = [{ id: '2', from: 'bob', text: 'hey' }]
 ```
 
 Saves state to: `$XDG_STATE_HOME/unseen/{name}.json`
+
+### Telegram bot plugins (GramIO)
+
+Plugins for personal Telegram bots built on [GramIO](https://gramio.dev). Each plugin lives at its own subpath; peer deps (`gramio`, `@gramio/storage`, `@gramio/session`, `@gramio/format`, `marked`) are **all optional** — install only what you import.
+
+```bash
+pnpm add @adriangalilea/utils gramio @gramio/storage @gramio/session
+```
+
+| Subpath | What it does |
+|---|---|
+| `@adriangalilea/utils/bot/kit` | `gracefulStart(bot)` — SIGINT/SIGTERM → `bot.stop()` → exit; force-kills if shutdown hangs.<br>`adminContext({ adminId? })` — reads `TELEGRAM_ADMIN_ID` from `kev` (with optional hardcoded fallback), decorates `ctx.adminId` + `ctx.isAdmin`. |
+| `@adriangalilea/utils/bot/access-control` | Personal-bot ACL — gates non-admin/non-default users; admin gets DM with `[✅ Aprobar][❌ Denegar]` on first attempt; `/access` opens a persistent menu (revoke / reapprove / list pending). Backed by `@gramio/session` per-user + a small index. |
+| `@adriangalilea/utils/bot/llm-stream` | `ctx.startStream()` for LLM token streams. Debounced `editMessageText`, splits at 4000 chars on paragraph/line/word boundary, parses Markdown locally so malformed mid-stream markup degrades to plain text instead of failing. |
+
+Standard wiring:
+
+```typescript
+import { Bot } from 'gramio'
+import { redisStorage } from '@gramio/storage-redis'
+import { adminContext, gracefulStart } from '@adriangalilea/utils/bot/kit'
+import { accessControl } from '@adriangalilea/utils/bot/access-control'
+import { llmStream } from '@adriangalilea/utils/bot/llm-stream'
+
+const storage = redisStorage()                      // ONE instance, shared
+
+const bot = new Bot(process.env.BOT_TOKEN!)
+  .extend(adminContext({ adminId: 190202471 }))     // KEV.TELEGRAM_ADMIN_ID overrides
+  .extend(accessControl({ storage, defaults: [] })) // gate; depends on adminContext
+  .extend(llmStream())
+  .command('chat', async (ctx) => {
+    const stream = ctx.startStream()
+    for await (const chunk of yourLLM()) await stream.append(chunk.text)
+    await stream.end()
+  })
+
+await gracefulStart(bot)
+```
+
+Inside handlers, `ctx.access` is a typed discriminated union — `{ allowed: true, source: 'admin' | 'default' | 'store', record? }` or `{ allowed: false, reason }`. `ctx.adminId` and `ctx.isAdmin` are available on every event from `adminContext`.
+
+For tests/demos without a second Telegram account, `simulateAccessRequest(bot, storage, adminId, fakeUser, msg)` injects a synthetic pending request so admin can exercise the approve/deny flow.
+
+See `src/bot/CLAUDE.md` for storage layout, design decisions, and gotchas.
 
 ## Release
 
