@@ -284,6 +284,23 @@ Plugins for personal Telegram bots built on [GramIO](https://gramio.dev). Each p
 pnpm add @adriangalilea/utils gramio @gramio/storage @gramio/session
 ```
 
+#### Threaded Mode — pin the `@gramio/contexts` fork
+
+Telegram added [Threaded Mode](https://telegram.org/blog/threaded-conversations) for private chats (BotFather → Bot Settings → Threaded Mode). gramio's `SendMixin` skips auto-threading there, and `CallbackQueryContext` doesn't expose `threadId` at all. Fixes [PR'd upstream](https://github.com/gramiojs/contexts/pull/4); until merged, pin the fork in **your bot project's** `package.json` (pnpm only honors overrides at the workspace root, not transitively):
+
+```json
+{
+  "pnpm": {
+    "overrides": {
+      "@gramio/contexts": "github:adriangalilea/contexts#fix/auto-thread-private-chat-threaded-mode"
+    },
+    "onlyBuiltDependencies": ["@gramio/contexts"]
+  }
+}
+```
+
+Then `pnpm install`. Every `ctx.send` / `ctx.sendDocument` / `ctx.reply` / etc. — including from callback handlers — will auto-forward `message_thread_id` and stay in the thread the message came from. If you don't use Threaded Mode, skip this.
+
 | Subpath | What it does |
 |---|---|
 | `@adriangalilea/utils/bot/kit` | `gracefulStart(bot)` — SIGINT/SIGTERM → `bot.stop()` → exit; force-kills if shutdown hangs.<br>`adminContext({ adminId? })` — reads `TELEGRAM_ADMIN_ID` from `kev` (with optional hardcoded fallback), decorates `ctx.adminId` + `ctx.isAdmin`. |
