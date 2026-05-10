@@ -10,6 +10,10 @@
  *                 (admin / default / store)
  *   /stream     — exercises llmStream: streams a markdown reply with
  *                 bullets, code, and a blockquote
+ *   <any text>  — exercises coalesceLongMessages. Just paste >4096
+ *                 chars. The plain-message handler reports the
+ *                 received length. If coalesce works you see one
+ *                 number ≥4096 instead of two events of <4096 each.
  *   /access     — opens the persistent admin menu (Aprobados, Pendientes,
  *                 Denegados, Refresh, Cerrar)
  *   /simulate   — fakes "another user just DMed the bot"; you'll receive an
@@ -24,6 +28,7 @@ import { inMemoryStorage } from '@gramio/storage'
 import { kev } from '../src/platform/kev.js'
 import { adminContext, gracefulStart } from '../src/bot/kit.js'
 import { accessControl, simulateAccessRequest } from '../src/bot/access-control.js'
+import { coalesceLongMessages } from '../src/bot/coalesce.js'
 import { llmStream } from '../src/bot/llm-stream.js'
 
 const token = kev.mustGet('BOT_TOKEN')
@@ -35,6 +40,7 @@ const storage = inMemoryStorage()
 const bot = new Bot(token)
   .extend(adminContext({ adminId: 190202471 }))
   .extend(accessControl({ storage, defaults: [] }))
+  .extend(coalesceLongMessages({ log: true }))
   .extend(llmStream())
 
   // ─── /start ────────────────────────────────────────────────────
@@ -48,7 +54,8 @@ const bot = new Bot(token)
         `Comandos disponibles:\n` +
         `  /stream   — demo de streaming markdown\n` +
         `  /access   — menú admin (sólo admin)\n` +
-        `  /simulate — fake access request (sólo admin)`,
+        `  /simulate — fake access request (sólo admin)\n\n` +
+        `Pega cualquier texto >4096 chars para probar coalesce.`,
     )
   })
 
@@ -60,6 +67,22 @@ const bot = new Bot(token)
       await stream.append(chunk)
     }
     await stream.end()
+  })
+
+  // ─── plain text echo — exercises coalesce ──────────────────────
+  // Any non-command message: report the length we received.
+  // If you paste >4096 chars, Telegram splits it client-side; coalesce
+  // joins them; this handler should see ONE event with the full
+  // length (~paste size). If coalesce is broken, you'd see two events
+  // each with <4096.
+  .on('message', (ctx) => {
+    if (!ctx.access.allowed) return
+    if (ctx.text?.startsWith('/')) return // commands handled above
+    return ctx.send(
+      `📏 recibido: ${ctx.text?.length ?? 0} chars\n\n` +
+        `Si pegaste un texto largo y este número es la longitud ` +
+        `total (no la mitad), coalesce funciona.`,
+    )
   })
 
   // ─── /simulate — fake "stranger DMed the bot" ──────────────────

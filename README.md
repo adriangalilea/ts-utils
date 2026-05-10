@@ -262,6 +262,7 @@ pnpm add @adriangalilea/utils gramio @gramio/storage @gramio/session
 |---|---|
 | `@adriangalilea/utils/bot/kit` | `gracefulStart(bot)` — SIGINT/SIGTERM → `bot.stop()` → exit; force-kills if shutdown hangs.<br>`adminContext({ adminId? })` — reads `TELEGRAM_ADMIN_ID` from `kev` (with optional hardcoded fallback), decorates `ctx.adminId` + `ctx.isAdmin`. |
 | `@adriangalilea/utils/bot/access-control` | Personal-bot ACL — gates non-admin/non-default users; admin gets DM with `[✅ Aprobar][❌ Denegar]` on first attempt; `/access` opens a persistent menu (revoke / reapprove / list pending). Backed by `@gramio/session` per-user + a small index. |
+| `@adriangalilea/utils/bot/coalesce` | Joins client-split inbound messages back into one. When a user pastes >4096 chars, Telegram clients fragment it into separate `message` updates with no marker. Middleware detects the burst and emits one combined event. |
 | `@adriangalilea/utils/bot/llm-stream` | `ctx.startStream()` for LLM token streams. Debounced `editMessageText`, splits at 4000 chars on paragraph/line/word boundary, parses Markdown locally so malformed mid-stream markup degrades to plain text instead of failing. |
 
 Standard wiring:

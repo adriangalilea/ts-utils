@@ -11,6 +11,7 @@ optional** — install only what the subpaths you import need.
 |---|---|
 | `@adriangalilea/utils/bot/kit` | `gracefulStart(bot, opts?)` — SIGINT/SIGTERM → `bot.stop()` → exit; force-kills if shutdown hangs. `adminContext({ adminId? })` — reads `TELEGRAM_ADMIN_ID` from KEV (with optional hardcoded fallback), decorates `ctx.adminId` (number) and `ctx.isAdmin` (boolean). |
 | `@adriangalilea/utils/bot/access-control` | `accessControl({ storage, defaults? })` — gates non-admin/non-default users; admin gets DM with `[✅ Aprobar][❌ Denegar]` on first attempt; persistent `/access` menu for revoke/reapprove/list. Plus `simulateAccessRequest()` for tests. |
+| `@adriangalilea/utils/bot/coalesce` | `coalesceLongMessages({ minLeadingLength?, windowMs?, acrossUsers?, log? })` — joins client-split inbound messages back into one. When a user pastes >4096 chars, Telegram clients fragment it into separate `message` updates with no marker. This middleware detects the burst and emits one combined event with `ctx.text` set to the full string. Also exports `isCoalescent(prev, curr, opts)` as a pure utility for power users. |
 | `@adriangalilea/utils/bot/llm-stream` | `llmStream()` — `ctx.startStream()` returns a `MarkdownStreamer`; debounced `editMessageText`, splits at 4000 chars on paragraph/line/word boundary, parses Markdown locally so malformed mid-stream markup degrades to plain text instead of failing the whole message. |
 
 Implementation files are flat under `src/bot/` — `kit.ts`, `access-control.ts`,
@@ -150,6 +151,60 @@ only loaded when `/settings` is invoked).
   For a personal bot scale this is essentially never an issue; if it
   ever bites, a "reconcile" pass over `ac:index` is straightforward.
 
+### `coalesce.ts`
+
+- **What it solves:** Telegram clients (tdesktop, iOS, web) split a
+  single >4096-char message client-side into multiple `sendMessage`
+  calls. The bot receives them as N separate `message` updates with
+  no marker linking them. This middleware joins them back so handlers
+  see one event.
+
+- **Strict-honest detection.** ALL conditions must hold to coalesce.
+  If any fails → fragments pass through as separate events:
+  1. Same chat (always)
+  2. Same user (default; override with `acrossUsers: true`)
+  3. Leading fragment length ≥ `minLeadingLength` — a short first
+     fragment is never the start of a real client split; we don't
+     open a buffer for short messages
+  4. Each subsequent fragment within `windowMs` of the previous
+
+  Bias: false negatives > false positives. Silently merging
+  unrelated messages produces bugs the bot user can't debug.
+
+- **Default values are guesses, not measurements.** See
+  `DEFAULT_MIN_LEADING_LENGTH` / `DEFAULT_WINDOW_MS` in
+  `coalesce.ts`. The first real-world observation: a README of
+  11206 chars pasted from macOS desktop client landed as
+  `3978 + 3959 + 3269` — so the leading fragment threshold has to
+  be ≤3978 to catch this case. Enable `log: true` in your bot to
+  see the actual lengths your users trigger and adjust accordingly.
+
+- **`isCoalescent(prev, curr, opts)` exported as a pure utility.**
+  Power users plug it into their own logic instead of the
+  middleware. Takes plain `CoalesceFragment` (`text`, `chatId`,
+  `userId`, `dateMs`) — decoupled from gramio's context.
+
+- **`ctx.text` reassignment via gramio's native setter.** gramio's
+  `MessageContext` exposes `text` as a `get/set` accessor — we just
+  `ctx.text = combined`. Each new update gets a fresh ctx, no leak
+  between updates.
+
+- **`ctx.entities` cleared on coalesced messages.** Per-fragment
+  entities reference each fragment's own text; combining them
+  naively gives wrong offsets. Plain-text consumers don't care;
+  formatted-input consumers should disable this plugin.
+
+- **Order matters.** Extend `coalesceLongMessages()` BEFORE
+  `.command()` / `.on('message')`. Otherwise command handlers see
+  the first fragment alone before the middleware can hold it.
+
+- **In-memory buffer, no persistence.** Doesn't survive bot restart
+  mid-burst. Fine for personal bots.
+
+- **No max-wait cap.** If 100 fragments arrive back-to-back the
+  buffer grows unbounded. Add a `maxLength` if needed for hostile
+  users.
+
 ### `llm-stream.ts`
 
 - **Markdown via `@gramio/format/markdown` (`markdownToFormattable`)** —
@@ -195,11 +250,25 @@ and exit 0.
 
 ## Open / TODO
 
-- **`bot/settings`** plugin — `/settings` for per-user prefs (language is
-  the obvious first one). Same shape: extends a `session({ key:'settings',
-  getSessionKey: ctx => 'settings:'+ctx.senderId, … })` internally.
-  No index needed (no admin "list all settings" use case). I18n consumers
-  read `ctx.settings.language` everywhere.
+- **Bundle `bot/gdpr` + `bot/settings` + `bot/message-history` together**
+  — these three are conceptually one feature set: per-user state +
+  legal compliance + retention. Designing them in isolation produces
+  awkward composition. Plan to ship as one PR/release after coalesce
+  is locked in:
+  - `bot/gdpr` — `/privacy` (default URL `https://telegram.org/privacy-tpa`,
+    overridable), `/forget`, `/export`, consent gate. Knows the
+    storage key patterns of our other plugins so cascade
+    delete/export work out of the box. `extraSources` opt-in for
+    custom plugins.
+  - `bot/settings` — `/settings` menu with per-user language picker
+    (extensible to other prefs). Storage at `settings:<userId>`.
+    `ctx.settings.language` typed.
+  - `bot/message-history` — opt-in ring buffer per user, with
+    retention (days + max count). Storage at `history:<userId>`.
+    Auto-deletes old entries; integrates with gdpr `/forget` and
+    `/export`. Gives retrospective commands (reply with `/summary`)
+    a real path that respects data minimization by default
+    (only buffers if you explicitly extend it).
 - **`bot/i18n`** — pairs with `settings`. Lookup
   `messages[ctx.settings.language ?? defaultLang][key]`. Could just
   consume `@gramio/i18n` if it covers our needs.

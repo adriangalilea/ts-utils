@@ -13,4 +13,5 @@
  */
 export * from './kit.js'
 export * from './access-control.js'
+export * from './coalesce.js'
 export * from './llm-stream.js'
