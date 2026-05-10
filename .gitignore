@@ -3,7 +3,7 @@ node_modules/
 .pnpm-store/
 
 # Build output
-# dist/ - needed for JSR, committed to repo
+dist/
 *.tsbuildinfo
 
 # IDE

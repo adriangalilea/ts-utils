@@ -8,8 +8,6 @@ TypeScript utilities - logger, currency, offensive programming, file operations,
 pnpm add @adriangalilea/utils
 ```
 
-Also available on [JSR](https://jsr.io/@adriangalilea/utils) but the JSR publish pipeline is not automated — versions may lag behind npm.
-
 ## Usage
 
 ### Logger
@@ -297,14 +295,12 @@ See `src/bot/CLAUDE.md` for storage layout, design decisions, and gotchas.
 
 ## Release
 
-Bump version in `package.json` (and `jsr.json`), push to `main`. CI handles everything:
+Bump version in `package.json`, push to `main`. CI handles everything:
 
 1. Type-check, lint, build
 2. Publish to npm via [OIDC trusted publishing](https://docs.npmjs.com/generating-provenance-statements) (no tokens — GitHub Actions proves identity directly to npm)
 3. Create git tag `vX.Y.Z`
 4. Generate changelog via [git-cliff](https://github.com/orhun/git-cliff) and create GitHub release
-
-JSR publishing is not automated — see `jsr.json` TODO.
 
 ## License
 
