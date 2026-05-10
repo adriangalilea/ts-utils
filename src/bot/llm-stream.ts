@@ -62,6 +62,7 @@ export class MarkdownStreamer {
   private ended = false
 
   private chatId: number
+  private threadId?: number
   // Match gramio's `bot.api` shape structurally. `text` accepts string or any
   // `Formattable` (from `@gramio/format`) — both stringify safely. We don't
   // import gramio's full Bot type to keep the streamer testable in isolation.
@@ -69,6 +70,7 @@ export class MarkdownStreamer {
     api: {
       sendMessage: (p: {
         chat_id: number
+        message_thread_id?: number
         text: string | { toString(): string }
       }) => Promise<{ message_id: number }>
       editMessageText: (p: {
@@ -81,10 +83,19 @@ export class MarkdownStreamer {
   private opts: Required<StreamOptions>
 
   constructor(
-    ctx: { chat: { id: number }; bot: MarkdownStreamer['bot'] },
+    ctx: {
+      chat: { id: number }
+      threadId?: number
+      bot: MarkdownStreamer['bot']
+    },
     opts: StreamOptions,
   ) {
     this.chatId = ctx.chat.id
+    // Captured at construction so the streamed reply stays in the same
+    // thread as the message that started it (forum-supergroup topics and
+    // BotFather Threaded Mode). editMessageText inherits the thread via
+    // message_id, so only the initial sendMessage needs it.
+    this.threadId = ctx.threadId
     this.bot = ctx.bot
     this.opts = {
       debounceMs: opts.debounceMs ?? DEFAULT_DEBOUNCE_MS,
@@ -105,6 +116,7 @@ export class MarkdownStreamer {
       this.firstSendPromise = (async () => {
         const sent = await this.bot.api.sendMessage({
           chat_id: this.chatId,
+          ...(this.threadId !== undefined && { message_thread_id: this.threadId }),
           text: this.opts.placeholder,
         })
         this.currentMessageId = sent.message_id

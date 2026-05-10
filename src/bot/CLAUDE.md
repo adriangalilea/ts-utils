@@ -91,6 +91,35 @@ await gracefulStart(bot)
 
 ---
 
+## Threads — `inThread(ctx)` and the gramio gap
+
+Telegram bots support threaded messages in two flavours: forum-supergroup
+topics and the newer BotFather "Threaded Mode" for private chats. Both
+deliver incoming messages with `message_thread_id`, surfaced by gramio as
+`ctx.threadId`.
+
+**The gap.** gramio's `ctx.send` auto-injects `message_thread_id` ONLY
+when `ctx.isTopicMessage()` is true — i.e. forum supergroups. BotFather
+Threaded Mode does NOT set `is_topic_message`, so gramio's auto-thread
+skips and replies land in the general thread by default.
+
+**The helper.** `inThread(ctx)` from `bot/kit` returns
+`{ message_thread_id }` (or `{}`) so outgoing methods spread it cleanly:
+
+```ts
+import { inThread } from '@adriangalilea/utils/bot/kit'
+
+await ctx.send(text, inThread(ctx))
+await ctx.sendDocument(file, { caption: 'export', ...inThread(ctx) })
+```
+
+`ctx.say.send` / `.reply` / `.edit` from `bot/language` already apply
+it internally — use `inThread(ctx)` when calling gramio methods directly.
+
+`bot/llm-stream` captures `ctx.threadId` at stream construction and
+forwards it on the initial `sendMessage`; subsequent `editMessageText`
+inherits the thread via message id.
+
 ## Polyglot strings — the hard rule
 
 Every user-facing string this library emits is an **inline polyglot

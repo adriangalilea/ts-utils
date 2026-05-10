@@ -1,17 +1,31 @@
 /**
  * Per-user rolling message history for GramIO bots — opt-in, with
- * retention.
+ * retention, **sharded by thread**.
  *
- * Follows the same shared-session pattern as `bot/language`: the
- * user creates a `session()` once at bot level, and each feature
- * plugin (including this one) declares it as a dependency. gramio
- * dedupes the runtime extension; the types flow.
+ * Each user has one session record. Inside that record, `history` keeps
+ * a separate ring buffer per thread:
+ *
+ *     storage[userId].history.shards = {
+ *       'general':   [ ...entries from no-thread messages ],
+ *       '12345':     [ ...entries from message_thread_id=12345 ],
+ *       '98765':     [ ...entries from message_thread_id=98765 ],
+ *     }
+ *
+ * This makes the plugin compatible with both forum-supergroup topics
+ * and BotFather's Threaded Mode for private chats (which is the whole
+ * point of those features: parallel conversations with separate
+ * context). `ctx.history` returns ONLY the slice for the current
+ * thread; `ctx.allHistory` returns the full sharded map when you need
+ * a cross-thread view (e.g. for `/export`).
+ *
+ * Thread key: `String(ctx.threadId)`, or `'general'` when no thread.
  *
  * ## What this plugin owns
  *
- *   - Appends each incoming user message to `ctx.session.history.items`
- *   - Prunes entries older than `retentionDays` or beyond `maxMessages`
- *   - Exposes a read-only pruned snapshot at `ctx.history` for handlers
+ *   - Appends each incoming user message to the shard for its thread
+ *   - Prunes per-shard by `retentionDays` and `maxMessages`
+ *   - Exposes `ctx.history` (current thread's pruned slice) and
+ *     `ctx.allHistory` (full map) to handlers
  *
  * ## GDPR caveat — retention IS personal data
  *
@@ -29,15 +43,6 @@
  * These are not enforced by this plugin (would couple it to menu); they
  * are documented as the bot author's legal responsibility.
  *
- * ## Storage layout
- *
- * Lives entirely inside the shared session record:
- *
- *   storage[String(senderId)] = {
- *     ...other plugins' fields,
- *     history: { items: [HistoryEntry, ...] }
- *   }
- *
  * Peer deps: `gramio`, `@gramio/session`.
  *
  * @example
@@ -50,7 +55,7 @@
  *
  * const history = messageHistory({
  *   session: userSession,
- *   maxMessages: 100,
+ *   maxMessages: 100,         // cap per-thread
  *   retentionDays: 7,
  * })
  *
@@ -59,7 +64,7 @@
  *   .extend(history.plugin)
  *   .command('replay', (ctx) => {
  *     const last = ctx.history.slice(-3).map((e) => e.text).join('\n---\n')
- *     return ctx.send(last || '(no history)')
+ *     return ctx.send(last || '(no history in this thread)')
  *   })
  */
 import { type DeriveDefinitions, Plugin } from 'gramio'
@@ -76,8 +81,24 @@ export type HistoryEntry = {
   text: string
 }
 
+/**
+ * Per-thread shards. Key is `String(ctx.threadId)` or `'general'`
+ * when no thread. Each shard is an independently capped + pruned
+ * ring buffer.
+ */
 export type HistoryRecord = {
-  items: HistoryEntry[]
+  shards: { [threadKey: string]: HistoryEntry[] }
+}
+
+const GENERAL_THREAD = 'general'
+
+const threadKey = (ctx: {
+  threadId?: number
+  message?: { threadId?: number }
+}): string => {
+  // Message events: ctx.threadId. Callback events: ctx.message.threadId.
+  const tid = ctx.threadId ?? ctx.message?.threadId
+  return tid !== undefined ? String(tid) : GENERAL_THREAD
 }
 
 /** Loose session shape — this plugin only touches the `history` field. */
@@ -92,7 +113,7 @@ export type MessageHistoryOptions = {
    * gramio's runtime dedup ensures it only runs once per update.
    */
   session: HistorySessionPluginRef
-  /** Ring buffer cap. Oldest entries dropped when exceeded. */
+  /** Ring buffer cap **per thread**. Oldest entries dropped when exceeded. */
   maxMessages: number
   /** Entries older than this (in days) are dropped on read. */
   retentionDays: number
@@ -105,7 +126,13 @@ export type MessageHistoryFeature = {
 // ─── derives ───────────────────────────────────────────────────────
 
 type HistoryDerives = {
+  /** Pruned snapshot for the CURRENT thread only. */
   history: ReadonlyArray<HistoryEntry>
+  /**
+   * Pruned snapshot of all threads, keyed by thread (`'general'` or
+   * stringified threadId). Use for cross-thread views (e.g. /export).
+   */
+  allHistory: Readonly<{ [threadKey: string]: ReadonlyArray<HistoryEntry> }>
 }
 
 // ─── helpers ───────────────────────────────────────────────────────
@@ -118,6 +145,19 @@ const prune = (
   const cutoffSec = Math.floor(Date.now() / 1000) - retentionDays * 86400
   const fresh = items.filter((e) => e.date >= cutoffSec)
   return fresh.slice(-maxMessages)
+}
+
+const pruneAll = (
+  shards: HistoryRecord['shards'],
+  maxMessages: number,
+  retentionDays: number,
+): HistoryRecord['shards'] => {
+  const out: HistoryRecord['shards'] = {}
+  for (const k of Object.keys(shards)) {
+    const pruned = prune(shards[k], maxMessages, retentionDays)
+    if (pruned.length > 0) out[k] = pruned
+  }
+  return out
 }
 
 // ─── feature factory ───────────────────────────────────────────────
@@ -148,8 +188,9 @@ const buildHistoryPlugin = (args: {
     '@adriangalilea/utils/bot/message-history',
   )
     .extend(sessionPlugin)
-    // Record incoming messages with text. Service messages, edits,
-    // and callback queries don't append — only direct user input.
+    // Record incoming messages with text into their thread's shard.
+    // Service messages, edits, and callback queries don't append —
+    // only direct user input.
     .on('message', async (ctx, next) => {
       if (ctx.text !== undefined) {
         const entry: HistoryEntry = {
@@ -157,21 +198,27 @@ const buildHistoryPlugin = (args: {
           date: ctx.payload.date,
           text: ctx.text,
         }
-        const cur = ctx.session.history?.items ?? []
-        ctx.session.history = {
-          items: [...prune(cur, maxMessages, retentionDays), entry].slice(
-            -maxMessages,
-          ),
-        }
+        const key = threadKey(ctx)
+        const shards = { ...(ctx.session.history?.shards ?? {}) }
+        const cur = shards[key] ?? []
+        shards[key] = [
+          ...prune(cur, maxMessages, retentionDays),
+          entry,
+        ].slice(-maxMessages)
+        ctx.session.history = { shards }
       }
       return next()
     })
-    // Pruned read-only view for handlers downstream.
-    .derive(['message', 'callback_query'], (ctx): HistoryDerives => ({
-      history: prune(
-        ctx.session.history?.items ?? [],
-        maxMessages,
-        retentionDays,
-      ) as ReadonlyArray<HistoryEntry>,
-    }))
+    // Read-only views for handlers downstream.
+    .derive(['message', 'callback_query'], (ctx): HistoryDerives => {
+      const shards = ctx.session.history?.shards ?? {}
+      const allPruned = pruneAll(shards, maxMessages, retentionDays)
+      const key = threadKey(ctx)
+      return {
+        history: (allPruned[key] ?? []) as ReadonlyArray<HistoryEntry>,
+        allHistory: allPruned as Readonly<{
+          [threadKey: string]: ReadonlyArray<HistoryEntry>
+        }>,
+      }
+    })
 }

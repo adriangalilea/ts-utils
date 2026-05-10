@@ -7,13 +7,13 @@
  * Manual test plan (commands are admin-only unless noted):
  *
  *   /start      — shows you which gate let the request through
- *                 (admin / default / store)
+ *                 (admin / default / store), plus thread/topic info
+ *                 for the chat the command was sent in.
  *   /stream     — exercises llmStream: streams a markdown reply with
  *                 bullets, code, and a blockquote
- *   <any text>  — exercises coalesceLongMessages. Just paste >4096
- *                 chars. The plain-message handler reports the
- *                 received length. If coalesce works you see one
- *                 number ≥4096 instead of two events of <4096 each.
+ *   <any text>  — echoes the message back into the same thread, plus
+ *                 exercises coalesceLongMessages. Paste >4096 chars
+ *                 and the echo should report the full length, not half.
  *   /access     — opens the persistent admin menu (Aprobados, Pendientes,
  *                 Denegados, Refresh, Cerrar)
  *   /simulate   — fakes "another user just DMed the bot"; you'll receive an
@@ -22,6 +22,22 @@
  *                 needed.
  *
  *   Ctrl-C      — gracefulStart catches SIGINT → bot.stop() → exit 0
+ *
+ * ## Threaded Mode demo (BotFather → bot → Bot Settings → Threaded Mode)
+ *
+ * With Threaded Mode enabled for the bot, your private chat can have
+ * multiple parallel topic threads. Each incoming message carries
+ * `message_thread_id`. gramio surfaces it as:
+ *
+ *   ctx.threadId            — number | undefined
+ *   ctx.isTopicMessage()    — true only for forum-supergroup topics
+ *   ctx.directMessagesTopic — set in private-chat threaded mode
+ *
+ * **gramio gap** — `ctx.send` auto-injects `message_thread_id` only
+ * when `isTopicMessage()` is true (`@gramio/contexts SendMixin`).
+ * Private-chat threaded mode doesn't set that flag, so we forward
+ * `message_thread_id: ctx.threadId` explicitly below to keep echo
+ * replies in the same thread.
  */
 import { Bot } from 'gramio'
 import { session } from '@gramio/session'
@@ -100,31 +116,38 @@ const bot = new Bot(token)
   // ─── /start ────────────────────────────────────────────────────
   .command('start', { description: 'Show what the bot can do' }, (ctx) => {
     if (!ctx.access.allowed) return
+    const threadLine =
+      `🧵 ctx.threadId: ${ctx.threadId ?? '(none)'}\n` +
+      `   isTopicMessage: ${ctx.isTopicMessage()}\n` +
+      `   directMessagesTopic: ${ctx.directMessagesTopic?.topicId ?? '(none)'}`
+    // ctx.say.send auto-forwards ctx.threadId (see bot/kit:inThread).
     return ctx.say.send({
       en:
         `👋 hi\n\n` +
         `🔑 access.source: ${ctx.access.source}\n` +
         `👑 isAdmin: ${ctx.isAdmin}\n` +
         `🆔 adminId: ${ctx.adminId}\n` +
-        `🌐 ctx.lang: ${ctx.lang}\n\n` +
+        `🌐 ctx.lang: ${ctx.lang}\n` +
+        `${threadLine}\n\n` +
         `Commands:\n` +
         `  /settings — user menu (language + forget/export/privacy)\n` +
         `  /stream   — streaming markdown demo\n` +
         `  /access   — admin menu (admin only)\n` +
         `  /simulate — fake access request (admin only)\n\n` +
-        `Paste >4096 chars to test coalesce.`,
+        `Paste >4096 chars to test coalesce. Send any text to see the echo + thread routing.`,
       es:
         `👋 hola\n\n` +
         `🔑 access.source: ${ctx.access.source}\n` +
         `👑 isAdmin: ${ctx.isAdmin}\n` +
         `🆔 adminId: ${ctx.adminId}\n` +
-        `🌐 ctx.lang: ${ctx.lang}\n\n` +
+        `🌐 ctx.lang: ${ctx.lang}\n` +
+        `${threadLine}\n\n` +
         `Comandos:\n` +
         `  /settings — menu user-facing (language + forget/export/privacy)\n` +
         `  /stream   — demo streaming markdown\n` +
         `  /access   — menú admin (sólo admin)\n` +
         `  /simulate — fake access request (sólo admin)\n\n` +
-        `Pega texto >4096 chars para coalesce.`,
+        `Pega texto >4096 chars para coalesce. Manda cualquier texto para ver el echo y el routing de thread.`,
     })
   })
 
@@ -142,24 +165,39 @@ const bot = new Bot(token)
     },
   )
 
-  // ─── plain text echo — exercises coalesce ──────────────────────
-  // Any non-command message: report the length we received.
-  // If you paste >4096 chars, Telegram splits it client-side; coalesce
-  // joins them; this handler should see ONE event with the full
-  // length (~paste size). If coalesce is broken, you'd see two events
-  // each with <4096.
+  // ─── plain text echo — exercises coalesce + thread routing ─────
+  // Any non-command message: echo back into the same thread, plus
+  // diagnostic info (length, thread ids). If you paste >4096 chars,
+  // Telegram splits it client-side; coalesce joins them; this handler
+  // should see ONE event with the full length. If coalesce is broken
+  // you'd see two events of <4096 each.
+  //
+  // For Threaded Mode demo: send the same text twice in two different
+  // threads — each echo should land in its own thread (not bleed across).
   .on('message', (ctx) => {
     if (!ctx.access.allowed) return
     if (ctx.text?.startsWith('/')) return // commands handled above
+
+    const len = ctx.text?.length ?? 0
+    const echo = ctx.text ?? '(non-text message)'
+    // Cap the echo at 500 chars in the reply text so long pastes don't
+    // double-render (coalesce stats are the point, not the content).
+    const echoTrimmed = echo.length > 500 ? `${echo.slice(0, 500)}…` : echo
+
+    const threadInfo =
+      ctx.threadId !== undefined
+        ? `🧵 thread: ${ctx.threadId}` +
+          (ctx.directMessagesTopic
+            ? ' (private-chat topic)'
+            : ctx.isTopicMessage()
+              ? ' (forum-supergroup topic)'
+              : ' (raw threadId, no topic flag set)')
+        : '🧵 no thread'
+
+    // ctx.say.send auto-forwards ctx.threadId (see bot/kit:inThread).
     return ctx.say.send({
-      en:
-        `📏 received: ${ctx.text?.length ?? 0} chars\n\n` +
-        `If you pasted long text and this number is the full length ` +
-        `(not half), coalesce works.`,
-      es:
-        `📏 recibido: ${ctx.text?.length ?? 0} chars\n\n` +
-        `Si pegaste un texto largo y este número es la longitud ` +
-        `total (no la mitad), coalesce funciona.`,
+      en: `📏 ${len} chars · ${threadInfo}\n\n🔁 echo:\n${echoTrimmed}`,
+      es: `📏 ${len} chars · ${threadInfo}\n\n🔁 echo:\n${echoTrimmed}`,
     })
   })
 
