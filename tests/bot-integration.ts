@@ -100,8 +100,21 @@ const bot = new Bot(token)
   // ─── /start ────────────────────────────────────────────────────
   .command('start', { description: 'Show what the bot can do' }, (ctx) => {
     if (!ctx.access.allowed) return
-    return ctx.send(
-      `👋 hola\n\n` +
+    return ctx.say.send({
+      en:
+        `👋 hi\n\n` +
+        `🔑 access.source: ${ctx.access.source}\n` +
+        `👑 isAdmin: ${ctx.isAdmin}\n` +
+        `🆔 adminId: ${ctx.adminId}\n` +
+        `🌐 ctx.lang: ${ctx.lang}\n\n` +
+        `Commands:\n` +
+        `  /settings — user menu (language + forget/export/privacy)\n` +
+        `  /stream   — streaming markdown demo\n` +
+        `  /access   — admin menu (admin only)\n` +
+        `  /simulate — fake access request (admin only)\n\n` +
+        `Paste >4096 chars to test coalesce.`,
+      es:
+        `👋 hola\n\n` +
         `🔑 access.source: ${ctx.access.source}\n` +
         `👑 isAdmin: ${ctx.isAdmin}\n` +
         `🆔 adminId: ${ctx.adminId}\n` +
@@ -112,7 +125,7 @@ const bot = new Bot(token)
         `  /access   — menú admin (sólo admin)\n` +
         `  /simulate — fake access request (sólo admin)\n\n` +
         `Pega texto >4096 chars para coalesce.`,
-    )
+    })
   })
 
   // ─── /stream — exercises llmStream ─────────────────────────────
@@ -138,11 +151,16 @@ const bot = new Bot(token)
   .on('message', (ctx) => {
     if (!ctx.access.allowed) return
     if (ctx.text?.startsWith('/')) return // commands handled above
-    return ctx.send(
-      `📏 recibido: ${ctx.text?.length ?? 0} chars\n\n` +
+    return ctx.say.send({
+      en:
+        `📏 received: ${ctx.text?.length ?? 0} chars\n\n` +
+        `If you pasted long text and this number is the full length ` +
+        `(not half), coalesce works.`,
+      es:
+        `📏 recibido: ${ctx.text?.length ?? 0} chars\n\n` +
         `Si pegaste un texto largo y este número es la longitud ` +
         `total (no la mitad), coalesce funciona.`,
-    )
+    })
   })
 
   // ─── /simulate — fake "stranger DMed the bot" ──────────────────
@@ -164,10 +182,14 @@ const bot = new Bot(token)
         },
         'hola, ¿me dejas usar tu bot?',
       )
-      await ctx.send(
-        `🧪 simulated request from id ${fakeId}.\n` +
+      await ctx.say.send({
+        en:
+          `🧪 simulated request from id ${fakeId}.\n` +
+          `Check above — admin notification with ✅/❌ should have arrived.`,
+        es:
+          `🧪 simulated request from id ${fakeId}.\n` +
           `Mira arriba — debería haber llegado la notificación con ✅/❌.`,
-      )
+      })
     },
   )
 

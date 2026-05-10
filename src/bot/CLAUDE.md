@@ -12,7 +12,7 @@ optional** — install only what the subpaths you import need.
 | `bot/kit` | `gracefulStart(bot, opts?)` — SIGINT/SIGTERM → `bot.stop()` → exit; force-kills if shutdown hangs; calls `bot.syncCommands()` automatically before `bot.start()`. `adminContext({ adminId? })` — reads `TELEGRAM_ADMIN_ID` from KEV with optional hardcoded fallback, decorates `ctx.adminId` + `ctx.isAdmin`. |
 | `bot/access-control` | `accessControl({ session, storage, defaults? })` — gates non-admin/non-default users; admin gets DM with `[✅ Aprobar][❌ Denegar]` on first attempt; persistent `/access` admin menu for revoke/reapprove/list. Exposes `simulateAccessRequest()` for tests. |
 | `bot/coalesce` | `coalesceLongMessages({ minLeadingLength?, windowMs?, acrossUsers?, log? })` — joins client-split inbound messages back into one event. Also exports `isCoalescent(prev, curr, opts)` as a pure utility. |
-| `bot/language` | `language({ session, supported, default, scope?, labels? })` — per-user BCP-47 preference; resolves `ctx.lang` (typed); supplies a `menuItem` for `botMenu`. |
+| `bot/language` | `language({ session, supported, default, scope?, labels? })` — per-user BCP-47 preference; resolves `ctx.lang` (typed); decorates `ctx.say` (callable polyglot resolver + `.send` / `.edit` / `.answer` methods); supplies a `menuItem` for `botMenu`. |
 | `bot/llm-stream` | `llmStream()` — `ctx.startStream()` returns a `MarkdownStreamer`; debounced `editMessageText`, splits at 4000 chars on paragraph/line/word boundary, parses Markdown locally so malformed mid-stream markup degrades to plain text. |
 | `bot/menu` | `botMenu({ command, description, items, privacy?, personalData?, adminContact })` — `/settings` command + InlineKeyboard router. With `personalData: { storage }`, auto-adds 🗑 Forget + 📥 Export buttons. |
 | `bot/message-history` | `messageHistory({ session, maxMessages, retentionDays })` — opt-in per-user ring buffer with retention; exposes `ctx.history` (read-only pruned snapshot). |
@@ -90,6 +90,32 @@ await gracefulStart(bot)
    plugins that internally `.extend(userSession)` for type flow.
 
 ---
+
+## Polyglot strings — the hard rule
+
+Every user-facing string this library emits is an **inline polyglot
+literal** resolved through `say()` from `@adriangalilea/utils/say`. No
+message bundle, no central registry, no extraction tool.
+
+```ts
+// inside this library:
+await ctx.send(say({ en: 'No access.', es: 'Sin acceso.' }, ctxLang(ctx)))
+
+// in your handlers:
+ctx.say.send({ en: 'Welcome', es: 'Bienvenido' })
+ctx.say({ en: 'Continue', es: 'Continuar' })  // returns the string
+```
+
+Recipient's language comes from `ctx.session.language` (set by
+`bot/language`). When the recipient is a different user from the ctx
+(admin notifying a subject), the plugin reads the subject's stored
+`language` via `loadFullRecord(storage, userId)` and falls back to
+`'en'`.
+
+The whole API is in `@adriangalilea/utils/say` (~30 LOC):
+`say(value, lang)` standalone and `type Polyglot<L>`. The bot-bound
+form `ctx.say` is added by `bot/language` and exposes the namespace
+with `.send / .edit / .answer` methods.
 
 ## Architecture: shared session, one record per user
 

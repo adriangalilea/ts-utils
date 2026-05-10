@@ -248,6 +248,34 @@ newMessages = [{ id: '2', from: 'bob', text: 'hey' }]
 
 Saves state to: `$XDG_STATE_HOME/unseen/{name}.json`
 
+### Polyglot strings (`say`)
+
+A typed multi-language string is just an object literal `{ en, es, … }` — the keys are the source of truth, the TS compiler enforces completeness, there's no JSON file / extraction tool / registry.
+
+```typescript
+import { say, type Polyglot } from '@adriangalilea/utils/say'
+
+say({ en: 'Hello', es: 'Hola' }, 'es')       // → 'Hola'
+say({ en: 'Hello', es: 'Hola' }, 'fr')       // TS error: '"fr"' not in '"en" | "es"'
+
+// parametric — closures, no wrapper:
+const greeting = (name: string) => ({ en: `Hi ${name}`, es: `Hola ${name}` })
+say(greeting('Adrian'), 'es')                 // → 'Hola Adrian'
+
+// type your own adapter:
+const notify = (msg: Polyglot<'en' | 'es'>, lang: 'en' | 'es') =>
+  transport.send(say(msg, lang))
+```
+
+In a bot, `bot/language` adds `ctx.say` — a callable namespace bound to `ctx.lang`:
+
+```typescript
+ctx.say({ en: 'Continue', es: 'Continuar' })       // → string
+await ctx.say.send({ en: 'Hi', es: 'Hola' })       // → ctx.send(resolved)
+await ctx.say.edit({ en: 'Done', es: 'Listo' })    // → ctx.editText (callback only)
+await ctx.say.answer({ en: 'OK', es: 'OK' })       // → ctx.answer (callback only)
+```
+
 ### Telegram bot plugins (GramIO)
 
 Plugins for personal Telegram bots built on [GramIO](https://gramio.dev). Each plugin lives at its own subpath; peer deps (`gramio`, `@gramio/storage`, `@gramio/session`, `@gramio/format`, `marked`) are **all optional** — install only what you import.

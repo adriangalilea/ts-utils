@@ -73,17 +73,36 @@ import {
 } from 'gramio'
 import type { Storage } from '@gramio/storage'
 
+import { say, type Polyglot } from '../say/index.js'
+
 // ─── public types ──────────────────────────────────────────────────
 
 type MenuCtx = {
   bot: unknown
   from?: { id: number }
   chat?: { id: number; type: string }
+  session?: { language?: string }
 }
 
-type Label = string | ((ctx: MenuCtx) => string)
+/**
+ * Anything a button or header can render as. Authoring a polyglot
+ * label is just an inline `{ en, es }` literal — `say()` resolves it
+ * to the recipient's language at render time.
+ *
+ *   label: 'Static'
+ *   label: { en: 'Settings', es: 'Ajustes' }
+ *   label: (ctx) => `Hi ${ctx.from?.firstName}`
+ *   label: (ctx) => ({ en: `Hi ${name}`, es: `Hola ${name}` })
+ */
+type Label =
+  | string
+  | Polyglot<string>
+  | ((ctx: MenuCtx) => string | Polyglot<string>)
 type Predicate = (ctx: MenuCtx) => boolean
 type Action = (ctx: MenuCtx) => Promise<void> | void
+
+const FALLBACK_LANG = 'en'
+const ctxLang = (ctx: MenuCtx): string => ctx.session?.language ?? FALLBACK_LANG
 
 export type MenuItem =
   | { id: string; label: Label; action: Action; order?: number; visible?: Predicate }
@@ -148,7 +167,7 @@ export type BotMenuOptions = {
 const DEFAULT_COMMAND = 'settings'
 const DEFAULT_DESCRIPTION = 'Open settings menu'
 const DEFAULT_PRIVACY_URL = 'https://telegram.org/privacy-tpa'
-const DEFAULT_HEADER = '⚙️ Settings'
+const DEFAULT_HEADER: Polyglot<string> = { en: '⚙️ Settings', es: '⚙️ Ajustes' }
 const DEFAULT_SESSION_KEY = (userId: number) => String(userId)
 
 // ─── callback data schemas ─────────────────────────────────────────
@@ -214,8 +233,11 @@ export const botMenu = (opts: BotMenuOptions): BotMenu => new BotMenu(opts)
 
 // ─── internal: rendering + plugin ──────────────────────────────────
 
-const labelOf = (l: Label, ctx: MenuCtx): string =>
-  typeof l === 'function' ? l(ctx) : l
+const labelOf = (l: Label, ctx: MenuCtx): string => {
+  const resolved = typeof l === 'function' ? l(ctx) : l
+  if (typeof resolved === 'string') return resolved
+  return say(resolved, ctxLang(ctx))
+}
 
 const itemsForPath = (root: MenuItem[], path: string[]): MenuItem[] | null => {
   if (path.length === 0) return root
@@ -264,30 +286,46 @@ const renderKeyboard = (
     kb.row()
   }
 
+  const lang = ctxLang(ctx)
   if (parentPath.length === 0) {
     // GDPR rights buttons at the root view.
     if (menu._opts.personalData) {
-      kb.text('🗑 Forget my data', actCb.pack({ path: '_forget' }))
+      kb.text(
+        say({ en: '🗑 Forget my data', es: '🗑 Olvidar mis datos' }, lang),
+        actCb.pack({ path: '_forget' }),
+      )
       kb.row()
-      kb.text('📥 Export my data', exportCb.pack({}))
+      kb.text(
+        say({ en: '📥 Export my data', es: '📥 Exportar mis datos' }, lang),
+        exportCb.pack({}),
+      )
       kb.row()
     }
     // Privacy link.
-    kb.url('📖 Privacy', menu._opts.privacy)
+    kb.url(say({ en: '📖 Privacy', es: '📖 Privacidad' }, lang), menu._opts.privacy)
     kb.row()
   } else {
     const backPath = parentPath.slice(0, -1).join('.')
-    kb.text('⬅️ Back', navCb.pack({ path: backPath || '_root' }))
+    kb.text(
+      say({ en: '⬅️ Back', es: '⬅️ Volver' }, lang),
+      navCb.pack({ path: backPath || '_root' }),
+    )
   }
 
   return kb
 }
 
-const renderConfirmForget = (): InlineKeyboard =>
+const renderConfirmForget = (lang: string): InlineKeyboard =>
   new InlineKeyboard()
-    .text('✅ Confirm delete', forgetConfirmCb.pack({}))
+    .text(
+      say({ en: '✅ Confirm delete', es: '✅ Confirmar borrado' }, lang),
+      forgetConfirmCb.pack({}),
+    )
     .row()
-    .text('⬅️ Cancel', forgetCancelCb.pack({}))
+    .text(
+      say({ en: '⬅️ Cancel', es: '⬅️ Cancelar' }, lang),
+      forgetCancelCb.pack({}),
+    )
 
 const buildMenuPlugin = (menu: BotMenu) => {
   const { command, description, header, personalData, adminContact } = menu._opts
@@ -299,11 +337,14 @@ const buildMenuPlugin = (menu: BotMenu) => {
     })
     // Navigate (root / submenu)
     .callbackQuery(navCb, async (ctx) => {
+      const lang = ctxLang(ctx)
       const raw = ctx.queryData.path
       const segments = raw === '_root' ? [] : raw.split('.')
       const items = itemsForPath(menu._items, segments)
       if (!items) {
-        await ctx.answer({ text: 'Menu out of date.' })
+        await ctx.answer({
+          text: say({ en: 'Menu out of date.', es: 'Menú obsoleto.' }, lang),
+        })
         return
       }
       await ctx.answer({})
@@ -316,15 +357,26 @@ const buildMenuPlugin = (menu: BotMenu) => {
     })
     // Action items + the forget pre-confirmation
     .callbackQuery(actCb, async (ctx) => {
+      const lang = ctxLang(ctx)
       const raw = ctx.queryData.path
       if (raw === '_forget') {
         await ctx.answer({})
         try {
           await ctx.editText(
-            '⚠️ Delete all your data?\n\n' +
-              'This removes the session record we keep about you ' +
-              '(preferences, history, access state). Not reversible.',
-            { reply_markup: renderConfirmForget() },
+            say(
+              {
+                en:
+                  '⚠️ Delete all your data?\n\n' +
+                  'This removes the session record we keep about you ' +
+                  '(preferences, history, access state). Not reversible.',
+                es:
+                  '⚠️ ¿Borrar todos tus datos?\n\n' +
+                  'Esto elimina el registro de sesión que guardamos sobre ti ' +
+                  '(preferencias, historial, estado de acceso). No se puede deshacer.',
+              },
+              lang,
+            ),
+            { reply_markup: renderConfirmForget(lang) },
           )
         } catch {
           /* ignore */
@@ -333,7 +385,9 @@ const buildMenuPlugin = (menu: BotMenu) => {
       }
       const item = itemForPath(menu._items, raw.split('.'))
       if (!item || !('action' in item)) {
-        await ctx.answer({ text: 'Item not found.' })
+        await ctx.answer({
+          text: say({ en: 'Item not found.', es: 'Elemento no encontrado.' }, lang),
+        })
         return
       }
       await ctx.answer({})
@@ -341,26 +395,51 @@ const buildMenuPlugin = (menu: BotMenu) => {
     })
     // Forget — confirm path
     .callbackQuery(forgetConfirmCb, async (ctx) => {
+      const lang = ctxLang(ctx)
       if (!personalData) {
-        await ctx.answer({ text: 'Not configured.', show_alert: true })
+        await ctx.answer({
+          text: say({ en: 'Not configured.', es: 'No configurado.' }, lang),
+          show_alert: true,
+        })
         return
       }
       const userId = ctx.from?.id
-      if (userId === undefined) return ctx.answer({ text: 'No user.' })
+      if (userId === undefined)
+        return ctx.answer({
+          text: say({ en: 'No user.', es: 'Sin usuario.' }, lang),
+        })
 
       try {
         await personalData.storage.delete(personalData.sessionKey(userId))
-        await ctx.answer({ text: 'Deleted.' })
+        await ctx.answer({
+          text: say({ en: 'Deleted.', es: 'Borrado.' }, lang),
+        })
         try {
-          await ctx.editText('✅ Your data has been deleted.')
+          await ctx.editText(
+            say(
+              {
+                en: '✅ Your data has been deleted.',
+                es: '✅ Tus datos han sido borrados.',
+              },
+              lang,
+            ),
+          )
         } catch {
           /* ignore */
         }
       } catch (e) {
         console.error('[menu] /forget failed', e)
-        await ctx.answer({ text: 'Failed.' })
+        await ctx.answer({
+          text: say({ en: 'Failed.', es: 'Falló.' }, lang),
+        })
         await ctx.send(
-          `❌ Could not delete your data.\n\nPlease contact ${adminContact}.`,
+          say(
+            {
+              en: `❌ Could not delete your data.\n\nPlease contact ${adminContact}.`,
+              es: `❌ No se han podido borrar tus datos.\n\nContacta con ${adminContact}.`,
+            },
+            lang,
+          ),
         )
       }
     })
@@ -375,12 +454,19 @@ const buildMenuPlugin = (menu: BotMenu) => {
     })
     // Export — JSON file with the user's whole session record
     .callbackQuery(exportCb, async (ctx) => {
+      const lang = ctxLang(ctx)
       if (!personalData) {
-        await ctx.answer({ text: 'Not configured.', show_alert: true })
+        await ctx.answer({
+          text: say({ en: 'Not configured.', es: 'No configurado.' }, lang),
+          show_alert: true,
+        })
         return
       }
       const userId = ctx.from?.id
-      if (userId === undefined) return ctx.answer({ text: 'No user.' })
+      if (userId === undefined)
+        return ctx.answer({
+          text: say({ en: 'No user.', es: 'Sin usuario.' }, lang),
+        })
 
       const record =
         (await personalData.storage.get(personalData.sessionKey(userId))) ?? {}
@@ -392,11 +478,22 @@ const buildMenuPlugin = (menu: BotMenu) => {
 
       await ctx.answer({})
       try {
-        await ctx.sendDocument(file, { caption: '📥 Your data export' })
+        await ctx.sendDocument(file, {
+          caption: say(
+            { en: '📥 Your data export', es: '📥 Exportación de tus datos' },
+            lang,
+          ),
+        })
       } catch (e) {
         console.error('[menu] /export sendDocument failed', e)
         await ctx.send(
-          `❌ Could not send your data export.\n\nPlease contact ${adminContact}.`,
+          say(
+            {
+              en: `❌ Could not send your data export.\n\nPlease contact ${adminContact}.`,
+              es: `❌ No se ha podido enviar la exportación de tus datos.\n\nContacta con ${adminContact}.`,
+            },
+            lang,
+          ),
         )
       }
     })

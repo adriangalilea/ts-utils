@@ -59,6 +59,7 @@
 import { CallbackData, type DeriveDefinitions, Plugin } from 'gramio'
 import { session } from '@gramio/session'
 
+import { say, type Polyglot } from '../say/index.js'
 import type { MenuItem } from './menu.js'
 
 // ─── public types ──────────────────────────────────────────────────
@@ -120,8 +121,11 @@ export type LanguageOptions<Langs extends readonly string[]> = {
    * derived from the language code.
    */
   labels?: Partial<Record<Langs[number], string>>
-  /** Header text for the language sub-menu. Default `'🌐 Language'`. */
-  menuLabel?: string
+  /**
+   * Header text for the language sub-menu. Accepts a plain string or a
+   * polyglot literal. Default: `{ en: '🌐 Language', es: '🌐 Idioma' }`.
+   */
+  menuLabel?: string | Polyglot<string>
 }
 
 export type LanguageFeature<Lang extends string> = {
@@ -131,7 +135,74 @@ export type LanguageFeature<Lang extends string> = {
 
 // ─── derives ───────────────────────────────────────────────────────
 
-type LanguageDerives<Lang extends string> = { lang: Lang }
+/**
+ * Callable namespace attached to `ctx.say`.
+ *
+ *   ctx.say({ en, es })           — resolves to a string at ctx.lang
+ *   ctx.say.send({ en, es }, p?)  — ctx.send with the resolved string
+ *   ctx.say.edit({ en, es }, p?)  — ctx.editText (callback ctx only)
+ *   ctx.say.answer({ en, es }, p?)— ctx.answer (callback ctx only)
+ *
+ * `.send` is valid wherever `ctx.send` exists; `.edit` / `.answer`
+ * require a callback_query ctx. Calling the wrong one for the event
+ * type raises a clear TypeError at runtime — the type-level declares
+ * them uniformly to keep the surface flat.
+ */
+export type Sayer<L extends string> = {
+  <V extends Polyglot<L>>(value: V): string
+  send<V extends Polyglot<L>>(value: V, params?: object): Promise<unknown>
+  edit<V extends Polyglot<L>>(value: V, params?: object): Promise<unknown>
+  answer<V extends Polyglot<L>>(value: V, params?: object): Promise<unknown>
+}
+
+type LanguageDerives<Lang extends string> = {
+  lang: Lang
+  say: Sayer<Lang>
+}
+
+const buildSayer = <L extends string>(
+  ctx: unknown,
+  lang: L,
+  fallback: L,
+): Sayer<L> => {
+  const resolve = <V extends Polyglot<L>>(value: V): string =>
+    value[lang] ?? value[fallback] ?? say(value as Polyglot<string>, lang)
+
+  const fn = (<V extends Polyglot<L>>(value: V): string =>
+    resolve(value)) as Sayer<L>
+
+  type CtxLike = {
+    send?: (text: string, params?: object) => Promise<unknown>
+    editText?: (text: string, params?: object) => Promise<unknown>
+    answer?: (params: object) => Promise<unknown>
+  }
+  const c = ctx as CtxLike
+
+  fn.send = (value, params) => {
+    if (typeof c.send !== 'function') {
+      throw new TypeError('ctx.say.send: ctx.send is not available on this event')
+    }
+    return c.send(resolve(value), params)
+  }
+  fn.edit = (value, params) => {
+    if (typeof c.editText !== 'function') {
+      throw new TypeError(
+        'ctx.say.edit: ctx.editText is only available on callback_query events',
+      )
+    }
+    return c.editText(resolve(value), params)
+  }
+  fn.answer = (value, params) => {
+    if (typeof c.answer !== 'function') {
+      throw new TypeError(
+        'ctx.say.answer: ctx.answer is only available on callback_query events',
+      )
+    }
+    return c.answer({ text: resolve(value), ...(params ?? {}) })
+  }
+
+  return fn
+}
 
 // ─── scope helpers ─────────────────────────────────────────────────
 
@@ -197,7 +268,8 @@ export const language = <const Langs extends readonly string[]>(
 
   const scopeOpt = opts.scope
   const labels = (opts.labels ?? {}) as Record<string, string>
-  const menuLabel = opts.menuLabel ?? '🌐 Language'
+  const menuLabel: string | Polyglot<string> =
+    opts.menuLabel ?? { en: '🌐 Language', es: '🌐 Idioma' }
 
   // Canonicalize all supported tags at construction.
   const canonical = opts.supported.map((l): Lang => {
@@ -297,25 +369,28 @@ const buildLanguagePlugin = <Lang extends string>(args: {
       // (ctx.session: SessionLike) flow into our handlers below.
       .extend(sessionPlugin)
       .derive(['message', 'callback_query'], (ctx) => {
-        // 1) stored override
-        const stored = ctx.session.language
-        if (stored && canonicalSet.has(stored)) {
-          return { lang: stored as Lang }
+        const resolveLang = (): Lang => {
+          // 1) stored override
+          const stored = ctx.session.language
+          if (stored && canonicalSet.has(stored)) return stored as Lang
+
+          // 2) Telegram hint — only when in user-scoped resolution
+          const chatType =
+            ctx.is('message')
+              ? ctx.chat.type
+              : ctx.message?.chat.type ?? 'private'
+          const strategy = resolveScope(scopeOpt, chatType)
+          if (strategy === 'user') {
+            const hint = matchSupported(ctx.from.languageCode)
+            if (hint) return hint
+          }
+
+          // 3) configured default
+          return defaultLanguage
         }
 
-        // 2) Telegram hint — only when in user-scoped resolution
-        const chatType =
-          ctx.is('message')
-            ? ctx.chat.type
-            : ctx.message?.chat.type ?? 'private'
-        const strategy = resolveScope(scopeOpt, chatType)
-        if (strategy === 'user') {
-          const hint = matchSupported(ctx.from.languageCode)
-          if (hint) return { lang: hint }
-        }
-
-        // 3) configured default
-        return { lang: defaultLanguage }
+        const lang = resolveLang()
+        return { lang, say: buildSayer<Lang>(ctx, lang, defaultLanguage) }
       })
   )
 }

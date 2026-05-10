@@ -15,6 +15,9 @@ export * from './universal/currency/index.js'
 // Offensive programming - pure throws, zero dependencies
 export * from './offensive.js'
 
+// Polyglot strings — TS-enforced multi-language values
+export * from './say/index.js'
+
 // Platform-specific utilities
 // These will throw helpful errors in browser environment when used
 export * from './platform/file.js'

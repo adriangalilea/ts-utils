@@ -11,7 +11,7 @@
  *      │     no  → drop + notify admin (rate-limited)    │
  *      └─────────────────────────────────────────────────┘
  *                       │
- *           admin gets DM with [✅ Aprobar] [❌ Denegar]
+ *           admin gets DM with [✅ Approve] [❌ Deny]
  *                       │
  *                  admin taps
  *                       │
@@ -33,11 +33,18 @@
  *
  *     storage['ac:index'] = { pending: [...ids], approved: [...], denied: [...] }
  *
- * **Cross-user mutations.** When the admin taps `[✅ Aprobar]` on
+ * **Cross-user mutations.** When the admin taps `[✅ Approve]` on
  * Pepe's notification, `ctx` is the admin's, so `ctx.session` is the
  * admin's record — useless for mutating Pepe. We reach for Pepe's
  * record directly via `storage.get(String(pepeId))`, preserve other
  * plugins' fields in it (read-modify-write), and put it back.
+ *
+ * **i18n.** Every user-facing string is an inline `{ en, es }`
+ * polyglot literal resolved via `say(value, lang)` at the call site
+ * — no message bundle, no override registry. The recipient's stored
+ * `language` field (set by `bot/language`) picks the variant; falls
+ * back to `'en'`. Want a different default? Set `language` on the
+ * relevant session record before this plugin fires.
  *
  * **Composes with**:
  *   - `adminContext` (kit.ts) — required, gives us `ctx.adminId` /
@@ -77,14 +84,12 @@ import {
 import { session } from '@gramio/session'
 import { type Storage } from '@gramio/storage'
 
-// Cross-user mutations (admin approves Pepe → write to Pepe's session)
-// hit `storage` directly using the same key format `@gramio/session`
-// uses by default: `String(userId)`. We preserve other plugins' fields
-// in the same session record by read-modify-write.
+import { say } from '../say/index.js'
+
 const INDEX_KEY = 'ac:index'
 const FIRST_MSG_LIMIT = 200
-const DEFAULT_DENY_MSG = 'Este bot es privado. Tu solicitud se ha enviado al admin.'
 const DEFAULT_THROTTLE_MS = 6 * 60 * 60 * 1000
+const FALLBACK_LANG = 'en'
 
 /** gramio's `@gramio/session` default `getSessionKey` is `String(senderId)`. */
 const sessionKey = (userId: number) => String(userId)
@@ -149,8 +154,11 @@ export type AccessInfo =
       reason: 'denied' | 'pending' | 'unknown' | 'no-sender'
     }
 
-/** Loose session shape — this plugin only touches the `access` field. */
-type SessionLike = { access?: AccessRecord }
+/**
+ * Loose session shape — this plugin writes `access`; it READS `language`
+ * to localize messages it sends to the subject. Both are optional.
+ */
+type SessionLike = { access?: AccessRecord; language?: string }
 
 /** @internal — kept unexported so it doesn't clash with peers' refs. */
 type AcSessionPluginRef = ReturnType<typeof session<SessionLike, 'session'>>
@@ -170,8 +178,8 @@ export type AccessControlOptions = {
   storage: Storage
   /** Always-allowed user ids, hardcoded. Bypass the entire flow. */
   defaults?: ReadonlyArray<number>
-  /** Reply sent to denied users on first attempt. `false` to silence. */
-  denyMessage?: string | false
+  /** Pass `false` to silence the first-attempt reply to denied users. */
+  silentDeny?: boolean
   /** Min ms between repeat admin notifications for the same user. Default 6h. */
   notifyThrottleMs?: number
   /** Callbacks for your own logging / metrics. */
@@ -232,27 +240,35 @@ const requestNotificationText = (
   uid: number,
   r: AccessRecord,
   repeat: boolean,
+  lang: string,
 ): string => {
   const parts = [
-    repeat ? '🔁 Acceso re-solicitado' : '🔔 Acceso solicitado',
+    say(
+      repeat
+        ? { en: '🔁 Access re-requested', es: '🔁 Acceso re-solicitado' }
+        : { en: '🔔 Access requested', es: '🔔 Acceso solicitado' },
+      lang,
+    ),
     '',
     `👤 ${formatUser(r.user, uid)}`,
     `🆔 ${uid}`,
-    `⏰ hace ${fmtAge(Date.now() - (r.requestedAt ?? Date.now()))}`,
+    `⏰ ${say({ en: 'ago', es: 'hace' }, lang)} ${fmtAge(Date.now() - (r.requestedAt ?? Date.now()))}`,
   ]
-  if (repeat) parts.push(`🔁 intentos: ${(r.rejectedAttempts ?? 0) + 1}`)
+  if (repeat) {
+    parts.push(
+      `🔁 ${say({ en: 'attempts', es: 'intentos' }, lang)}: ${(r.rejectedAttempts ?? 0) + 1}`,
+    )
+  }
   if (r.firstMessage) parts.push('', `💬 "${r.firstMessage}"`)
   return parts.join('\n')
 }
 
-const requestKeyboard = (uid: number) =>
+const requestKeyboard = (uid: number, lang: string) =>
   new InlineKeyboard()
-    .text('✅ Aprobar', acApprove.pack({ uid }))
-    .text('❌ Denegar', acDeny.pack({ uid }))
+    .text(say({ en: '✅ Approve', es: '✅ Aprobar' }, lang), acApprove.pack({ uid }))
+    .text(say({ en: '❌ Deny', es: '❌ Denegar' }, lang), acDeny.pack({ uid }))
 
 // ─── index helpers ─────────────────────────────────────────────────
-
-const emptyIndex = (): AccessIndex => ({ pending: [], approved: [], denied: [] })
 
 const loadIndex = async (storage: Storage): Promise<AccessIndex> => {
   const raw = (await storage.get(INDEX_KEY)) as Partial<AccessIndex> | undefined
@@ -306,7 +322,10 @@ const indexMove = async (
 // (`String(userId)`). We preserve OTHER plugins' fields in the same
 // record via read-modify-write.
 
-type FullSessionRecord = { access?: AccessRecord } & Record<string, unknown>
+type FullSessionRecord = {
+  access?: AccessRecord
+  language?: string
+} & Record<string, unknown>
 
 const loadFullRecord = async (
   storage: Storage,
@@ -332,13 +351,22 @@ const loadAccess = async (
   return full.access
 }
 
+/** Read recipient's stored language (set by bot/language); fallback to en. */
+const langOfUser = async (storage: Storage, userId: number): Promise<string> => {
+  const full = await loadFullRecord(storage, userId)
+  return full.language ?? FALLBACK_LANG
+}
+
+/** Read current ctx's lang. */
+const ctxLang = (ctx: { session: SessionLike }): string =>
+  ctx.session.language ?? FALLBACK_LANG
+
 // ─── plugin ────────────────────────────────────────────────────────
 
 export const accessControl = (opts: AccessControlOptions) => {
   const { session: sessionPlugin, storage } = opts
   const defaults = new Set(opts.defaults ?? [])
-  const denyMessage =
-    opts.denyMessage === false ? null : (opts.denyMessage ?? DEFAULT_DENY_MSG)
+  const silentDeny = opts.silentDeny === true
   const throttleMs = opts.notifyThrottleMs ?? DEFAULT_THROTTLE_MS
 
   return (
@@ -399,7 +427,10 @@ export const accessControl = (opts: AccessControlOptions) => {
 
         // Acknowledge unauthorized callback queries so the spinner clears.
         if (ctx.is('callback_query')) {
-          await ctx.answer({ text: 'Sin acceso.', show_alert: false })
+          await ctx.answer({
+            text: say({ en: 'No access.', es: 'Sin acceso.' }, ctxLang(ctx)),
+            show_alert: false,
+          })
           return
         }
         // Only message-shaped events have .text/.chat for our notification.
@@ -438,10 +469,11 @@ export const accessControl = (opts: AccessControlOptions) => {
         if (shouldNotify) {
           rec.lastNotifiedAt = now
           try {
+            const adminLang = await langOfUser(storage, ctx.adminId)
             await ctx.bot.api.sendMessage({
               chat_id: ctx.adminId,
-              text: requestNotificationText(userId, rec, !isFirstRequest),
-              reply_markup: requestKeyboard(userId),
+              text: requestNotificationText(userId, rec, !isFirstRequest, adminLang),
+              reply_markup: requestKeyboard(userId, adminLang),
             })
           } catch (e) {
             console.error(
@@ -455,9 +487,17 @@ export const accessControl = (opts: AccessControlOptions) => {
         // Persist the updated record to the user's session.
         ctx.session.access = rec
 
-        if (denyMessage && isFirstRequest) {
+        if (!silentDeny && isFirstRequest) {
           try {
-            await ctx.send(denyMessage)
+            await ctx.send(
+              say(
+                {
+                  en: 'This bot is private. Your request has been sent to the admin.',
+                  es: 'Este bot es privado. Tu solicitud se ha enviado al admin.',
+                },
+                ctxLang(ctx),
+              ),
+            )
           } catch {
             // user blocked the bot — irrelevant
           }
@@ -466,10 +506,18 @@ export const accessControl = (opts: AccessControlOptions) => {
       })
       // ─── admin actions ────────────────────────────────────────
       .callbackQuery(acApprove, async (ctx) => {
-        if (!ctx.isAdmin) return ctx.answer({ text: 'Solo admin.', show_alert: true })
+        const aLang = ctxLang(ctx)
+        if (!ctx.isAdmin)
+          return ctx.answer({
+            text: say({ en: 'Admin only.', es: 'Solo admin.' }, aLang),
+            show_alert: true,
+          })
         const uid = ctx.queryData.uid
         const rec = await loadAccess(storage, uid)
-        if (!rec) return ctx.answer({ text: 'No encontrado.' })
+        if (!rec)
+          return ctx.answer({
+            text: say({ en: 'Not found.', es: 'No encontrado.' }, aLang),
+          })
 
         const wasDenied = rec.status === 'denied'
         const wasPending = rec.status === 'pending'
@@ -488,23 +536,37 @@ export const accessControl = (opts: AccessControlOptions) => {
 
         if (rec.chatId !== undefined) {
           try {
+            const sLang = await langOfUser(storage, uid)
             await ctx.bot.api.sendMessage({
               chat_id: rec.chatId,
-              text: wasDenied
-                ? '✅ El admin reconsideró: ya tienes acceso.'
-                : '✅ Acceso concedido. Ya puedes usar el bot.',
+              text: say(
+                wasDenied
+                  ? {
+                      en: '✅ The admin reconsidered: you have access.',
+                      es: '✅ El admin reconsideró: ya tienes acceso.',
+                    }
+                  : {
+                      en: '✅ Access granted. You can use the bot now.',
+                      es: '✅ Acceso concedido. Ya puedes usar el bot.',
+                    },
+                sLang,
+              ),
             })
           } catch {
             // user blocked / chat gone
           }
         }
-        await ctx.answer({ text: '✅ Aprobado' })
+        await ctx.answer({
+          text: say({ en: '✅ Approved', es: '✅ Aprobado' }, aLang),
+        })
 
         if (ctx.queryData.v) {
-          await renderView(ctx, storage, defaults, ctx.queryData.v)
+          await renderView(ctx, storage, defaults, ctx.queryData.v, aLang)
         } else {
           try {
-            await ctx.editText(`✅ Aprobado · ${formatUser(rec.user, uid)}`)
+            await ctx.editText(
+              `${say({ en: '✅ Approved', es: '✅ Aprobado' }, aLang)} · ${formatUser(rec.user, uid)}`,
+            )
           } catch {
             // not always editable
           }
@@ -512,10 +574,18 @@ export const accessControl = (opts: AccessControlOptions) => {
         opts.onApprove?.({ userId: uid, approvedBy: ctx.adminId })
       })
       .callbackQuery(acDeny, async (ctx) => {
-        if (!ctx.isAdmin) return ctx.answer({ text: 'Solo admin.', show_alert: true })
+        const aLang = ctxLang(ctx)
+        if (!ctx.isAdmin)
+          return ctx.answer({
+            text: say({ en: 'Admin only.', es: 'Solo admin.' }, aLang),
+            show_alert: true,
+          })
         const uid = ctx.queryData.uid
         const rec = await loadAccess(storage, uid)
-        if (!rec) return ctx.answer({ text: 'No encontrado.' })
+        if (!rec)
+          return ctx.answer({
+            text: say({ en: 'Not found.', es: 'No encontrado.' }, aLang),
+          })
 
         const wasPending = rec.status === 'pending'
         rec.status = 'denied'
@@ -526,21 +596,29 @@ export const accessControl = (opts: AccessControlOptions) => {
 
         if (rec.chatId !== undefined) {
           try {
+            const sLang = await langOfUser(storage, uid)
             await ctx.bot.api.sendMessage({
               chat_id: rec.chatId,
-              text: '❌ Acceso denegado.',
+              text: say(
+                { en: '❌ Access denied.', es: '❌ Acceso denegado.' },
+                sLang,
+              ),
             })
           } catch {
             // ignore
           }
         }
-        await ctx.answer({ text: '❌ Denegado' })
+        await ctx.answer({
+          text: say({ en: '❌ Denied', es: '❌ Denegado' }, aLang),
+        })
 
         if (ctx.queryData.v) {
-          await renderView(ctx, storage, defaults, ctx.queryData.v)
+          await renderView(ctx, storage, defaults, ctx.queryData.v, aLang)
         } else {
           try {
-            await ctx.editText(`❌ Denegado · ${formatUser(rec.user, uid)}`)
+            await ctx.editText(
+              `${say({ en: '❌ Denied', es: '❌ Denegado' }, aLang)} · ${formatUser(rec.user, uid)}`,
+            )
           } catch {
             // ignore
           }
@@ -548,10 +626,18 @@ export const accessControl = (opts: AccessControlOptions) => {
         opts.onDeny?.({ userId: uid, deniedBy: ctx.adminId })
       })
       .callbackQuery(acRevoke, async (ctx) => {
-        if (!ctx.isAdmin) return ctx.answer({ text: 'Solo admin.', show_alert: true })
+        const aLang = ctxLang(ctx)
+        if (!ctx.isAdmin)
+          return ctx.answer({
+            text: say({ en: 'Admin only.', es: 'Solo admin.' }, aLang),
+            show_alert: true,
+          })
         const uid = ctx.queryData.uid
         const rec = await loadAccess(storage, uid)
-        if (!rec) return ctx.answer({ text: 'No encontrado.' })
+        if (!rec)
+          return ctx.answer({
+            text: say({ en: 'Not found.', es: 'No encontrado.' }, aLang),
+          })
 
         rec.status = 'denied'
         rec.deniedAt = Date.now()
@@ -561,24 +647,43 @@ export const accessControl = (opts: AccessControlOptions) => {
 
         if (rec.chatId !== undefined) {
           try {
+            const sLang = await langOfUser(storage, uid)
             await ctx.bot.api.sendMessage({
               chat_id: rec.chatId,
-              text: '↩️ Tu acceso al bot ha sido revocado.',
+              text: say(
+                {
+                  en: '↩️ Your bot access has been revoked.',
+                  es: '↩️ Tu acceso al bot ha sido revocado.',
+                },
+                sLang,
+              ),
             })
           } catch {
             // ignore
           }
         }
-        await ctx.answer({ text: '↩️ Revocado' })
-        await renderView(ctx, storage, defaults, 'approved')
+        await ctx.answer({
+          text: say({ en: '↩️ Revoked', es: '↩️ Revocado' }, aLang),
+        })
+        await renderView(ctx, storage, defaults, 'approved', aLang)
       })
       .callbackQuery(acView, async (ctx) => {
-        if (!ctx.isAdmin) return ctx.answer({ text: 'Solo admin.', show_alert: true })
+        const aLang = ctxLang(ctx)
+        if (!ctx.isAdmin)
+          return ctx.answer({
+            text: say({ en: 'Admin only.', es: 'Solo admin.' }, aLang),
+            show_alert: true,
+          })
         await ctx.answer({})
-        await renderView(ctx, storage, defaults, ctx.queryData.v)
+        await renderView(ctx, storage, defaults, ctx.queryData.v, aLang)
       })
       .callbackQuery(acClose, async (ctx) => {
-        if (!ctx.isAdmin) return ctx.answer({ text: 'Solo admin.', show_alert: true })
+        const aLang = ctxLang(ctx)
+        if (!ctx.isAdmin)
+          return ctx.answer({
+            text: say({ en: 'Admin only.', es: 'Solo admin.' }, aLang),
+            show_alert: true,
+          })
         await ctx.answer({})
         try {
           await ctx.message?.delete()
@@ -592,12 +697,16 @@ export const accessControl = (opts: AccessControlOptions) => {
           // Admin-only; hidden from Telegram's `/` menu so it doesn't
           // tempt other users to type it. Admin still invokes via /access.
           // See https://gramio.dev/triggers/command.html#commandmeta-fields
+          //
+          // Note: gramio's setMyCommands publishes ONE description per
+          // bot, not per language. English form used as the canonical.
           description: 'Admin: access control menu',
           hide: true,
         },
         async (ctx) => {
           if (!ctx.isAdmin) return
-          const v = await mainView(storage, defaults)
+          const aLang = ctxLang(ctx)
+          const v = mainView(await loadIndex(storage), defaults, aLang)
           await ctx.send(v.text, { reply_markup: v.keyboard })
         },
       )
@@ -618,15 +727,17 @@ const renderView = async (
   storage: Storage,
   defaults: ReadonlySet<number>,
   view: string,
+  lang: string,
 ): Promise<void> => {
+  const idx = await loadIndex(storage)
   const v =
     view === 'approved'
-      ? await listView(storage, 'approved', defaults)
+      ? await listView(storage, idx, 'approved', defaults, lang)
       : view === 'pending'
-        ? await listView(storage, 'pending', defaults)
+        ? await listView(storage, idx, 'pending', defaults, lang)
         : view === 'denied'
-          ? await listView(storage, 'denied', defaults)
-          : await mainView(storage, defaults)
+          ? await listView(storage, idx, 'denied', defaults, lang)
+          : mainView(idx, defaults, lang)
   try {
     await ctx.editText(v.text, { reply_markup: v.keyboard })
   } catch {
@@ -634,35 +745,43 @@ const renderView = async (
   }
 }
 
-const mainView = async (storage: Storage, defaults: ReadonlySet<number>) => {
-  const idx = await loadIndex(storage)
+const mainView = (
+  idx: AccessIndex,
+  defaults: ReadonlySet<number>,
+  lang: string,
+) => {
+  const approved = say({ en: 'Approved', es: 'Aprobados' }, lang)
+  const pending = say({ en: 'Pending', es: 'Pendientes' }, lang)
+  const denied = say({ en: 'Denied', es: 'Denegados' }, lang)
+
   const text = [
-    '🔐 Access Control',
+    say({ en: '🔐 Access Control', es: '🔐 Access Control' }, lang),
     '',
-    `✅ Aprobados: ${idx.approved.length}`,
-    `⏳ Pendientes: ${idx.pending.length}`,
-    `❌ Denegados: ${idx.denied.length}`,
-    `👑 Defaults: ${defaults.size} (hardcoded)`,
+    `✅ ${approved}: ${idx.approved.length}`,
+    `⏳ ${pending}: ${idx.pending.length}`,
+    `❌ ${denied}: ${idx.denied.length}`,
+    `👑 ${say({ en: 'Defaults', es: 'Defaults' }, lang)}: ${defaults.size} (hardcoded)`,
   ].join('\n')
 
   const keyboard = new InlineKeyboard()
-    .text(`✅ Aprobados (${idx.approved.length})`, acView.pack({ v: 'approved' }))
-    .text(`⏳ Pendientes (${idx.pending.length})`, acView.pack({ v: 'pending' }))
+    .text(`✅ ${approved} (${idx.approved.length})`, acView.pack({ v: 'approved' }))
+    .text(`⏳ ${pending} (${idx.pending.length})`, acView.pack({ v: 'pending' }))
     .row()
-    .text(`❌ Denegados (${idx.denied.length})`, acView.pack({ v: 'denied' }))
-    .text('🔄 Refresh', acView.pack({ v: 'main' }))
+    .text(`❌ ${denied} (${idx.denied.length})`, acView.pack({ v: 'denied' }))
+    .text(say({ en: '🔄 Refresh', es: '🔄 Refresh' }, lang), acView.pack({ v: 'main' }))
     .row()
-    .text('✖️ Cerrar', acClose.pack({}))
+    .text(say({ en: '✖️ Close', es: '✖️ Cerrar' }, lang), acClose.pack({}))
 
   return { text, keyboard }
 }
 
 const listView = async (
   storage: Storage,
+  idx: AccessIndex,
   filter: 'pending' | 'approved' | 'denied',
   defaults: ReadonlySet<number>,
+  lang: string,
 ) => {
-  const idx = await loadIndex(storage)
   const ids = idx[filter]
   // Cap at 20 to keep callback_data + rendering sane.
   const shownIds = ids.slice(0, 20)
@@ -672,11 +791,19 @@ const listView = async (
 
   const headerEmoji = filter === 'approved' ? '✅' : filter === 'pending' ? '⏳' : '❌'
   const headerLabel =
-    filter === 'approved' ? 'Aprobados' : filter === 'pending' ? 'Pendientes' : 'Denegados'
+    filter === 'approved'
+      ? say({ en: 'Approved', es: 'Aprobados' }, lang)
+      : filter === 'pending'
+        ? say({ en: 'Pending', es: 'Pendientes' }, lang)
+        : say({ en: 'Denied', es: 'Denegados' }, lang)
+
+  const back = say({ en: '⬅️ Back', es: '⬅️ Volver' }, lang)
 
   if (ids.length === 0) {
-    const text = `${headerEmoji} ${headerLabel} (0)\n\n(vacío)`
-    const keyboard = new InlineKeyboard().text('⬅️ Volver', acView.pack({ v: 'main' }))
+    const text =
+      `${headerEmoji} ${headerLabel} (0)\n\n` +
+      say({ en: '(empty)', es: '(vacío)' }, lang)
+    const keyboard = new InlineKeyboard().text(back, acView.pack({ v: 'main' }))
     return { text, keyboard }
   }
 
@@ -687,12 +814,14 @@ const listView = async (
     const { id, rec } = records[i]
     if (!rec) {
       // index referenced a missing record — show as placeholder
-      lines.push(`${i + 1}. id ${id} (datos perdidos)`)
+      lines.push(
+        `${i + 1}. id ${id} ${say({ en: '(data lost)', es: '(datos perdidos)' }, lang)}`,
+      )
       continue
     }
     const ageRef = rec.approvedAt ?? rec.deniedAt ?? rec.requestedAt ?? Date.now()
     lines.push(
-      `${i + 1}. ${formatUser(rec.user, id)} · hace ${fmtAge(Date.now() - ageRef)}` +
+      `${i + 1}. ${formatUser(rec.user, id)} · ${say({ en: 'ago', es: 'hace' }, lang)} ${fmtAge(Date.now() - ageRef)}` +
         (rec.messageCount ? ` · ${rec.messageCount} msgs` : ''),
     )
     if (filter === 'pending') {
@@ -701,22 +830,33 @@ const listView = async (
         .text(`❌ ${i + 1}`, acDeny.pack({ uid: id, v: 'pending' }))
         .row()
     } else if (filter === 'approved') {
-      keyboard.text(`↩️ Revocar #${i + 1}`, acRevoke.pack({ uid: id })).row()
+      keyboard
+        .text(
+          `${say({ en: '↩️ Revoke', es: '↩️ Revocar' }, lang)} #${i + 1}`,
+          acRevoke.pack({ uid: id }),
+        )
+        .row()
     } else if (filter === 'denied') {
       keyboard
-        .text(`✅ Reaprobar #${i + 1}`, acApprove.pack({ uid: id, v: 'denied' }))
+        .text(
+          `${say({ en: '✅ Reapprove', es: '✅ Reaprobar' }, lang)} #${i + 1}`,
+          acApprove.pack({ uid: id, v: 'denied' }),
+        )
         .row()
     }
   }
 
   if (ids.length > shownIds.length) {
-    lines.push('', `(+${ids.length - shownIds.length} más, no mostrados)`)
+    lines.push(
+      '',
+      `(+${ids.length - shownIds.length} ${say({ en: 'more, not shown', es: 'más, no mostrados' }, lang)})`,
+    )
   }
   if (filter === 'approved' && defaults.size > 0) {
     lines.push('', `+ ${defaults.size} hardcoded defaults`)
   }
 
-  keyboard.text('⬅️ Volver', acView.pack({ v: 'main' }))
+  keyboard.text(back, acView.pack({ v: 'main' }))
   return { text: lines.join('\n'), keyboard }
 }
 
@@ -727,7 +867,7 @@ const listView = async (
  * easily spin up a second Telegram account. Writes a `pending` record
  * to storage at the same key the plugin's session would, updates the
  * index, then DMs the admin with the real
- * `[✅ Aprobar][❌ Denegar]` keyboard. Tapping those buttons exercises
+ * `[✅ Approve][❌ Deny]` keyboard. Tapping those buttons exercises
  * the real callback handlers end-to-end.
  *
  * Pass the SAME `storage` instance you passed to `accessControl({ storage })`.
@@ -753,9 +893,11 @@ export const simulateAccessRequest = async (
   await saveAccess(storage, fakeUser.id, rec)
   await indexAdd(storage, 'pending', fakeUser.id)
 
+  const adminLang = await langOfUser(storage, adminId)
+
   await bot.api.sendMessage({
     chat_id: adminId,
-    text: requestNotificationText(fakeUser.id, rec, false),
-    reply_markup: requestKeyboard(fakeUser.id),
+    text: requestNotificationText(fakeUser.id, rec, false, adminLang),
+    reply_markup: requestKeyboard(fakeUser.id, adminLang),
   })
 }
