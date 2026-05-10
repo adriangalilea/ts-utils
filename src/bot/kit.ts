@@ -73,6 +73,13 @@ export const gracefulStart = async (
   process.on('SIGINT', () => void stop('SIGINT'))
   process.on('SIGTERM', () => void stop('SIGTERM'))
 
+  // Publish all `.command(name, { description }, …)` registrations to
+  // Telegram via `setMyCommands`. Hashes scopes internally so unchanged
+  // metadata doesn't burn rate-limit budget. Hidden / un-described
+  // commands are skipped.
+  // See https://gramio.dev/triggers/command.html#how-synccommands-works
+  bot.onStart(() => bot.syncCommands())
+
   await bot.start()
 }
 

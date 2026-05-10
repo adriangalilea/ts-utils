@@ -24,50 +24,110 @@
  *   Ctrl-C      — gracefulStart catches SIGINT → bot.stop() → exit 0
  */
 import { Bot } from 'gramio'
+import { session } from '@gramio/session'
 import { inMemoryStorage } from '@gramio/storage'
 import { kev } from '../src/platform/kev.js'
 import { adminContext, gracefulStart } from '../src/bot/kit.js'
 import { accessControl, simulateAccessRequest } from '../src/bot/access-control.js'
 import { coalesceLongMessages } from '../src/bot/coalesce.js'
 import { llmStream } from '../src/bot/llm-stream.js'
+import { botMenu } from '../src/bot/menu.js'
+import { language } from '../src/bot/language.js'
+import { messageHistory } from '../src/bot/message-history.js'
 
 const token = kev.mustGet('BOT_TOKEN')
 
-// Share the storage between accessControl() and the /simulate helper so
-// the fake record lives where the plugin's handlers can find it.
 const storage = inMemoryStorage()
+
+// Shared session — one record per user, with each plugin owning a
+// distinct field by convention (`access`, `language`, `history`).
+// All session-using plugins below declare this as a dependency;
+// gramio's runtime deduplication ensures the session derive runs
+// exactly once per update.
+const userSession = session({
+  storage,
+  key: 'session',
+  initial: () => ({}),
+})
+
+const lang = language({
+  session: userSession,
+  supported: ['en', 'es'] as const,
+  default: 'en',
+})
+
+const history = messageHistory({
+  session: userSession,
+  maxMessages: 50,
+  retentionDays: 7,
+})
+
+const menu = botMenu({
+  command: 'settings',
+  description: 'Open settings',
+  adminContact: '@adriangalilea',
+  personalData: { storage },     // ← enables 🗑 Forget · 📥 Export
+  items: [
+    lang.menuItem,
+    {
+      id: 'recent',
+      label: '📜 Show last 3 messages',
+      action: async (ctx) => {
+        const recent =
+          (ctx as unknown as { history?: ReadonlyArray<{ text: string }> }).history ?? []
+        const last = recent
+          .slice(-3)
+          .map((e, i) => `${i + 1}. ${e.text}`)
+          .join('\n')
+        await (ctx as unknown as { send: (t: string) => Promise<unknown> }).send(
+          last || '(no history)',
+        )
+      },
+    },
+  ],
+})
 
 const bot = new Bot(token)
   .extend(adminContext({ adminId: 190202471 }))
-  .extend(accessControl({ storage, defaults: [] }))
+  .extend(userSession)                                          // session first
+  .extend(accessControl({ session: userSession, storage, defaults: [] }))
   .extend(coalesceLongMessages({ log: true }))
   .extend(llmStream())
+  .extend(lang.plugin)
+  .extend(history.plugin)
+  .extend(menu.plugin)
 
   // ─── /start ────────────────────────────────────────────────────
-  .command('start', (ctx) => {
+  .command('start', { description: 'Show what the bot can do' }, (ctx) => {
     if (!ctx.access.allowed) return
     return ctx.send(
       `👋 hola\n\n` +
         `🔑 access.source: ${ctx.access.source}\n` +
         `👑 isAdmin: ${ctx.isAdmin}\n` +
-        `🆔 adminId: ${ctx.adminId}\n\n` +
-        `Comandos disponibles:\n` +
-        `  /stream   — demo de streaming markdown\n` +
+        `🆔 adminId: ${ctx.adminId}\n` +
+        `🌐 ctx.lang: ${ctx.lang}\n\n` +
+        `Comandos:\n` +
+        `  /settings — menu user-facing (language + forget/export/privacy)\n` +
+        `  /stream   — demo streaming markdown\n` +
         `  /access   — menú admin (sólo admin)\n` +
         `  /simulate — fake access request (sólo admin)\n\n` +
-        `Pega cualquier texto >4096 chars para probar coalesce.`,
+        `Pega texto >4096 chars para coalesce.`,
     )
   })
 
   // ─── /stream — exercises llmStream ─────────────────────────────
-  .command('stream', async (ctx) => {
+  .command(
+    'stream',
+    { description: 'Stream a fake LLM markdown reply' },
+    async (ctx) => {
     if (!ctx.access.allowed) return
-    const stream = ctx.startStream()
-    for await (const chunk of fakeLLM()) {
-      await stream.append(chunk)
-    }
-    await stream.end()
-  })
+      const stream = ctx.startStream()
+      for await (const chunk of fakeLLM()) {
+        await stream.append(chunk)
+      }
+      await stream.end()
+    },
+  )
 
   // ─── plain text echo — exercises coalesce ──────────────────────
   // Any non-command message: report the length we received.
@@ -86,26 +146,30 @@ const bot = new Bot(token)
   })
 
   // ─── /simulate — fake "stranger DMed the bot" ──────────────────
-  .command('simulate', async (ctx) => {
-    if (!ctx.isAdmin) return
-    const fakeId = 900_000_000 + Math.floor(Math.random() * 99_999)
-    await simulateAccessRequest(
-      ctx.bot,
-      storage,
-      ctx.adminId,
-      {
-        id: fakeId,
-        firstName: 'Pepe',
-        lastName: 'Pérez',
-        username: 'pepe_fake',
-      },
-      'hola, ¿me dejas usar tu bot?',
-    )
-    await ctx.send(
-      `🧪 simulated request from id ${fakeId}.\n` +
-        `Mira arriba — debería haber llegado la notificación con ✅/❌.`,
-    )
-  })
+  .command(
+    'simulate',
+    { description: 'Admin: inject a fake access request', hide: true },
+    async (ctx) => {
+      if (!ctx.isAdmin) return
+      const fakeId = 900_000_000 + Math.floor(Math.random() * 99_999)
+      await simulateAccessRequest(
+        ctx.bot,
+        storage,
+        ctx.adminId,
+        {
+          id: fakeId,
+          firstName: 'Pepe',
+          lastName: 'Pérez',
+          username: 'pepe_fake',
+        },
+        'hola, ¿me dejas usar tu bot?',
+      )
+      await ctx.send(
+        `🧪 simulated request from id ${fakeId}.\n` +
+          `Mira arriba — debería haber llegado la notificación con ✅/❌.`,
+      )
+    },
+  )
 
   .onStart(({ info }) => console.log(`[bot] running as @${info.username}`))
 
