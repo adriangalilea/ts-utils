@@ -133,10 +133,7 @@
   "pnpm": {
     "overrides": {
       "@gramio/contexts": "github:adriangalilea/contexts#local-build/auto-thread-private-chat-threaded-mode"
-    },
-    "onlyBuiltDependencies": [
-      "@gramio/contexts"
-    ]
+    }
   },
   "repository": {
     "type": "git",

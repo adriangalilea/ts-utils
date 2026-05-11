@@ -293,8 +293,7 @@ Telegram added [Threaded Mode](https://telegram.org/blog/threaded-conversations)
   "pnpm": {
     "overrides": {
       "@gramio/contexts": "github:adriangalilea/contexts#local-build/auto-thread-private-chat-threaded-mode"
-    },
-    "onlyBuiltDependencies": ["@gramio/contexts"]
+    }
   }
 }
 ```
