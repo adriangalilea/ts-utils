@@ -2,7 +2,15 @@
  * Test runtime detection and platform-specific behavior
  */
 
-import { file, format, kev, log, path, runtime } from "../src/index.js";
+import {
+	file,
+	format,
+	kev,
+	log,
+	ProcessExitError,
+	path,
+	runtime,
+} from "../src/index.js";
 
 console.log("\n=== Runtime Detection ===\n");
 
@@ -57,10 +65,11 @@ try {
 	// offensive.panic('This is a test panic!')
 	log.info("Panic would exit process in Node or throw in browser");
 } catch (e) {
-	const err = e as Error & { exitCode?: number };
-	log.warn("Caught panic in browser:", err.message);
-	if (err.exitCode) {
-		console.log("  Exit code:", err.exitCode);
+	if (e instanceof ProcessExitError) {
+		log.warn("Caught panic in browser:", e.message);
+		console.log("  Exit code:", e.exitCode);
+	} else if (e instanceof Error) {
+		log.warn("Caught error:", e.message);
 	}
 }
 

@@ -7,18 +7,23 @@
  */
 
 // Ambient declarations for the runtime globals we touch. Declared here
-// (not as `@types/deno` / `@types/bun` deps) so we only describe what
-// we actually call and pull no extra dependencies.
+// (not as `@types/deno` / `@types/bun` / `lib.dom` deps) so we only
+// describe what we actually call and pull no extra dependencies.
 declare global {
-	// `var` makes Deno/Bun live on `globalThis` per ECMAScript spec.
+	// `var` makes the binding live on `globalThis` per ECMAScript spec.
+	// We declare a minimal `BrowserWindow` rather than pulling lib.dom
+	// — we only touch two custom fields injected by bundlers.
 	// eslint-disable-next-line no-var
 	var Deno: DenoNamespace | undefined;
 	// eslint-disable-next-line no-var
 	var Bun: object | undefined;
-	interface Window {
-		__ENV__?: Record<string, string>;
-		process?: { env?: Record<string, string> };
-	}
+	// eslint-disable-next-line no-var
+	var window: BrowserWindow | undefined;
+}
+
+interface BrowserWindow {
+	__ENV__?: Record<string, string>;
+	process?: { env?: Record<string, string> };
 }
 
 interface DenoNamespace {
@@ -84,11 +89,8 @@ interface RuntimeCapabilities {
 }
 
 // Capture the browser window once, if present. Local capture keeps
-// every subsequent access typed without `globalThis.window` lookups.
-const browserWindow: Window | undefined =
-	typeof globalThis !== "undefined" && "window" in globalThis
-		? (globalThis as unknown as { window: Window }).window
-		: undefined;
+// every subsequent access typed without re-checking `globalThis.window`.
+const browserWindow: BrowserWindow | undefined = globalThis.window;
 
 const browserEnv = (): Record<string, string> | undefined =>
 	browserWindow?.__ENV__ ?? browserWindow?.process?.env;

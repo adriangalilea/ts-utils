@@ -16,7 +16,7 @@ export * from "./platform/unseen.js";
 export * from "./platform/xdg.js";
 export type { RuntimeCapabilities } from "./runtime.js";
 // Always export runtime - it's the foundation
-export { runtime } from "./runtime.js";
+export { ProcessExitError, runtime } from "./runtime.js";
 // Polyglot strings — TS-enforced multi-language values
 export * from "./say/index.js";
 export * from "./universal/currency/index.js";

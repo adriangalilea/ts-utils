@@ -128,10 +128,27 @@ function isTurboRepo(turboJsonPath: string): boolean {
 }
 
 /**
- * Get the nearest package.json data. Returns a generic record — callers
- * narrow by reading known fields (`name`, `version`, `dependencies`, …).
+ * Subset of npm/yarn/pnpm package.json fields. `[key: string]` keeps the
+ * door open for custom fields (`bin`, `repository`, `pnpm`, etc.) which
+ * callers can read by widening locally.
  */
-export function getPackageJson(): Record<string, unknown> | null {
+export type PackageJson = {
+	name?: string;
+	version?: string;
+	description?: string;
+	type?: "module" | "commonjs";
+	main?: string;
+	types?: string;
+	scripts?: Record<string, string>;
+	dependencies?: Record<string, string>;
+	devDependencies?: Record<string, string>;
+	peerDependencies?: Record<string, string>;
+	optionalDependencies?: Record<string, string>;
+	[key: string]: unknown;
+};
+
+/** Get the nearest `package.json` data, or `null` if none is found. */
+export function getPackageJson(): PackageJson | null {
 	const root = findProjectRoot();
 	if (!root) return null;
 
@@ -155,18 +172,11 @@ export function isTypeScriptProject(): boolean {
 	// Check for tsconfig.json
 	if (file.exists(path.join(root, "tsconfig.json"))) return true;
 
-	// Check for TypeScript in dependencies
 	const pkg = getPackageJson();
-	if (pkg) {
-		const dependencies = (pkg.dependencies ?? {}) as Record<string, unknown>;
-		const devDependencies = (pkg.devDependencies ?? {}) as Record<
-			string,
-			unknown
-		>;
-		return "typescript" in dependencies || "typescript" in devDependencies;
-	}
-
-	return false;
+	if (!pkg) return false;
+	return Boolean(
+		pkg.dependencies?.typescript ?? pkg.devDependencies?.typescript,
+	);
 }
 
 export const project = {
