@@ -571,13 +571,23 @@ export const consumeChatStream = async (
 		if (chunk.type === "reasoning") {
 			reasoning += chunk.text;
 			if (reasoningMessageId === undefined) {
-				// Defer the first send until there's actually visible content.
-				// Some models (e.g. Gemma 4 via mlx-vlm's gemma4 reasoning
-				// parser) emit a leading whitespace-only chunk; Telegram
-				// rejects `sendMessage` with empty body. Accumulated reasoning
-				// keeps its full text — we just wait for the first
-				// non-whitespace before opening the blockquote message.
-				if (reasoning.trim().length > 0) {
+				// Defer the first send until the RENDERED markdown has
+				// visible content. Two distinct failure modes here:
+				//
+				//   1. Leading whitespace-only chunks (e.g. Gemma 4 via
+				//      mlx-vlm's gemma4 reasoning parser opens with '\n').
+				//      `reasoning.trim()` filters those out.
+				//
+				//   2. Markdown that COLLAPSES to empty even though the
+				//      raw text isn't whitespace: '\n*', '#', '```', etc.
+				//      `markdownToFormattable` parses '\n*' as an empty
+				//      list marker → FormattableString.text = ''. Telegram
+				//      then rejects sendMessage with "text must be non-empty".
+				//
+				// Checking the rendered text catches both. Accumulated
+				// reasoning keeps its full content; we just hold the
+				// message open until the first chunk that renders.
+				if (renderReasoning().text.trim().length > 0) {
 					await sendReasoningMessage();
 				}
 			} else {
@@ -673,8 +683,21 @@ export type LLMHistoryOptions = {
 	menuLabels?: {
 		/** Button label. Default: `{ en: '🗑 Delete this thread', es: '🗑 Borrar este hilo' }`. */
 		item?: Polyglot<string>;
-		/** Toast shown after a successful clear. Default: `{ en: '🗑 Deleted.', es: '🗑 Borrado.' }`. */
-		cleared?: Polyglot<string>;
+		/**
+		 * Toast shown when `deleteForumTopic` succeeded — the Telegram
+		 * thread (with all its messages) is actually gone.
+		 * Default: `{ en: '🗑 Thread deleted.', es: '🗑 Hilo borrado.' }`.
+		 */
+		deleted?: Polyglot<string>;
+		/**
+		 * Toast shown when the thread COULD NOT be deleted (no `threadId`
+		 * available, the API rejected, etc.) but the LLM history was
+		 * still wiped. Tells the user what really happened — the thread
+		 * stays visible but the bot has forgotten the conversation.
+		 * Default: `{ en: '🧹 History cleared — couldn't delete the thread.',
+		 *           es: '🧹 Historial limpio — no se pudo borrar el hilo.' }`.
+		 */
+		historyOnly?: Polyglot<string>;
 		/** Confirmation overlay text. Default explains the full-delete scope. */
 		confirmPrompt?: Polyglot<string>;
 	};
@@ -785,9 +808,13 @@ export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
 		en: "🗑 Delete this thread",
 		es: "🗑 Borrar este hilo",
 	};
-	const clearedToast: Polyglot<string> = opts.menuLabels?.cleared ?? {
-		en: "🗑 Deleted.",
-		es: "🗑 Borrado.",
+	const deletedToast: Polyglot<string> = opts.menuLabels?.deleted ?? {
+		en: "🗑 Thread deleted.",
+		es: "🗑 Hilo borrado.",
+	};
+	const historyOnlyToast: Polyglot<string> = opts.menuLabels?.historyOnly ?? {
+		en: "🧹 History cleared — couldn't delete the thread.",
+		es: "🧹 Historial limpio — no se pudo borrar el hilo.",
 	};
 	const confirmPrompt: Polyglot<string> = opts.menuLabels?.confirmPrompt ?? {
 		en: "⚠️ Delete this thread?\n\nWipes the LLM history AND removes the thread (with all its messages) from this chat. Sibling threads stay intact.",
@@ -825,6 +852,7 @@ export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
 					};
 				};
 				chat?: { id: number };
+				from?: { id: number };
 				threadId?: number;
 				message?: { threadId?: number };
 			};
@@ -835,6 +863,8 @@ export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
 			c.llm?.clear();
 			const tid = c.threadId ?? c.message?.threadId;
 			const chatId = c.chat?.id;
+			const userId = c.from?.id;
+			let threadDeleted = false;
 			if (
 				tid !== undefined &&
 				chatId !== undefined &&
@@ -845,13 +875,23 @@ export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
 						chat_id: chatId,
 						message_thread_id: tid,
 					});
-				} catch {
+					threadDeleted = true;
+				} catch (e) {
 					// Thread already gone (404), supergroup-without-admin (400),
-					// or the chat type doesn't support it — Redis is already
-					// cleared so the user has a clean conversation either way.
+					// chat type doesn't support it, etc. Redis is already
+					// cleared so the user has a clean conversation, but we
+					// log so the failure isn't invisible.
+					console.error(
+						`[llm-history] deleteForumTopic failed (chat=${chatId} thread=${tid} user=${userId ?? "?"}):`,
+						e,
+					);
 				}
+			} else {
+				console.warn(
+					`[llm-history] skipping deleteForumTopic (chat=${chatId ?? "?"} thread=${tid ?? "none"} user=${userId ?? "?"}) — history cleared, thread stays visible`,
+				);
 			}
-			return clearedToast;
+			return threadDeleted ? deletedToast : historyOnlyToast;
 		},
 	};
 

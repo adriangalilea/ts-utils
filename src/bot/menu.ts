@@ -9,12 +9,18 @@
  * state, recording, gates) have their OWN runtime behaviour independent
  * of any menu.
  *
- * ## Forget / Export buttons
+ * ## Privacy & data submenu
  *
- * If you pass `personalData: { storage }`, the menu adds two buttons:
+ * The menu always renders a single `🔒 Privacy & data` button at root
+ * which navigates to a virtual submenu containing the privacy policy
+ * link plus (when `personalData: { storage }` is passed):
  *
  *   - 🗑 Forget my data — `storage.delete(sessionKey(userId))`
  *   - 📥 Export my data — `storage.get(sessionKey(userId))` → JSON file
+ *   - 📖 Privacy policy  — URL from `privacy` (defaults to Telegram's)
+ *
+ * Keeping these one tap away avoids cluttering the root view with
+ * destructive / informational buttons that the user only needs rarely.
  *
  * Because all per-user state across our plugins lives in ONE shared
  * session record (see `bot/language`, `bot/llm`'s `llmHistory`), wiping
@@ -289,10 +295,11 @@ export type BotMenuOptions = {
 	 */
 	adminContact: string;
 	/**
-	 * Enables 🗑 Forget my data and 📥 Export my data buttons. Pass
-	 * the storage instance backing your `session()`. If omitted, the
-	 * buttons don't appear (use this for bots with no per-user state
-	 * beyond what Telegram's standard policy covers).
+	 * Enables 🗑 Forget my data and 📥 Export my data buttons inside
+	 * the `🔒 Privacy & data` submenu. Pass the storage instance
+	 * backing your `session()`. If omitted, the submenu still appears
+	 * but only shows the privacy policy link (use this for bots with
+	 * no per-user state beyond what Telegram's standard policy covers).
 	 */
 	personalData?: PersonalDataOptions;
 };
@@ -488,8 +495,41 @@ const itemForPath = (root: MenuItem[], path: string[]): MenuItem | null => {
 	return last ?? null;
 };
 
+// Virtual segment that holds Forget / Export / Privacy under one
+// submenu — keeps the root view focused on user-defined items, with
+// the privacy/data controls one tap away. See `renderPrivacySubmenu`.
+const PRIVACY_PATH = "_privacy";
+
+const renderPrivacySubmenu = (menu: BotMenu, ctx: MenuCtx): InlineKeyboard => {
+	const lang = ctxLang(ctx);
+	const kb = new InlineKeyboard();
+	if (menu._opts.personalData) {
+		kb.text(
+			say({ en: "🗑 Forget my data", es: "🗑 Olvidar mis datos" }, lang),
+			actCb.pack({ path: "_forget" }),
+			{ style: "danger" },
+		);
+		kb.row();
+		kb.text(
+			say({ en: "📥 Export my data", es: "📥 Exportar mis datos" }, lang),
+			exportCb.pack({}),
+		);
+		kb.row();
+	}
+	kb.url(
+		say({ en: "📖 Privacy policy", es: "📖 Política de privacidad" }, lang),
+		menu._opts.privacy,
+	);
+	kb.row();
+	kb.text(
+		say({ en: "⬅️ Back", es: "⬅️ Volver" }, lang),
+		navCb.pack({ path: "_root" }),
+	);
+	return kb;
+};
+
 const renderKeyboard = (
-	menu: BotMenu,
+	_menu: BotMenu,
 	items: MenuItem[],
 	ctx: MenuCtx,
 	parentPath: string[],
@@ -518,24 +558,11 @@ const renderKeyboard = (
 
 	const lang = ctxLang(ctx);
 	if (parentPath.length === 0) {
-		// Forget / Export buttons at the root view.
-		if (menu._opts.personalData) {
-			kb.text(
-				say({ en: "🗑 Forget my data", es: "🗑 Olvidar mis datos" }, lang),
-				actCb.pack({ path: "_forget" }),
-				{ style: "danger" },
-			);
-			kb.row();
-			kb.text(
-				say({ en: "📥 Export my data", es: "📥 Exportar mis datos" }, lang),
-				exportCb.pack({}),
-			);
-			kb.row();
-		}
-		// Privacy link.
-		kb.url(
-			say({ en: "📖 Privacy", es: "📖 Privacidad" }, lang),
-			menu._opts.privacy,
+		// Privacy + Forget + Export live one tap away to keep the root
+		// view focused on user-defined items.
+		kb.text(
+			say({ en: "🔒 Privacy & data", es: "🔒 Privacidad y datos" }, lang),
+			navCb.pack({ path: PRIVACY_PATH }),
 		);
 		kb.row();
 	} else {
@@ -576,6 +603,18 @@ const buildMenuPlugin = (menu: BotMenu) => {
 			.callbackQuery(navCb, async (ctx) => {
 				const lang = ctxLang(ctx);
 				const raw = ctx.queryData.path;
+				// Virtual privacy submenu — rendered separately because its
+				// items aren't user-defined `MenuItem`s.
+				if (raw === PRIVACY_PATH) {
+					await ctx.answer({});
+					const kb = renderPrivacySubmenu(menu, ctx);
+					try {
+						await ctx.editText(labelOf(header, ctx), { reply_markup: kb });
+					} catch {
+						// message too old to edit
+					}
+					return;
+				}
 				const segments = raw === "_root" ? [] : raw.split(".");
 				const items = itemsForPath(menu._items, segments);
 				if (!items) {
@@ -804,7 +843,9 @@ const buildMenuPlugin = (menu: BotMenu) => {
 			})
 			.callbackQuery(forgetCancelCb, async (ctx) => {
 				await ctx.answer({});
-				const kb = renderKeyboard(menu, menu._items, ctx, []);
+				// Cancel lands back on the privacy submenu (where the user
+				// came from), not root — saves the re-navigation tap.
+				const kb = renderPrivacySubmenu(menu, ctx);
 				try {
 					await ctx.editText(labelOf(header, ctx), { reply_markup: kb });
 				} catch {
