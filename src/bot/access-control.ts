@@ -488,7 +488,20 @@ export const accessControl = (opts: AccessControlOptions) => {
 			})
 			// Gate. Authorized passes through; unauthorized triggers admin notify
 			// and silent stranger reply, then drops.
+			//
+			// IMPORTANT: only `message` and `callback_query` are user-initiated
+			// events we can meaningfully gate. Telegram-originated protocol
+			// events (`pre_checkout_query`, `shipping_query`, `chat_member`,
+			// `successful_payment` riders, …) MUST pass through unconditionally
+			// — those aren't users interacting with the bot, they're the
+			// platform talking to us, and dropping them silently breaks
+			// downstream plugins (payments, business connection handlers, etc.)
+			// with no visible error on our side and a generic "An error
+			// occurred" on Telegram's side after their 10 s timeout.
 			.use(async (ctx, next) => {
+				if (!ctx.is("message") && !ctx.is("callback_query")) {
+					return next();
+				}
 				if (ctx.access.allowed) {
 					// Activity bump (only for store-approved users — admins/defaults
 					// don't have a session record we want to clutter).
@@ -896,7 +909,10 @@ const listView = async (
 	// Cap at 20 to keep callback_data + rendering sane.
 	const shownIds = ids.slice(0, 20);
 	const records = await Promise.all(
-		shownIds.map(async (id) => ({ id, rec: await loadAccess(storage, ctx, id) })),
+		shownIds.map(async (id) => ({
+			id,
+			rec: await loadAccess(storage, ctx, id),
+		})),
 	);
 
 	const headerEmoji =

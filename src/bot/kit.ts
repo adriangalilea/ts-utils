@@ -39,7 +39,7 @@
  *
  * await gracefulStart(bot, { onShutdown: () => db.end() })
  */
-import { session, type SessionOptions } from "@gramio/session";
+import { type SessionOptions, session } from "@gramio/session";
 import type { Storage } from "@gramio/storage";
 import type { Plugin as PluginType } from "gramio";
 import { type AnyBot, Plugin } from "gramio";
@@ -112,8 +112,10 @@ export const gracefulStart = async (
 		}
 	};
 
-	process.on("SIGINT", () => void stop("SIGINT"));
-	process.on("SIGTERM", () => void stop("SIGTERM"));
+	// `once` (not `on`) so a second Ctrl-C falls through to the default
+	// handler and force-kills if our graceful path is itself stuck.
+	process.once("SIGINT", () => void stop("SIGINT"));
+	process.once("SIGTERM", () => void stop("SIGTERM"));
 
 	// Publish all `.command(name, { description }, …)` registrations to
 	// Telegram via `setMyCommands`. Hashes scopes internally so unchanged
@@ -237,10 +239,8 @@ export const botId = (ctx: { bot: unknown }): number => {
  * request). For the current user, the session plugin handles keying
  * automatically when wired via `botSession`.
  */
-export const botStorageKey = (
-	ctx: { bot: unknown },
-	userId: number,
-): string => `bot-${botId(ctx)}:${userId}`;
+export const botStorageKey = (ctx: { bot: unknown }, userId: number): string =>
+	`bot-${botId(ctx)}:${userId}`;
 
 /**
  * Static-key variant — namespace an arbitrary sub-key (e.g. an admin
@@ -250,10 +250,8 @@ export const botStorageKey = (
  *   botSubKey(ctx, 'ac:index')   →  'bot-<id>:ac:index'
  *   botSubKey(ctx, 'metrics')    →  'bot-<id>:metrics'
  */
-export const botSubKey = (
-	ctx: { bot: unknown },
-	subKey: string,
-): string => `bot-${botId(ctx)}:${subKey}`;
+export const botSubKey = (ctx: { bot: unknown }, subKey: string): string =>
+	`bot-${botId(ctx)}:${subKey}`;
 
 // ─── botSession ────────────────────────────────────────────────────
 
@@ -311,9 +309,9 @@ export const botSession = <
 			const ctx = ctxRaw as AnyCtx;
 			const prefix = `bot-${botId(ctx)}:`;
 			if (userKeyer) {
-				const inner = await (userKeyer as (c: AnyCtx) => string | Promise<string>)(
-					ctx,
-				);
+				const inner = await (
+					userKeyer as (c: AnyCtx) => string | Promise<string>
+				)(ctx);
 				return `${prefix}${inner}`;
 			}
 			return `${prefix}${ctx.senderId ?? ""}`;
@@ -339,7 +337,8 @@ export const botSession = <
  * internal prefix: final keys look like `${prefix}bot-<id>:<userId>`.
  */
 export const prefixStorage = (storage: Storage, prefix: string): Storage => {
-	const k = (key: string | number | symbol): string => `${prefix}${String(key)}`;
+	const k = (key: string | number | symbol): string =>
+		`${prefix}${String(key)}`;
 	return {
 		get: (key) => storage.get(k(key)),
 		has: (key) => storage.has(k(key)),

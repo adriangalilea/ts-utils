@@ -15,6 +15,10 @@ optional** — install only what the subpaths you import need.
 | `bot/language` | `language({ session, supported, default, scope?, labels? })` — per-user BCP-47 preference; resolves `ctx.lang` (typed); decorates `ctx.say` (callable polyglot resolver + `.send` / `.edit` / `.answer` methods); supplies a `menuItem` for `botMenu`. |
 | `bot/llm` | The full LLM-chatbot pipeline in one module. **Input:** `streamChat(response)` parses OpenAI-compatible SSE (OpenAI, vllm, mlx-lm, llama.cpp, Together, Groq, …) into `AsyncGenerator<{type, text}>` with `content` / `reasoning` separation. **Output:** `llmStream()` adds `ctx.startStream()` (low-level: debounced markdown to Telegram) AND `ctx.startChatStream(response)` (high-level: consumes the stream, renders reasoning as `expandable_blockquote` entity + content as streamed markdown — both phases go through `markdownToFormattable` with graceful degradation — returns `{ content, reasoning }`). `MarkdownStreamer.wasPartial` exposes whether `.end()` left buffered text un-flushed. **History:** `llmHistory({ session, maxTurns, retentionDays })` decorates `ctx.llm` with `.add / .get / .clear / .all / .clearAll` — per-(user, thread) conversation buffer in OpenAI `ChatMessage` shape, persisted in the shared session record so the menu's 🗑 Forget wipes it automatically. Also returns a drop-in `menuItem` ("🗑 Delete this thread") for `botMenu` — wipes the LLM history AND calls `deleteForumTopic` to physically remove the Telegram thread (with all its messages) from the chat, falling back to Redis-only when no `threadId` is present. |
 | `bot/menu` | `botMenu({ command, description, items, privacy?, personalData?, adminContact })` — `/settings` command + InlineKeyboard router. Root view always shows a `🔒 Privacy & data` button that navigates to a submenu with the privacy policy link plus (if `personalData: { storage }`) 🗑 Forget + 📥 Export. `MenuItem` supports `style` (Telegram coloured buttons: `primary` / `success` / `danger`), `refresh` (re-render in place after action so dynamic labels / styles update), `confirm: { prompt }` (one-step confirmation overlay for destructive actions — replacement for `ctx.answer({ show_alert })`), and `Action` returning `void \| string \| Polyglot<string>` (menu plugin owns the single answerCallbackQuery; actions return toasts instead of calling `ctx.answer` directly). `toggleMenuItem({ id, read, write, label: { off, on }, toast? })` builds a boolean-toggle item — dynamic label + auto-`primary` style on ON + `refresh: true` + storage-agnostic. |
+| `bot/payments` | `botPayments({ session, storage, paysupport, legal, waiver, vip?, credits?, perks? })` — Telegram Stars monetization. Three orthogonal axes: VIP tier ladder (positional `vip.1` / `vip.2` / …), credit packs (`credits.N`), and perks (`perks.<key>`). Decorates `ctx.payments.{atLeast, tier, has, credits, require, invoice}`. Owns the Art. 103(m) TRLGDCU waiver consent flow, `/paysupport` slash command (ToS §6.5), idempotent `successful_payment` fulfillment via `pay:idempotency:{chargeId}`, admin-DM refund approval (mirror of `accessControl`'s pattern), and lazy subscription expiry. Returns `{ plugin, menuItem, payouts, admin, onFulfilled }`: `menuItem` is the drop-in `💎 VIP` entry for `botMenu`; `payouts` is the Fragment payout ledger (`record` / `list` / `export` / `exportForUsers`); `admin.{listCharges, getCharge}` for custom admin commands; `onFulfilled(productKey \| '*', handler)` fires sync hooks after each charge. Stars-only (digital goods can't use third-party providers per ToS §6.2); Crypto Pay deferred (MiCA risk); Stripe-outside-Telegram is a future v2 channel. Full compliance memo in `src/bot/payments/CLAUDE.md`. |
+| `bot/storage` | `botRecord<T>(storage, prefix, validator?)` / `botIndex(storage, prefix, { capacity? })` / `botSentinel(storage, prefix)` — typed storage primitives with automatic bot-id namespacing. Validator is structural (`{ parse(unknown): T }`) — zod / valibot / ArkType / hand-rolled all work. Records validate on read; corrupted storage throws `SourcedError({ source: 'storage', operation: 'validate' })` instead of NaN-ing downstream. Index is a capped, prepend-friendly de-duping `string[]`. Sentinel claims an id atomically (boundaries permitting). Used internally by `bot/payments`; available to bot authors for custom plugins. |
+| `bot/ctx` | `BotMessageCtx<S, Api>` / `BotCallbackCtx<S, Query, Api>` / `BotPaymentCtx<S, Api>` / `BotPreCheckoutCtx<Api>` — canonical structural ctx shapes that gramio's real contexts satisfy by duck-typing. `narrow<T>(ctx)` is the documented cast helper. Plugins parameterize with their `Session` shape + strict `Api` (per-method-typed `bot.api`) and stop redeclaring "ctx has session + from + send + …" in every handler. |
+| `bot/callbacks` | `callbackNs("plugin").data("name", { uid: 'number' })` — namespaced `CallbackData` factory with a process-wide collision registry. Repeated registration with the same shape returns the cached schema (HMR / dual-import safe); a second registration with conflicting fields panics. gramio hashes the full name to a 6-char wire prefix regardless of name length, so namespace discipline costs nothing on `callback_data`. |
 
 Implementation files are flat under `src/bot/`. `index.ts` is the barrel for
 `@adriangalilea/utils/bot`.
@@ -140,6 +144,205 @@ The whole API is in `@adriangalilea/utils/say` (~30 LOC):
 `say(value, lang)` standalone and `type Polyglot<L>`. The bot-bound
 form `ctx.say` is added by `bot/language` and exposes the namespace
 with `.send / .edit / .answer` methods.
+
+## gramio foot-guns — the four we lost time on
+
+gramio's docs are mostly excellent, but four behaviours bit us during
+the `bot/payments` build. Documented here so the next plugin doesn't
+re-discover them.
+
+### 1. `.on(type, fn)` requires explicit `next()`
+
+gramio implements `.on('message', fn)` as an explicit middleware: `fn`
+receives `(ctx, next)` and **must call `next()`** for the chain to
+continue. Looks like a passive listener; behaves like a stopper.
+
+```ts
+// ❌ BUG — this kills the chain for every message event. /start, /me,
+//   /vip, every other .command() registered later silently never fires.
+.on("message", async (ctx) => {
+  if (!ctx.successful_payment) return  // ← silently stops chain
+  await fulfill(ctx)
+})
+
+// ✅ FIX — pass `next()` through for both branches:
+.on("message", async (ctx, next) => {
+  if (!ctx.successful_payment) { await next(); return }
+  await fulfill(ctx)
+  await next()
+})
+```
+
+The pattern in `composer.md` makes this explicit:
+
+```ts
+command(cmd, handler) {
+  return this.on("message", (ctx, next) => {
+    if (ctx.text?.startsWith(`/${cmd}`)) return handler(ctx)
+    return next()                              // ← skip → continue chain
+  })
+}
+```
+
+Matched commands deliberately don't call `next()` (terminal handler).
+**Type-filter** handlers (like `bot/payments`' `successful_payment`
+filter) always must, because peer `.command()`s registered after them
+depend on the chain advancing. `.callbackQuery(schema, fn)` and
+`.command(name, fn)` are auto-wrapped, so this only bites raw `.on()`
+inside plugins.
+
+### 2. `allowed_updates` auto-derives from `.on()` calls — dedicated events MATTER
+
+gramio's `bot.start()` runs `registeredEvents()` over the whole
+composer tree to compute `allowed_updates`. If you write
+
+```ts
+bot.on("message", (ctx) => {
+  if (!ctx.payload.successful_payment) return
+  // ... fulfill
+})
+```
+
+you'll **never receive** a service-message payment. Telegram doesn't
+deliver service messages over the generic `message` channel unless
+you also subscribe to the dedicated event type. The fix is to use the
+purpose-built event:
+
+```ts
+bot.on("successful_payment", (ctx) => {
+  // ctx.eventPayment.payload.telegram_payment_charge_id
+})
+```
+
+Same rule for `pre_checkout_query`, `shipping_query`, `chat_member`,
+`business_connection`, …: if there's a dedicated event type for it,
+subscribe to that — generic `message` is a different channel.
+
+### 3. Wrapper class vs raw payload — pick one, stick to it
+
+gramio wraps Telegram objects in classes with camelCase getters and
+exposes the raw snake_case payload on a `.payload` field:
+
+```
+ctx.eventPayment               // SuccessfulPayment wrapper
+ctx.eventPayment.totalAmount   // camelCase getter
+ctx.eventPayment.payload       // TelegramSuccessfulPayment (raw)
+ctx.eventPayment.payload.total_amount   // snake_case field
+```
+
+If you mix them — reading `ctx.eventPayment.total_amount` (snake_case
+on the wrapper, doesn't exist) — you get `undefined` with zero error.
+This package's convention is **always go through `.payload`** for
+payment / shipping / pre-checkout reads; the rest of the package
+(record shapes, log lines) speaks snake_case end-to-end. The
+canonical ctx type in `bot/ctx.ts` (`BotPaymentCtx`) bakes this in.
+
+### 4. `Plugin.extend()` isolates derives by default
+
+Composers extended with `.extend(plugin)` wrap the plugin's middleware
+in an isolation group. Derives run inside the group; the values
+**don't propagate to the parent ctx** unless the plugin is marked
+`.as("scoped")` or `.as("global")`. gramio's `Plugin` class
+auto-applies `scoped` for the ctx-decorating use case we have, but
+it's not obvious. If you write a custom `Composer` and forget the
+scope, every downstream handler sees `ctx.yourField` as `undefined`
+while TS happily types it.
+
+Pattern: when a Composer is for ctx enrichment (e.g. `withUser`,
+`withAuth`), end the chain with `.as("scoped")` so the derives bubble
+up. `Plugin` already does this internally.
+
+---
+
+## Building blocks — the four utilities every plugin uses
+
+When writing a new `bot/*` plugin, reach for these instead of
+reinventing storage / context / callback boilerplate. Adopted by
+`bot/payments` (and migrating to the others); they exist for the
+specific frictions called out above.
+
+### `bot/storage` — typed storage with bot-id namespacing
+
+```ts
+import { botRecord, botIndex, botSentinel } from "../storage.js"
+
+const charges    = botRecord<ChargeRecord>(storage, "pay:charge", ChargeSchema)
+const idem       = botSentinel(storage, "pay:idem")
+const userChrgs  = (userId: number) =>
+  botIndex(storage, `pay:user:${userId}:charges`, { capacity: 100 })
+
+await charges.set(ctx, chargeId, charge)         // namespaced + validated
+const c = await charges.get(ctx, chargeId)        // ChargeRecord | undefined
+if (!(await idem.claim(ctx, chargeId))) return    // idempotent fulfillment
+await userChrgs(userId).prepend(ctx, chargeId)    // cap-bounded list
+```
+
+Validators are structural (`{ parse(unknown): T }`) so zod, valibot,
+ArkType, or a hand-rolled type guard all work. Omit the validator for
+unchecked reads (same behaviour as `storage.get(key) as T`).
+
+### `bot/ctx` — canonical structural ctx shapes
+
+```ts
+import { type BotCallbackCtx, narrow } from "../ctx.js"
+
+.callbackQuery(refundApproveCb, async (ctx) => {
+  const c = narrow<BotCallbackCtx<MySession, { cid: string }> & AdminDerives>(ctx)
+  // c.session.foo, c.queryData.cid, c.answer({...}), c.editText("..."), c.bot.api.x
+})
+```
+
+Replaces the per-handler `const c = ctx as unknown as { session, from, answer, editText, queryData, ... }` redeclarations. One source of truth in `bot/ctx.ts`; plugin-specific derives compose via type intersection.
+
+### `bot/callbacks` — namespaced callback registry
+
+```ts
+import { callbackNs } from "../callbacks.js"
+
+const cb = callbackNs("pay")                            // reserves "pay" prefix
+export const waiverConsent = cb.data("waiver:consent", { pk: "string" })
+export const refundApprove = cb.data("refund:approve", { cid: "string" })
+```
+
+Cross-plugin name collisions throw at registration. Duplicate
+registration with the same shape returns the cached `CallbackData`
+(HMR / dual-import safe). gramio still hashes the full name to a
+6-char wire prefix so name length doesn't bloat `callback_data`.
+
+### `bot/menu` — `MenuItem.id` constraint
+
+Already covered above (no dots — uses `_`). The `botMenu` constructor
+validates ids recursively and panics on violation. Worth re-stating
+here because it's the same class of issue: silent dispatch failure due
+to namespace collision.
+
+---
+
+## Plugin file convention
+
+Each `bot/<plugin>/` directory follows the same shape so new plugins
+read predictably:
+
+```
+src/bot/<plugin>/
+├── CLAUDE.md       ← design + compliance + flows
+├── types.ts        ← public + internal types, schemas
+├── config.ts       ← validateConfig + buildCatalog (pure)
+├── handlers.ts     ← .on(eventType) handlers (event filters)
+├── callbacks.ts    ← .callbackQuery() handlers (inline taps)
+├── commands.ts     ← .command() handlers (slash commands)
+├── derive.ts       ← ctx.<plugin> builder (the ctx decoration)
+├── menu-item.ts    ← MenuItem factory for botMenu integration
+├── plugin.ts       ← assembly: .extend() + .derive() + .on() + .callbackQuery() + .command()
+└── index.ts        ← public exports
+```
+
+`plugin.ts` is **wiring only** — no handler bodies. Each `.on()` /
+`.callbackQuery()` / `.command()` line delegates to a function imported
+from the matching concern file. Reading `plugin.ts` should be 60 seconds
+of inspection, not 500 LOC of decryption.
+
+---
 
 ## Snapshot vs live derives — the staleness gotcha
 

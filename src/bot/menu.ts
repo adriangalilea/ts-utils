@@ -206,6 +206,13 @@ const styleOf = (
  * derives that snapshot at event start (e.g. `ctx.lang` from
  * `bot/language` is the event-start value, NOT the post-mutation
  * one). `ctx.say(...)` IS live and safe to use anywhere.
+ *
+ * **`id` must not contain `.`.** Submenu paths are dot-joined into
+ * callback_data (`parent.child.grandchild`), so a dot in an id
+ * collides with the path separator and the route resolver returns
+ * "Item not found" with no logging. Use `_` instead. The plugin
+ * validates this at registration; misformatted ids panic the build
+ * rather than silently mis-routing.
  */
 export type MenuItem =
 	| {
@@ -311,7 +318,19 @@ const DEFAULT_HEADER: Polyglot<string> = { en: "⚙️ Settings", es: "⚙️ Aj
 
 // ─── callback data schemas ─────────────────────────────────────────
 
-const navCb = new CallbackData("mNav").string("path");
+/**
+ * Callback data for navigating between menu levels. Exported so peer
+ * plugins (e.g. `bot/payments`'s `require()` upgrade prompt) can pack
+ * a "jump to /settings → <id>" button without duplicating the schema
+ * name/fields. Routes through the handler registered below.
+ *
+ *   menuNavCb.pack({ path: 'pay' })           → goes to `pay` submenu
+ *   menuNavCb.pack({ path: '_root' })          → goes back to root
+ *   menuNavCb.pack({ path: 'pay.history' })    → nested path
+ */
+export const menuNavCb = new CallbackData("mNav").string("path");
+// Internal alias — keeps the file's existing references compact.
+const navCb = menuNavCb;
 const actCb = new CallbackData("mAct").string("path");
 /** Fired when the user taps Confirm in a `confirm:` flow. `path`
  *  identifies the underlying MenuItem.action to run. */
@@ -337,6 +356,27 @@ type ResolvedOpts = {
 	personalData: ResolvedPersonalData | null;
 };
 
+// Recursively validate that no MenuItem id contains `.` — the menu's
+// callback paths are dot-joined, so a dot in an id collides with the
+// separator and silently mis-routes. Fail loud at construction.
+const validateMenuItemIds = (
+	items: ReadonlyArray<MenuItem>,
+	where: string,
+): void => {
+	for (const item of items) {
+		if (item.id.includes(".")) {
+			throw new Error(
+				`bot/menu: MenuItem.id "${item.id}" must not contain '.' (path separator) ` +
+					`at ${where}. Use '_' instead. The plugin would otherwise silently ` +
+					`return "Item not found" on tap with no logging.`,
+			);
+		}
+		if ("submenu" in item) {
+			validateMenuItemIds(item.submenu, `${where}.${item.id}`);
+		}
+	}
+};
+
 export class BotMenu {
 	/** @internal */
 	readonly _items: MenuItem[];
@@ -345,6 +385,7 @@ export class BotMenu {
 
 	constructor(opts: BotMenuOptions) {
 		this._items = [...(opts.items ?? [])];
+		validateMenuItemIds(this._items, "botMenu");
 		this._opts = {
 			command: opts.command ?? DEFAULT_COMMAND,
 			description: opts.description ?? DEFAULT_DESCRIPTION,
@@ -359,6 +400,7 @@ export class BotMenu {
 
 	/** Append a custom item. Mutates the menu. */
 	add(item: MenuItem): this {
+		validateMenuItemIds([item], "botMenu.add");
 		this._items.push(item);
 		return this;
 	}

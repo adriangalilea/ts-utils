@@ -1,5 +1,5 @@
 /**
- * Runnable smoke-test for the four GramIO plugins shipped with this package.
+ * Runnable smoke-test for the GramIO plugins shipped with this package.
  *
  * Run:
  *   BOT_TOKEN=… pnpm tsx tests/bot-integration.ts
@@ -21,7 +21,35 @@
  *                 those buttons hits the real handlers, no second account
  *                 needed.
  *
+ *   /me         — current payments state (tier, credits, perks)
+ *   /vip        — gated by ctx.payments.atLeast('vip') — runs a "premium
+ *                 feature" message if you're VIP, prompts upgrade otherwise
+ *   /spend      — consumes 1 credit via ctx.payments.credits.tryConsume()
+ *                 — prompts a top-up if you have none
+ *   /settings   — opens user menu; /settings → 💎 VIP buys / cancels /
+ *                 manages, including credits + perks
+ *   /refunds    — admin-only: lists your recent charges with [Refund]
+ *                 buttons that hit the real refundStarPayment flow
+ *   /paysupport — auto-installed by bot/payments per ToS §6.5
+ *
  *   Ctrl-C      — gracefulStart catches SIGINT → bot.stop() → exit 0
+ *
+ * ## Payments E2E with real Stars
+ *
+ *   1. /me                                  → free, 0 credits, no perks
+ *   2. /vip                                 → upgrade prompt with button
+ *   3. /settings → 💎 VIP → tap "💎 Test VIP — 1 ⭐"
+ *   4. waiver prompt → tap ✅ Consiento
+ *   5. Telegram payment sheet → confirm
+ *   6. bot confirms purchase; /me now shows vip.1 + granted credits
+ *   7. /vip                                 → "premium feature" message
+ *   8. /spend                               → consumes 1 credit
+ *   9. /settings → 💎 VIP → "💬 +10 credits — 1 ⭐"  (top up)
+ *  10. /settings → 💎 VIP → "🎁 Test perk — 1 ⭐"   (one-shot)
+ *  11. /refunds                             → list with [Refund]
+ *  12. tap Refund on the VIP charge        → /me now shows free again,
+ *                                             credits decremented by grant amount
+ *  13. /refunds on the perk charge         → /me hides the perk again
  *
  * ## Threaded Mode demo (BotFather → bot → Bot Settings → Threaded Mode)
  *
@@ -36,7 +64,7 @@
 
 import { session } from "@gramio/session";
 import { inMemoryStorage } from "@gramio/storage";
-import { Bot } from "gramio";
+import { Bot, InlineKeyboard } from "gramio";
 import {
 	accessControl,
 	simulateAccessRequest,
@@ -46,6 +74,8 @@ import { adminContext, gracefulStart } from "../src/bot/kit.js";
 import { language } from "../src/bot/language.js";
 import { llmHistory, llmStream } from "../src/bot/llm.js";
 import { botMenu } from "../src/bot/menu.js";
+import { botPayments } from "../src/bot/payments/index.js";
+import { refundApproveCb } from "../src/bot/payments/refund.js";
 import { kev } from "../src/platform/kev.js";
 
 const token = kev.mustGet("BOT_TOKEN");
@@ -75,6 +105,73 @@ const chat = llmHistory({
 	retentionDays: 7,
 });
 
+// Payments — cheap (1 ⭐) test products so the full pay/refund round-trip
+// can be exercised without burning Stars. Sandboxed in inMemoryStorage:
+// charges + waiver state live only for this process' lifetime, so a
+// restart resets everything (handy during iteration, useless for
+// production — but this is integration smoke-test config).
+//
+// `vip` (subscription) requires Telegram-side bot-revenue export
+// (Fragment payout method linked in BotFather → Bot Settings) before
+// `sendInvoice` with `subscription_period` succeeds. Without it,
+// Telegram replies with `Bad Request: SUBSCRIPTION_EXPORT_MISSING`.
+// Set `INCLUDE_VIP=1` once BotFather is set up; otherwise we run the
+// test bot with credits + perks only (both one-off, no export needed).
+const includeVip = kev.int("INCLUDE_VIP", 0) > 0;
+const payments = botPayments({
+	session: userSession,
+	storage,
+	paysupport: "@adriangalilea",
+	legal: {
+		sellerName: "Adrian Galilea (test)",
+		nif: "X1234567Y",
+		// termsUrl + privacyUrl omitted on purpose: terms button hides
+		// (no Telegram-side default), privacy defaults to Telegram's
+		// Standard Bot Privacy Policy via DEFAULT_PRIVACY_URL.
+	},
+	waiver: {
+		version: "2026-05-test",
+		text: {
+			en:
+				"I expressly request immediate delivery of the digital content. " +
+				"I understand that under Art. 103(m) TRLGDCU I lose the 14-day " +
+				"right of withdrawal once execution begins.",
+			es:
+				"Solicito expresamente el suministro inmediato del contenido digital. " +
+				"Entiendo que conforme al art. 103.m) del TRLGDCU pierdo el derecho " +
+				"de desistimiento una vez iniciada la ejecución.",
+		},
+	},
+	...(includeVip && {
+		vip: [
+			{
+				xtr: 1,
+				period: "30d" as const,
+				name: { en: "Test VIP", es: "Test VIP" },
+				grants: { credits: 10 }, // ← renewal grant; bumps balance by 10
+			},
+		],
+	}),
+	credits: {
+		unit: { en: "credit", es: "crédito" },
+		packs: [{ xtr: 1, grants: { credits: 10 } }],
+	},
+	perks: {
+		test_perk: {
+			xtr: 1,
+			name: { en: "Test perk", es: "Test perk" },
+		},
+	},
+});
+
+// Demo onFulfilled hook — logs every fulfillment so you can correlate
+// with the bot's outgoing confirmation message during the E2E test.
+payments.onFulfilled("*", (event) => {
+	console.log(
+		`[payments] fulfilled ${event.productKey} for user ${event.userId} · chargeId=${event.chargeId} · xtr=${event.xtr}`,
+	);
+});
+
 const menu = botMenu({
 	command: "settings",
 	description: "Open settings",
@@ -82,6 +179,7 @@ const menu = botMenu({
 	personalData: { storage }, // ← enables 🗑 Forget · 📥 Export (wipes ctx.llm too)
 	items: [
 		lang.menuItem,
+		payments.menuItem, // ← 💎 VIP — buy / cancel / packs / perks / help
 		{
 			id: "recent",
 			label: "📜 Show last 3 turns (this thread)",
@@ -120,6 +218,7 @@ const bot = new Bot(token)
 	.extend(llmStream())
 	.extend(chat.plugin)
 	.extend(lang.plugin)
+	.extend(payments.plugin)
 	.extend(menu.plugin)
 
 	// ─── /start ────────────────────────────────────────────────────
@@ -218,6 +317,120 @@ const bot = new Bot(token)
 
 		ctx.llm.add({ role: "assistant", content: echoTrimmed });
 	})
+
+	// ─── /me — show current payments state ─────────────────────────
+	.command(
+		"me",
+		{ description: "Show your current tier, credits, perks" },
+		async (ctx) => {
+			if (!ctx.access.allowed) return;
+			const tier = ctx.payments.tier();
+			const level = ctx.payments.tier.level();
+			const tierName = ctx.payments.tier.label() ?? "—";
+			const credits = ctx.payments.credits.balance();
+			const hasPerk = ctx.payments.has("test_perk");
+			const atLeastVip = ctx.payments.atLeast("vip");
+			await ctx.say.send({
+				en:
+					`💼 your payments state\n\n` +
+					`🏷️ tier: ${tier} · level ${level} · name "${tierName}"\n` +
+					`💎 atLeast('vip'): ${atLeastVip}\n` +
+					`💬 credits: ${credits}\n` +
+					`🎁 test_perk owned: ${hasPerk}`,
+				es:
+					`💼 tu estado de pagos\n\n` +
+					`🏷️ tier: ${tier} · nivel ${level} · nombre "${tierName}"\n` +
+					`💎 atLeast('vip'): ${atLeastVip}\n` +
+					`💬 créditos: ${credits}\n` +
+					`🎁 test_perk desbloqueado: ${hasPerk}`,
+			});
+		},
+	)
+
+	// ─── /vip — gated by atLeast('vip') ────────────────────────────
+	.command(
+		"vip",
+		{ description: "VIP-only feature (exercises require() upgrade prompt)" },
+		async (ctx) => {
+			if (!ctx.access.allowed) return;
+			// `require()` sends a localized upgrade prompt with a button
+			// deep-linking to /settings → 💎 VIP when the gate is closed.
+			if (!(await ctx.payments.require("vip", { feature: "/vip demo" })))
+				return;
+			await ctx.say.send({
+				en: "🎉 Welcome, VIP. This is the gated feature payload.",
+				es: "🎉 Bienvenido, VIP. Este es el payload de la función gated.",
+			});
+		},
+	)
+
+	// ─── /spend — credit consumption demo ──────────────────────────
+	.command(
+		"spend",
+		{ description: "Consume 1 credit (prompts top-up if zero)" },
+		async (ctx) => {
+			if (!ctx.access.allowed) return;
+			const ok = ctx.payments.credits.tryConsume(1);
+			if (!ok) {
+				// No credits left — prompt the credits pack invoice. This
+				// exercises ctx.payments.invoice() which handles waiver +
+				// sendInvoice in one call.
+				await ctx.say.send({
+					en: "⛔ Out of credits — opening top-up invoice…",
+					es: "⛔ Sin créditos — abriendo factura de recarga…",
+				});
+				await ctx.payments.invoice("credits.1");
+				return;
+			}
+			const left = ctx.payments.credits.balance();
+			await ctx.say.send({
+				en: `✅ Spent 1 credit · ${left} remaining.`,
+				es: `✅ Gastado 1 crédito · ${left} restantes.`,
+			});
+		},
+	)
+
+	// ─── /refunds — admin: list your charges with [Refund] buttons ─
+	//
+	// This is the manual-tester loop for E2E refund. The real refund
+	// flow goes user → /paysupport contact → admin DM → approve.
+	// Here the tester IS the admin, so we surface a direct admin list.
+	// The button packs `refundApproveCb` (from bot/payments/refund) so
+	// taps hit the same handler the production admin DM flow uses.
+	.command(
+		"refunds",
+		{
+			description: "Admin: list your charges with refund buttons",
+			hide: true,
+		},
+		async (ctx) => {
+			if (!ctx.isAdmin) return;
+			const charges = await payments.admin.listCharges(ctx, ctx.from.id);
+			if (charges.length === 0) {
+				await ctx.send("(no charges yet — buy something first)");
+				return;
+			}
+			const lines = [`📜 your last ${charges.length} charge(s)\n`];
+			const kb = new InlineKeyboard();
+			for (const c of charges.slice(0, 10)) {
+				const tag =
+					c.paysupportState === "refunded"
+						? "↩️ refunded"
+						: c.paysupportState === "opened"
+							? "⏳ pending"
+							: "✅ active";
+				lines.push(`• ${c.productKey} · ${c.xtr} ⭐ · ${tag}`);
+				if (c.paysupportState !== "refunded") {
+					kb.text(
+						`💸 Refund ${c.productKey}`,
+						refundApproveCb.pack({ cid: c.chargeId }),
+						{ style: "danger" },
+					).row();
+				}
+			}
+			await ctx.send(lines.join("\n"), { reply_markup: kb });
+		},
+	)
 
 	// ─── /simulate — fake "stranger DMed the bot" ──────────────────
 	.command(
