@@ -69,14 +69,11 @@
  *   .extend(history.plugin)
  *   .extend(menu.plugin)
  */
-import {
-  CallbackData,
-  InlineKeyboard,
-  Plugin,
-} from 'gramio'
-import type { Storage } from '@gramio/storage'
 
-import { say, type Polyglot } from '../say/index.js'
+import type { Storage } from "@gramio/storage";
+import { CallbackData, InlineKeyboard, Plugin } from "gramio";
+
+import { type Polyglot, say } from "../say/index.js";
 
 // ─── public types ──────────────────────────────────────────────────
 
@@ -95,17 +92,26 @@ import { say, type Polyglot } from '../say/index.js'
  *   stays plugin-agnostic.
  */
 export type MenuCtx = {
-  bot: unknown
-  from?: { id: number }
-  chat?: { id: number; type: string }
-  session?: { language?: string }
-  threadId?: number
-  message?: { threadId?: number }
-  send?: (text: string | { toString(): string }, params?: object) => Promise<unknown>
-  reply?: (text: string | { toString(): string }, params?: object) => Promise<unknown>
-  answer?: (params: object) => Promise<unknown>
-  editText?: (text: string | { toString(): string }, params?: object) => Promise<unknown>
-}
+	bot: unknown;
+	from?: { id: number };
+	chat?: { id: number; type: string };
+	session?: { language?: string };
+	threadId?: number;
+	message?: { threadId?: number };
+	send?: (
+		text: string | { toString(): string },
+		params?: object,
+	) => Promise<unknown>;
+	reply?: (
+		text: string | { toString(): string },
+		params?: object,
+	) => Promise<unknown>;
+	answer?: (params: object) => Promise<unknown>;
+	editText?: (
+		text: string | { toString(): string },
+		params?: object,
+	) => Promise<unknown>;
+};
 
 /**
  * Anything a button or header can render as. Authoring a polyglot
@@ -118,10 +124,10 @@ export type MenuCtx = {
  *   label: (ctx) => ({ en: `Hi ${name}`, es: `Hola ${name}` })
  */
 type Label =
-  | string
-  | Polyglot<string>
-  | ((ctx: MenuCtx) => string | Polyglot<string>)
-type Predicate = (ctx: MenuCtx) => boolean
+	| string
+	| Polyglot<string>
+	| ((ctx: MenuCtx) => string | Polyglot<string>);
+type Predicate = (ctx: MenuCtx) => boolean;
 
 /**
  * What a menu action's return value means:
@@ -138,8 +144,8 @@ type Predicate = (ctx: MenuCtx) => boolean
  * and `refresh: true` never runs. Return the toast instead; the menu
  * sends the single answer.
  */
-type ActionResult = void | string | Polyglot<string>
-type Action = (ctx: MenuCtx) => Promise<ActionResult> | ActionResult
+type ActionResult = undefined | string | Polyglot<string>;
+type Action = (ctx: MenuCtx) => Promise<ActionResult> | ActionResult;
 
 /**
  * Telegram's inline-keyboard-button colour modes
@@ -154,21 +160,22 @@ type Action = (ctx: MenuCtx) => Promise<ActionResult> | ActionResult
  * `style` instead of emoji markers (●/○) to mark active state, which
  * is consistent with how Telegram itself surfaces selection state.
  */
-export type ButtonStyle = 'primary' | 'success' | 'danger'
+export type ButtonStyle = "primary" | "success" | "danger";
 
-type StyleResolver = ButtonStyle | ((ctx: MenuCtx) => ButtonStyle | undefined)
+type StyleResolver = ButtonStyle | ((ctx: MenuCtx) => ButtonStyle | undefined);
 
-const FALLBACK_LANG = 'en'
-const ctxLang = (ctx: MenuCtx): string => ctx.session?.language ?? FALLBACK_LANG
+const FALLBACK_LANG = "en";
+const ctxLang = (ctx: MenuCtx): string =>
+	ctx.session?.language ?? FALLBACK_LANG;
 
 const styleOf = (
-  s: StyleResolver | undefined,
-  ctx: MenuCtx,
+	s: StyleResolver | undefined,
+	ctx: MenuCtx,
 ): ButtonStyle | undefined => {
-  if (s === undefined) return undefined
-  if (typeof s === 'function') return s(ctx)
-  return s
-}
+	if (s === undefined) return undefined;
+	if (typeof s === "function") return s(ctx);
+	return s;
+};
 
 /**
  * An entry in the menu. Three variants:
@@ -194,210 +201,210 @@ const styleOf = (
  * one). `ctx.say(...)` IS live and safe to use anywhere.
  */
 export type MenuItem =
-  | {
-      id: string
-      label: Label
-      action: Action
-      order?: number
-      visible?: Predicate
-      style?: StyleResolver
-      /** Re-render the menu message after the action runs. */
-      refresh?: boolean
-      /**
-       * Adds a one-step confirmation before the action runs. First tap
-       * edits the menu message in place to show `prompt` + "Confirm" /
-       * "Cancel" buttons; the action only runs on Confirm.
-       *
-       * Use this for destructive actions instead of
-       * `ctx.answer({ show_alert: true })` — Telegram's alert UI is
-       * disruptive and doesn't compose with refresh / toast.
-       *
-       * After Confirm runs the action, the menu navigates back to
-       * root (so the user lands in a known-good state).
-       */
-      confirm?: {
-        /** Body text rendered above the Confirm/Cancel buttons. */
-        prompt: Label
-        /** Override "✅ Confirm" label. Default: polyglot en/es. */
-        confirmLabel?: Label
-        /** Override "⬅️ Cancel" label. Default: polyglot en/es. */
-        cancelLabel?: Label
-      }
-    }
-  | {
-      id: string
-      label: Label
-      url: string
-      order?: number
-      visible?: Predicate
-      style?: StyleResolver
-    }
-  | {
-      id: string
-      label: Label
-      submenu: MenuItem[]
-      order?: number
-      visible?: Predicate
-      style?: StyleResolver
-    }
+	| {
+			id: string;
+			label: Label;
+			action: Action;
+			order?: number;
+			visible?: Predicate;
+			style?: StyleResolver;
+			/** Re-render the menu message after the action runs. */
+			refresh?: boolean;
+			/**
+			 * Adds a one-step confirmation before the action runs. First tap
+			 * edits the menu message in place to show `prompt` + "Confirm" /
+			 * "Cancel" buttons; the action only runs on Confirm.
+			 *
+			 * Use this for destructive actions instead of
+			 * `ctx.answer({ show_alert: true })` — Telegram's alert UI is
+			 * disruptive and doesn't compose with refresh / toast.
+			 *
+			 * After Confirm runs the action, the menu navigates back to
+			 * root (so the user lands in a known-good state).
+			 */
+			confirm?: {
+				/** Body text rendered above the Confirm/Cancel buttons. */
+				prompt: Label;
+				/** Override "✅ Confirm" label. Default: polyglot en/es. */
+				confirmLabel?: Label;
+				/** Override "⬅️ Cancel" label. Default: polyglot en/es. */
+				cancelLabel?: Label;
+			};
+	  }
+	| {
+			id: string;
+			label: Label;
+			url: string;
+			order?: number;
+			visible?: Predicate;
+			style?: StyleResolver;
+	  }
+	| {
+			id: string;
+			label: Label;
+			submenu: MenuItem[];
+			order?: number;
+			visible?: Predicate;
+			style?: StyleResolver;
+	  };
 
 export type PersonalDataOptions = {
-  /**
-   * Storage backend where each user's data lives. Must be the SAME
-   * instance you passed to your `session(...)` plugin — that's how
-   * /forget and /export reach the right keys.
-   */
-  storage: Storage
-  /**
-   * How to compute the storage key for a given user id. Defaults to
-   * `String(userId)` — matching `@gramio/session`'s default
-   * `getSessionKey`. Override if your session uses a custom
-   * `getSessionKey`.
-   */
-  sessionKey?: (userId: number) => string
-}
+	/**
+	 * Storage backend where each user's data lives. Must be the SAME
+	 * instance you passed to your `session(...)` plugin — that's how
+	 * /forget and /export reach the right keys.
+	 */
+	storage: Storage;
+	/**
+	 * How to compute the storage key for a given user id. Defaults to
+	 * `String(userId)` — matching `@gramio/session`'s default
+	 * `getSessionKey`. Override if your session uses a custom
+	 * `getSessionKey`.
+	 */
+	sessionKey?: (userId: number) => string;
+};
 
 export type BotMenuOptions = {
-  /** Slash command that opens the menu. Default `'settings'`. */
-  command?: string
-  /** Description shown in Telegram's command list. */
-  description?: string
-  /** Items rendered top-down (sorted by `order`, then registration). */
-  items?: MenuItem[]
-  /**
-   * URL to your privacy policy. Defaults to Telegram's Standard Bot
-   * Privacy Policy. Override when you retain content or process data
-   * beyond what the standard covers.
-   */
-  privacy?: string
-  /**
-   * Header text rendered above the keyboard.
-   */
-  header?: Label
-  /**
-   * Contact the user can reach when something fails (export error,
-   * etc.). **Required** — a bot that asks users to trust it with
-   * data must always offer a human to talk to when the automated
-   * paths fail.
-   */
-  adminContact: string
-  /**
-   * Enables 🗑 Forget my data and 📥 Export my data buttons. Pass
-   * the storage instance backing your `session()`. If omitted, the
-   * buttons don't appear (use this for bots with no per-user state
-   * beyond what Telegram's standard policy covers).
-   */
-  personalData?: PersonalDataOptions
-}
+	/** Slash command that opens the menu. Default `'settings'`. */
+	command?: string;
+	/** Description shown in Telegram's command list. */
+	description?: string;
+	/** Items rendered top-down (sorted by `order`, then registration). */
+	items?: MenuItem[];
+	/**
+	 * URL to your privacy policy. Defaults to Telegram's Standard Bot
+	 * Privacy Policy. Override when you retain content or process data
+	 * beyond what the standard covers.
+	 */
+	privacy?: string;
+	/**
+	 * Header text rendered above the keyboard.
+	 */
+	header?: Label;
+	/**
+	 * Contact the user can reach when something fails (export error,
+	 * etc.). **Required** — a bot that asks users to trust it with
+	 * data must always offer a human to talk to when the automated
+	 * paths fail.
+	 */
+	adminContact: string;
+	/**
+	 * Enables 🗑 Forget my data and 📥 Export my data buttons. Pass
+	 * the storage instance backing your `session()`. If omitted, the
+	 * buttons don't appear (use this for bots with no per-user state
+	 * beyond what Telegram's standard policy covers).
+	 */
+	personalData?: PersonalDataOptions;
+};
 
-const DEFAULT_COMMAND = 'settings'
-const DEFAULT_DESCRIPTION = 'Open settings menu'
-const DEFAULT_PRIVACY_URL = 'https://telegram.org/privacy-tpa'
-const DEFAULT_HEADER: Polyglot<string> = { en: '⚙️ Settings', es: '⚙️ Ajustes' }
-const DEFAULT_SESSION_KEY = (userId: number) => String(userId)
+const DEFAULT_COMMAND = "settings";
+const DEFAULT_DESCRIPTION = "Open settings menu";
+const DEFAULT_PRIVACY_URL = "https://telegram.org/privacy-tpa";
+const DEFAULT_HEADER: Polyglot<string> = { en: "⚙️ Settings", es: "⚙️ Ajustes" };
+const DEFAULT_SESSION_KEY = (userId: number) => String(userId);
 
 // ─── callback data schemas ─────────────────────────────────────────
 
-const navCb = new CallbackData('mNav').string('path')
-const actCb = new CallbackData('mAct').string('path')
+const navCb = new CallbackData("mNav").string("path");
+const actCb = new CallbackData("mAct").string("path");
 /** Fired when the user taps Confirm in a `confirm:` flow. `path`
  *  identifies the underlying MenuItem.action to run. */
-const actConfirmCb = new CallbackData('mActC').string('path')
-const forgetConfirmCb = new CallbackData('mFcfm')
-const forgetCancelCb = new CallbackData('mFcnl')
-const exportCb = new CallbackData('mExp')
+const actConfirmCb = new CallbackData("mActC").string("path");
+const forgetConfirmCb = new CallbackData("mFcfm");
+const forgetCancelCb = new CallbackData("mFcnl");
+const exportCb = new CallbackData("mExp");
 
 // ─── BotMenu (the builder) ─────────────────────────────────────────
 
 type ResolvedPersonalData = {
-  storage: Storage
-  sessionKey: (userId: number) => string
-}
+	storage: Storage;
+	sessionKey: (userId: number) => string;
+};
 
 type ResolvedOpts = {
-  command: string
-  description: string
-  privacy: string
-  header: Label
-  adminContact: string
-  personalData: ResolvedPersonalData | null
-}
+	command: string;
+	description: string;
+	privacy: string;
+	header: Label;
+	adminContact: string;
+	personalData: ResolvedPersonalData | null;
+};
 
 export class BotMenu {
-  /** @internal */
-  readonly _items: MenuItem[]
-  /** @internal */
-  readonly _opts: ResolvedOpts
+	/** @internal */
+	readonly _items: MenuItem[];
+	/** @internal */
+	readonly _opts: ResolvedOpts;
 
-  constructor(opts: BotMenuOptions) {
-    this._items = [...(opts.items ?? [])]
-    this._opts = {
-      command: opts.command ?? DEFAULT_COMMAND,
-      description: opts.description ?? DEFAULT_DESCRIPTION,
-      privacy: opts.privacy ?? DEFAULT_PRIVACY_URL,
-      header: opts.header ?? DEFAULT_HEADER,
-      adminContact: opts.adminContact,
-      personalData: opts.personalData
-        ? {
-            storage: opts.personalData.storage,
-            sessionKey: opts.personalData.sessionKey ?? DEFAULT_SESSION_KEY,
-          }
-        : null,
-    }
-  }
+	constructor(opts: BotMenuOptions) {
+		this._items = [...(opts.items ?? [])];
+		this._opts = {
+			command: opts.command ?? DEFAULT_COMMAND,
+			description: opts.description ?? DEFAULT_DESCRIPTION,
+			privacy: opts.privacy ?? DEFAULT_PRIVACY_URL,
+			header: opts.header ?? DEFAULT_HEADER,
+			adminContact: opts.adminContact,
+			personalData: opts.personalData
+				? {
+						storage: opts.personalData.storage,
+						sessionKey: opts.personalData.sessionKey ?? DEFAULT_SESSION_KEY,
+					}
+				: null,
+		};
+	}
 
-  /** Append a custom item. Mutates the menu. */
-  add(item: MenuItem): this {
-    this._items.push(item)
-    return this
-  }
+	/** Append a custom item. Mutates the menu. */
+	add(item: MenuItem): this {
+		this._items.push(item);
+		return this;
+	}
 
-  /** The gramio plugin: registers the slash command + all callback handlers. */
-  get plugin() {
-    return buildMenuPlugin(this)
-  }
+	/** The gramio plugin: registers the slash command + all callback handlers. */
+	get plugin() {
+		return buildMenuPlugin(this);
+	}
 }
 
-export const botMenu = (opts: BotMenuOptions): BotMenu => new BotMenu(opts)
+export const botMenu = (opts: BotMenuOptions): BotMenu => new BotMenu(opts);
 
 // ─── toggleMenuItem ────────────────────────────────────────────────
 
 export type ToggleMenuItemOptions = {
-  /** Item id within the menu. Must be unique among siblings. */
-  id: string
-  /**
-   * Reads the current boolean value. Typically `(ctx) =>
-   * ctx.session?.someField ?? false`. Storage-agnostic — return
-   * `false` by default so the toggle starts in the OFF state.
-   */
-  read: (ctx: MenuCtx) => boolean
-  /**
-   * Persists the new value. Typically `(ctx, v) => {
-   * (ctx.session as any).someField = v }`. The menu plugin does NOT
-   * own a session — write through whatever your bot already uses.
-   */
-  write: (ctx: MenuCtx, value: boolean) => void | Promise<void>
-  /**
-   * Button labels for each state. Polyglot literals resolve against
-   * `ctx.session?.language` (set by `bot/language`); strings render
-   * as-is. Use functions for runtime composition (e.g. emoji ✓/✗ +
-   * dynamic name).
-   */
-  label: {
-    off: Label
-    on: Label
-  }
-  /**
-   * Optional toast shown via `ctx.answer({ text })` after a tap. Same
-   * polyglot resolution as `label`. Omit to stay silent.
-   */
-  toast?: {
-    off?: Label
-    on?: Label
-  }
-  order?: number
-  visible?: Predicate
-}
+	/** Item id within the menu. Must be unique among siblings. */
+	id: string;
+	/**
+	 * Reads the current boolean value. Typically `(ctx) =>
+	 * ctx.session?.someField ?? false`. Storage-agnostic — return
+	 * `false` by default so the toggle starts in the OFF state.
+	 */
+	read: (ctx: MenuCtx) => boolean;
+	/**
+	 * Persists the new value. Typically `(ctx, v) => {
+	 * (ctx.session as any).someField = v }`. The menu plugin does NOT
+	 * own a session — write through whatever your bot already uses.
+	 */
+	write: (ctx: MenuCtx, value: boolean) => void | Promise<void>;
+	/**
+	 * Button labels for each state. Polyglot literals resolve against
+	 * `ctx.session?.language` (set by `bot/language`); strings render
+	 * as-is. Use functions for runtime composition (e.g. emoji ✓/✗ +
+	 * dynamic name).
+	 */
+	label: {
+		off: Label;
+		on: Label;
+	};
+	/**
+	 * Optional toast shown via `ctx.answer({ text })` after a tap. Same
+	 * polyglot resolution as `label`. Omit to stay silent.
+	 */
+	toast?: {
+		off?: Label;
+		on?: Label;
+	};
+	order?: number;
+	visible?: Predicate;
+};
 
 /**
  * Convenience factory for a boolean-toggle `MenuItem`. The label
@@ -425,417 +432,436 @@ export type ToggleMenuItemOptions = {
  * })
  */
 export const toggleMenuItem = (opts: ToggleMenuItemOptions): MenuItem => ({
-  id: opts.id,
-  order: opts.order,
-  visible: opts.visible,
-  // ON state is the active state → 'primary' (blue, Telegram's
-  // "selected" colour). OFF state stays unstyled (app default).
-  style: (ctx) => (opts.read(ctx) ? 'primary' : undefined),
-  // Re-render the menu after the tap so the user sees the colour /
-  // label flip immediately, without having to re-open /settings.
-  refresh: true,
-  label: (ctx) => {
-    const l = opts.read(ctx) ? opts.label.on : opts.label.off
-    return typeof l === 'function' ? l(ctx) : l
-  },
-  action: async (ctx) => {
-    const wasOn = opts.read(ctx)
-    const willBeOn = !wasOn
-    await opts.write(ctx, willBeOn)
+	id: opts.id,
+	order: opts.order,
+	visible: opts.visible,
+	// ON state is the active state → 'primary' (blue, Telegram's
+	// "selected" colour). OFF state stays unstyled (app default).
+	style: (ctx) => (opts.read(ctx) ? "primary" : undefined),
+	// Re-render the menu after the tap so the user sees the colour /
+	// label flip immediately, without having to re-open /settings.
+	refresh: true,
+	label: (ctx) => {
+		const l = opts.read(ctx) ? opts.label.on : opts.label.off;
+		return typeof l === "function" ? l(ctx) : l;
+	},
+	action: async (ctx) => {
+		const wasOn = opts.read(ctx);
+		const willBeOn = !wasOn;
+		await opts.write(ctx, willBeOn);
 
-    // Return the toast for the menu to send as the single
-    // answerCallbackQuery — don't call ctx.answer directly here.
-    const t = willBeOn ? opts.toast?.on : opts.toast?.off
-    if (t === undefined) return
-    const resolved = typeof t === 'function' ? t(ctx) : t
-    return resolved
-  },
-})
+		// Return the toast for the menu to send as the single
+		// answerCallbackQuery — don't call ctx.answer directly here.
+		const t = willBeOn ? opts.toast?.on : opts.toast?.off;
+		if (t === undefined) return;
+		const resolved = typeof t === "function" ? t(ctx) : t;
+		return resolved;
+	},
+});
 
 // ─── internal: rendering + plugin ──────────────────────────────────
 
 const labelOf = (l: Label, ctx: MenuCtx): string => {
-  const resolved = typeof l === 'function' ? l(ctx) : l
-  if (typeof resolved === 'string') return resolved
-  return say(resolved, ctxLang(ctx))
-}
+	const resolved = typeof l === "function" ? l(ctx) : l;
+	if (typeof resolved === "string") return resolved;
+	return say(resolved, ctxLang(ctx));
+};
 
 const itemsForPath = (root: MenuItem[], path: string[]): MenuItem[] | null => {
-  if (path.length === 0) return root
-  const [head, ...rest] = path
-  const found = root.find((i) => i.id === head)
-  if (!found || !('submenu' in found)) return null
-  return itemsForPath(found.submenu, rest)
-}
+	if (path.length === 0) return root;
+	const [head, ...rest] = path;
+	const found = root.find((i) => i.id === head);
+	if (!found || !("submenu" in found)) return null;
+	return itemsForPath(found.submenu, rest);
+};
 
 const itemForPath = (root: MenuItem[], path: string[]): MenuItem | null => {
-  if (path.length === 0) return null
-  let current: MenuItem[] | undefined = root
-  let last: MenuItem | undefined
-  for (const segment of path) {
-    if (!current) return null
-    last = current.find((i) => i.id === segment)
-    if (!last) return null
-    current = 'submenu' in last ? last.submenu : undefined
-  }
-  return last ?? null
-}
+	if (path.length === 0) return null;
+	let current: MenuItem[] | undefined = root;
+	let last: MenuItem | undefined;
+	for (const segment of path) {
+		if (!current) return null;
+		last = current.find((i) => i.id === segment);
+		if (!last) return null;
+		current = "submenu" in last ? last.submenu : undefined;
+	}
+	return last ?? null;
+};
 
 const renderKeyboard = (
-  menu: BotMenu,
-  items: MenuItem[],
-  ctx: MenuCtx,
-  parentPath: string[],
+	menu: BotMenu,
+	items: MenuItem[],
+	ctx: MenuCtx,
+	parentPath: string[],
 ): InlineKeyboard => {
-  const kb = new InlineKeyboard()
+	const kb = new InlineKeyboard();
 
-  const sorted = [...items]
-    .filter((i) => (i.visible ? i.visible(ctx) : true))
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+	const sorted = [...items]
+		.filter((i) => (i.visible ? i.visible(ctx) : true))
+		.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-  for (const item of sorted) {
-    const path = [...parentPath, item.id].join('.')
-    const label = labelOf(item.label, ctx)
-    const style = styleOf(item.style, ctx)
-    const opts = style ? { style } : undefined
+	for (const item of sorted) {
+		const path = [...parentPath, item.id].join(".");
+		const label = labelOf(item.label, ctx);
+		const style = styleOf(item.style, ctx);
+		const opts = style ? { style } : undefined;
 
-    if ('action' in item) {
-      kb.text(label, actCb.pack({ path }), opts)
-    } else if ('url' in item) {
-      kb.url(label, item.url, opts)
-    } else {
-      kb.text(label, navCb.pack({ path }), opts)
-    }
-    kb.row()
-  }
+		if ("action" in item) {
+			kb.text(label, actCb.pack({ path }), opts);
+		} else if ("url" in item) {
+			kb.url(label, item.url, opts);
+		} else {
+			kb.text(label, navCb.pack({ path }), opts);
+		}
+		kb.row();
+	}
 
-  const lang = ctxLang(ctx)
-  if (parentPath.length === 0) {
-    // Forget / Export buttons at the root view.
-    if (menu._opts.personalData) {
-      kb.text(
-        say({ en: '🗑 Forget my data', es: '🗑 Olvidar mis datos' }, lang),
-        actCb.pack({ path: '_forget' }),
-        { style: 'danger' },
-      )
-      kb.row()
-      kb.text(
-        say({ en: '📥 Export my data', es: '📥 Exportar mis datos' }, lang),
-        exportCb.pack({}),
-      )
-      kb.row()
-    }
-    // Privacy link.
-    kb.url(say({ en: '📖 Privacy', es: '📖 Privacidad' }, lang), menu._opts.privacy)
-    kb.row()
-  } else {
-    const backPath = parentPath.slice(0, -1).join('.')
-    kb.text(
-      say({ en: '⬅️ Back', es: '⬅️ Volver' }, lang),
-      navCb.pack({ path: backPath || '_root' }),
-    )
-  }
+	const lang = ctxLang(ctx);
+	if (parentPath.length === 0) {
+		// Forget / Export buttons at the root view.
+		if (menu._opts.personalData) {
+			kb.text(
+				say({ en: "🗑 Forget my data", es: "🗑 Olvidar mis datos" }, lang),
+				actCb.pack({ path: "_forget" }),
+				{ style: "danger" },
+			);
+			kb.row();
+			kb.text(
+				say({ en: "📥 Export my data", es: "📥 Exportar mis datos" }, lang),
+				exportCb.pack({}),
+			);
+			kb.row();
+		}
+		// Privacy link.
+		kb.url(
+			say({ en: "📖 Privacy", es: "📖 Privacidad" }, lang),
+			menu._opts.privacy,
+		);
+		kb.row();
+	} else {
+		const backPath = parentPath.slice(0, -1).join(".");
+		kb.text(
+			say({ en: "⬅️ Back", es: "⬅️ Volver" }, lang),
+			navCb.pack({ path: backPath || "_root" }),
+		);
+	}
 
-  return kb
-}
+	return kb;
+};
 
 const renderConfirmForget = (lang: string): InlineKeyboard =>
-  new InlineKeyboard()
-    .text(
-      say({ en: '✅ Confirm delete', es: '✅ Confirmar borrado' }, lang),
-      forgetConfirmCb.pack({}),
-      { style: 'danger' },
-    )
-    .row()
-    .text(
-      say({ en: '⬅️ Cancel', es: '⬅️ Cancelar' }, lang),
-      forgetCancelCb.pack({}),
-    )
+	new InlineKeyboard()
+		.text(
+			say({ en: "✅ Confirm delete", es: "✅ Confirmar borrado" }, lang),
+			forgetConfirmCb.pack({}),
+			{ style: "danger" },
+		)
+		.row()
+		.text(
+			say({ en: "⬅️ Cancel", es: "⬅️ Cancelar" }, lang),
+			forgetCancelCb.pack({}),
+		);
 
 const buildMenuPlugin = (menu: BotMenu) => {
-  const { command, description, header, personalData, adminContact } = menu._opts
+	const { command, description, header, personalData, adminContact } =
+		menu._opts;
 
-  return new Plugin('@adriangalilea/utils/bot/menu')
-    .command(command, { description }, async (ctx) => {
-      const kb = renderKeyboard(menu, menu._items, ctx, [])
-      await ctx.send(labelOf(header, ctx), { reply_markup: kb })
-    })
-    // Navigate (root / submenu)
-    .callbackQuery(navCb, async (ctx) => {
-      const lang = ctxLang(ctx)
-      const raw = ctx.queryData.path
-      const segments = raw === '_root' ? [] : raw.split('.')
-      const items = itemsForPath(menu._items, segments)
-      if (!items) {
-        await ctx.answer({
-          text: say({ en: 'Menu out of date.', es: 'Menú obsoleto.' }, lang),
-        })
-        return
-      }
-      await ctx.answer({})
-      const kb = renderKeyboard(menu, items, ctx, segments)
-      try {
-        await ctx.editText(labelOf(header, ctx), { reply_markup: kb })
-      } catch {
-        // message too old to edit
-      }
-    })
-    // Action items + the forget pre-confirmation
-    .callbackQuery(actCb, async (ctx) => {
-      const lang = ctxLang(ctx)
-      const raw = ctx.queryData.path
-      if (raw === '_forget') {
-        await ctx.answer({})
-        try {
-          await ctx.editText(
-            say(
-              {
-                en:
-                  '⚠️ Delete all your data?\n\n' +
-                  'This removes the session record we keep about you ' +
-                  '(preferences, history, access state). Not reversible.',
-                es:
-                  '⚠️ ¿Borrar todos tus datos?\n\n' +
-                  'Esto elimina el registro de sesión que guardamos sobre ti ' +
-                  '(preferencias, historial, estado de acceso). No se puede deshacer.',
-              },
-              lang,
-            ),
-            { reply_markup: renderConfirmForget(lang) },
-          )
-        } catch {
-          /* ignore */
-        }
-        return
-      }
-      const segments = raw.split('.')
-      const item = itemForPath(menu._items, segments)
-      if (!item || !('action' in item)) {
-        await ctx.answer({
-          text: say({ en: 'Item not found.', es: 'Elemento no encontrado.' }, lang),
-        })
-        return
-      }
+	return (
+		new Plugin("@adriangalilea/utils/bot/menu")
+			.command(command, { description }, async (ctx) => {
+				const kb = renderKeyboard(menu, menu._items, ctx, []);
+				await ctx.send(labelOf(header, ctx), { reply_markup: kb });
+			})
+			// Navigate (root / submenu)
+			.callbackQuery(navCb, async (ctx) => {
+				const lang = ctxLang(ctx);
+				const raw = ctx.queryData.path;
+				const segments = raw === "_root" ? [] : raw.split(".");
+				const items = itemsForPath(menu._items, segments);
+				if (!items) {
+					await ctx.answer({
+						text: say({ en: "Menu out of date.", es: "Menú obsoleto." }, lang),
+					});
+					return;
+				}
+				await ctx.answer({});
+				const kb = renderKeyboard(menu, items, ctx, segments);
+				try {
+					await ctx.editText(labelOf(header, ctx), { reply_markup: kb });
+				} catch {
+					// message too old to edit
+				}
+			})
+			// Action items + the forget pre-confirmation
+			.callbackQuery(actCb, async (ctx) => {
+				const lang = ctxLang(ctx);
+				const raw = ctx.queryData.path;
+				if (raw === "_forget") {
+					await ctx.answer({});
+					try {
+						await ctx.editText(
+							say(
+								{
+									en:
+										"⚠️ Delete all your data?\n\n" +
+										"This removes the session record we keep about you " +
+										"(preferences, history, access state). Not reversible.",
+									es:
+										"⚠️ ¿Borrar todos tus datos?\n\n" +
+										"Esto elimina el registro de sesión que guardamos sobre ti " +
+										"(preferencias, historial, estado de acceso). No se puede deshacer.",
+								},
+								lang,
+							),
+							{ reply_markup: renderConfirmForget(lang) },
+						);
+					} catch {
+						/* ignore */
+					}
+					return;
+				}
+				const segments = raw.split(".");
+				const item = itemForPath(menu._items, segments);
+				if (!item || !("action" in item)) {
+					await ctx.answer({
+						text: say(
+							{ en: "Item not found.", es: "Elemento no encontrado." },
+							lang,
+						),
+					});
+					return;
+				}
 
-      // If the item declares a `confirm` step, this first tap renders
-      // the confirmation overlay in place instead of running the
-      // action. The real action runs on actConfirmCb (Confirm tap).
-      if (item.confirm) {
-        await ctx.answer({})
-        const promptText = labelOf(item.confirm.prompt, ctx)
-        const confirmLabel = item.confirm.confirmLabel
-          ? labelOf(item.confirm.confirmLabel, ctx)
-          : say({ en: '✅ Confirm', es: '✅ Confirmar' }, lang)
-        const cancelLabel = item.confirm.cancelLabel
-          ? labelOf(item.confirm.cancelLabel, ctx)
-          : say({ en: '⬅️ Cancel', es: '⬅️ Cancelar' }, lang)
-        try {
-          await ctx.editText(promptText, {
-            reply_markup: new InlineKeyboard()
-              .text(confirmLabel, actConfirmCb.pack({ path: raw }), {
-                style: 'danger',
-              })
-              .row()
-              .text(cancelLabel, navCb.pack({ path: '_root' })),
-          })
-        } catch {
-          /* message too old to edit */
-        }
-        return
-      }
+				// If the item declares a `confirm` step, this first tap renders
+				// the confirmation overlay in place instead of running the
+				// action. The real action runs on actConfirmCb (Confirm tap).
+				if (item.confirm) {
+					await ctx.answer({});
+					const promptText = labelOf(item.confirm.prompt, ctx);
+					const confirmLabel = item.confirm.confirmLabel
+						? labelOf(item.confirm.confirmLabel, ctx)
+						: say({ en: "✅ Confirm", es: "✅ Confirmar" }, lang);
+					const cancelLabel = item.confirm.cancelLabel
+						? labelOf(item.confirm.cancelLabel, ctx)
+						: say({ en: "⬅️ Cancel", es: "⬅️ Cancelar" }, lang);
+					try {
+						await ctx.editText(promptText, {
+							reply_markup: new InlineKeyboard()
+								.text(confirmLabel, actConfirmCb.pack({ path: raw }), {
+									style: "danger",
+								})
+								.row()
+								.text(cancelLabel, navCb.pack({ path: "_root" })),
+						});
+					} catch {
+						/* message too old to edit */
+					}
+					return;
+				}
 
-      // Run the action, capture its toast (if any). The menu owns the
-      // single `answerCallbackQuery` call for this query — actions
-      // return strings / polyglots instead of calling answer
-      // themselves, so we never double-answer (Telegram rejects that
-      // and would block `refresh: true` from running).
-      let toast: ActionResult
-      try {
-        toast = await item.action(ctx)
-      } catch (e) {
-        // Clear the spinner so the user isn't left hanging, then
-        // re-throw so gramio's error handler / our `onError` paths see
-        // the failure.
-        try {
-          await ctx.answer({})
-        } catch {
-          /* ignore — Telegram already closed the query */
-        }
-        throw e
-      }
+				// Run the action, capture its toast (if any). The menu owns the
+				// single `answerCallbackQuery` call for this query — actions
+				// return strings / polyglots instead of calling answer
+				// themselves, so we never double-answer (Telegram rejects that
+				// and would block `refresh: true` from running).
+				let toast: ActionResult;
+				try {
+					toast = await item.action(ctx);
+				} catch (e) {
+					// Clear the spinner so the user isn't left hanging, then
+					// re-throw so gramio's error handler / our `onError` paths see
+					// the failure.
+					try {
+						await ctx.answer({});
+					} catch {
+						/* ignore — Telegram already closed the query */
+					}
+					throw e;
+				}
 
-      const text =
-        typeof toast === 'string'
-          ? toast
-          : toast === undefined
-            ? undefined
-            : say(toast, lang)
-      await ctx.answer(text === undefined ? {} : { text })
+				const text =
+					typeof toast === "string"
+						? toast
+						: toast === undefined
+							? undefined
+							: say(toast, lang);
+				await ctx.answer(text === undefined ? {} : { text });
 
-      // If the action wants the menu to reflect mutated state (toggles,
-      // mutually-exclusive selections, …), re-render the parent path
-      // in place so dynamic `label` / `style` resolvers update without
-      // the user having to re-open the menu.
-      if (item.refresh) {
-        const parentPath = segments.slice(0, -1)
-        const items = itemsForPath(menu._items, parentPath)
-        if (items) {
-          const kb = renderKeyboard(menu, items, ctx, parentPath)
-          try {
-            await ctx.editText(labelOf(header, ctx), { reply_markup: kb })
-          } catch {
-            // message too old to edit
-          }
-        }
-      }
-    })
-    // Confirmed tap on a `confirm:`-flagged action item: run the
-    // action with the same return-value contract as actCb, then
-    // navigate back to root so the user lands in a meaningful state.
-    .callbackQuery(actConfirmCb, async (ctx) => {
-      const lang = ctxLang(ctx)
-      const raw = ctx.queryData.path
-      const segments = raw.split('.')
-      const item = itemForPath(menu._items, segments)
-      if (!item || !('action' in item)) {
-        await ctx.answer({
-          text: say({ en: 'Item not found.', es: 'Elemento no encontrado.' }, lang),
-        })
-        return
-      }
+				// If the action wants the menu to reflect mutated state (toggles,
+				// mutually-exclusive selections, …), re-render the parent path
+				// in place so dynamic `label` / `style` resolvers update without
+				// the user having to re-open the menu.
+				if (item.refresh) {
+					const parentPath = segments.slice(0, -1);
+					const items = itemsForPath(menu._items, parentPath);
+					if (items) {
+						const kb = renderKeyboard(menu, items, ctx, parentPath);
+						try {
+							await ctx.editText(labelOf(header, ctx), { reply_markup: kb });
+						} catch {
+							// message too old to edit
+						}
+					}
+				}
+			})
+			// Confirmed tap on a `confirm:`-flagged action item: run the
+			// action with the same return-value contract as actCb, then
+			// navigate back to root so the user lands in a meaningful state.
+			.callbackQuery(actConfirmCb, async (ctx) => {
+				const lang = ctxLang(ctx);
+				const raw = ctx.queryData.path;
+				const segments = raw.split(".");
+				const item = itemForPath(menu._items, segments);
+				if (!item || !("action" in item)) {
+					await ctx.answer({
+						text: say(
+							{ en: "Item not found.", es: "Elemento no encontrado." },
+							lang,
+						),
+					});
+					return;
+				}
 
-      let toast: ActionResult
-      try {
-        toast = await item.action(ctx)
-      } catch (e) {
-        try {
-          await ctx.answer({})
-        } catch {
-          /* ignore */
-        }
-        throw e
-      }
+				let toast: ActionResult;
+				try {
+					toast = await item.action(ctx);
+				} catch (e) {
+					try {
+						await ctx.answer({});
+					} catch {
+						/* ignore */
+					}
+					throw e;
+				}
 
-      const text =
-        typeof toast === 'string'
-          ? toast
-          : toast === undefined
-            ? undefined
-            : say(toast, lang)
-      await ctx.answer(text === undefined ? {} : { text })
+				const text =
+					typeof toast === "string"
+						? toast
+						: toast === undefined
+							? undefined
+							: say(toast, lang);
+				await ctx.answer(text === undefined ? {} : { text });
 
-      // Always navigate back to root after a confirmed destructive
-      // action — the previous context (where the user tapped) might
-      // not make sense anymore.
-      const kb = renderKeyboard(menu, menu._items, ctx, [])
-      try {
-        await ctx.editText(labelOf(header, ctx), { reply_markup: kb })
-      } catch {
-        /* ignore */
-      }
-    })
-    // Forget — confirm path
-    .callbackQuery(forgetConfirmCb, async (ctx) => {
-      const lang = ctxLang(ctx)
-      if (!personalData) {
-        await ctx.answer({
-          text: say({ en: 'Not configured.', es: 'No configurado.' }, lang),
-          show_alert: true,
-        })
-        return
-      }
-      const userId = ctx.from?.id
-      if (userId === undefined)
-        return ctx.answer({
-          text: say({ en: 'No user.', es: 'Sin usuario.' }, lang),
-        })
+				// Always navigate back to root after a confirmed destructive
+				// action — the previous context (where the user tapped) might
+				// not make sense anymore.
+				const kb = renderKeyboard(menu, menu._items, ctx, []);
+				try {
+					await ctx.editText(labelOf(header, ctx), { reply_markup: kb });
+				} catch {
+					/* ignore */
+				}
+			})
+			// Forget — confirm path
+			.callbackQuery(forgetConfirmCb, async (ctx) => {
+				const lang = ctxLang(ctx);
+				if (!personalData) {
+					await ctx.answer({
+						text: say({ en: "Not configured.", es: "No configurado." }, lang),
+						show_alert: true,
+					});
+					return;
+				}
+				const userId = ctx.from?.id;
+				if (userId === undefined)
+					return ctx.answer({
+						text: say({ en: "No user.", es: "Sin usuario." }, lang),
+					});
 
-      try {
-        await personalData.storage.delete(personalData.sessionKey(userId))
-        await ctx.answer({
-          text: say({ en: 'Deleted.', es: 'Borrado.' }, lang),
-        })
-        try {
-          await ctx.editText(
-            say(
-              {
-                en: '✅ Your data has been deleted.',
-                es: '✅ Tus datos han sido borrados.',
-              },
-              lang,
-            ),
-          )
-        } catch {
-          /* ignore */
-        }
-      } catch (e) {
-        console.error('[menu] /forget failed', e)
-        await ctx.answer({
-          text: say({ en: 'Failed.', es: 'Falló.' }, lang),
-        })
-        await ctx.send(
-          say(
-            {
-              en: `❌ Could not delete your data.\n\nPlease contact ${adminContact}.`,
-              es: `❌ No se han podido borrar tus datos.\n\nContacta con ${adminContact}.`,
-            },
-            lang,
-          ),
-        )
-      }
-    })
-    .callbackQuery(forgetCancelCb, async (ctx) => {
-      await ctx.answer({})
-      const kb = renderKeyboard(menu, menu._items, ctx, [])
-      try {
-        await ctx.editText(labelOf(header, ctx), { reply_markup: kb })
-      } catch {
-        /* ignore */
-      }
-    })
-    // Export — JSON file with the user's whole session record
-    .callbackQuery(exportCb, async (ctx) => {
-      const lang = ctxLang(ctx)
-      if (!personalData) {
-        await ctx.answer({
-          text: say({ en: 'Not configured.', es: 'No configurado.' }, lang),
-          show_alert: true,
-        })
-        return
-      }
-      const userId = ctx.from?.id
-      if (userId === undefined)
-        return ctx.answer({
-          text: say({ en: 'No user.', es: 'Sin usuario.' }, lang),
-        })
+				try {
+					await personalData.storage.delete(personalData.sessionKey(userId));
+					await ctx.answer({
+						text: say({ en: "Deleted.", es: "Borrado." }, lang),
+					});
+					try {
+						await ctx.editText(
+							say(
+								{
+									en: "✅ Your data has been deleted.",
+									es: "✅ Tus datos han sido borrados.",
+								},
+								lang,
+							),
+						);
+					} catch {
+						/* ignore */
+					}
+				} catch (e) {
+					console.error("[menu] /forget failed", e);
+					await ctx.answer({
+						text: say({ en: "Failed.", es: "Falló." }, lang),
+					});
+					await ctx.send(
+						say(
+							{
+								en: `❌ Could not delete your data.\n\nPlease contact ${adminContact}.`,
+								es: `❌ No se han podido borrar tus datos.\n\nContacta con ${adminContact}.`,
+							},
+							lang,
+						),
+					);
+				}
+			})
+			.callbackQuery(forgetCancelCb, async (ctx) => {
+				await ctx.answer({});
+				const kb = renderKeyboard(menu, menu._items, ctx, []);
+				try {
+					await ctx.editText(labelOf(header, ctx), { reply_markup: kb });
+				} catch {
+					/* ignore */
+				}
+			})
+			// Export — JSON file with the user's whole session record
+			.callbackQuery(exportCb, async (ctx) => {
+				const lang = ctxLang(ctx);
+				if (!personalData) {
+					await ctx.answer({
+						text: say({ en: "Not configured.", es: "No configurado." }, lang),
+						show_alert: true,
+					});
+					return;
+				}
+				const userId = ctx.from?.id;
+				if (userId === undefined)
+					return ctx.answer({
+						text: say({ en: "No user.", es: "Sin usuario." }, lang),
+					});
 
-      const record =
-        (await personalData.storage.get(personalData.sessionKey(userId))) ?? {}
-      const file = new File(
-        [JSON.stringify({ userId, exportedAt: Date.now(), data: record }, null, 2)],
-        `my-data-${userId}-${Date.now()}.json`,
-        { type: 'application/json' },
-      )
+				const record =
+					(await personalData.storage.get(personalData.sessionKey(userId))) ??
+					{};
+				const file = new File(
+					[
+						JSON.stringify(
+							{ userId, exportedAt: Date.now(), data: record },
+							null,
+							2,
+						),
+					],
+					`my-data-${userId}-${Date.now()}.json`,
+					{ type: "application/json" },
+				);
 
-      await ctx.answer({})
-      try {
-        await ctx.sendDocument(file, {
-          caption: say(
-            { en: '📥 Your data export', es: '📥 Exportación de tus datos' },
-            lang,
-          ),
-        })
-      } catch (e) {
-        console.error('[menu] /export sendDocument failed', e)
-        await ctx.send(
-          say(
-            {
-              en: `❌ Could not send your data export.\n\nPlease contact ${adminContact}.`,
-              es: `❌ No se ha podido enviar la exportación de tus datos.\n\nContacta con ${adminContact}.`,
-            },
-            lang,
-          ),
-        )
-      }
-    })
-}
+				await ctx.answer({});
+				try {
+					await ctx.sendDocument(file, {
+						caption: say(
+							{ en: "📥 Your data export", es: "📥 Exportación de tus datos" },
+							lang,
+						),
+					});
+				} catch (e) {
+					console.error("[menu] /export sendDocument failed", e);
+					await ctx.send(
+						say(
+							{
+								en: `❌ Could not send your data export.\n\nPlease contact ${adminContact}.`,
+								es: `❌ No se ha podido enviar la exportación de tus datos.\n\nContacta con ${adminContact}.`,
+							},
+							lang,
+						),
+					);
+				}
+			})
+	);
+};

@@ -1,4 +1,4 @@
-import { cryptoSymbolsData, lastUpdated, symbolCount } from './crypto-symbols-data.js'
+import { cryptoSymbolsData } from "./crypto-symbols-data.js";
 
 /**
  * Set of all known cryptocurrency symbols
@@ -6,19 +6,19 @@ import { cryptoSymbolsData, lastUpdated, symbolCount } from './crypto-symbols-da
  * Last updated: ${lastUpdated}
  * Run 'npm run update-crypto' to refresh
  */
-export const cryptoSymbols = new Set(cryptoSymbolsData)
+export const cryptoSymbols = new Set(cryptoSymbolsData);
 
 /**
  * Check if a symbol is a known cryptocurrency
  * @param symbol - The symbol to check (case-insensitive)
  * @returns true if the symbol is in the crypto list
- * 
+ *
  * @example
  * isCryptoSymbol("BTC") // true
- * isCryptoSymbol("btc") // true  
+ * isCryptoSymbol("btc") // true
  * isCryptoSymbol("ETH") // true
  * isCryptoSymbol("DOGE") // true
  */
 export function isCryptoSymbol(symbol: string): boolean {
-  return cryptoSymbols.has(symbol.toUpperCase())
+	return cryptoSymbols.has(symbol.toUpperCase());
 }

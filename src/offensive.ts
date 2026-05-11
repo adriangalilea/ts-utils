@@ -43,10 +43,10 @@
  * expect(() => assert(false, 'boom')).toThrow(Panic)
  */
 export class Panic extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'Panic'
-  }
+	constructor(message: string) {
+		super(message);
+		this.name = "Panic";
+	}
 }
 
 /**
@@ -57,7 +57,7 @@ export class Panic extends Error {
  * assert(port > 0 && port < 65536, 'invalid port:', port)
  */
 export function assert(condition: boolean, ...msg: any[]): asserts condition {
-  if (!condition) throw new Panic(msg.join(' ') || 'assertion failed')
+	if (!condition) throw new Panic(msg.join(" ") || "assertion failed");
 }
 
 /**
@@ -71,7 +71,7 @@ export function assert(condition: boolean, ...msg: any[]): asserts condition {
  * }
  */
 export function panic(...msg: any[]): never {
-  throw new Panic(msg.join(' ') || 'panic')
+	throw new Panic(msg.join(" ") || "panic");
 }
 
 /**
@@ -91,7 +91,9 @@ export function panic(...msg: any[]): never {
  * }
  */
 export function assertNever(value: never, ...msg: any[]): never {
-  throw new Panic(msg.join(' ') || `assertNever: unexpected value: ${JSON.stringify(value)}`)
+	throw new Panic(
+		msg.join(" ") || `assertNever: unexpected value: ${JSON.stringify(value)}`,
+	);
 }
 
 /**
@@ -102,20 +104,20 @@ export function assertNever(value: never, ...msg: any[]): never {
  * const file = await must(() => fs.promises.readFile(path))
  * const buf = must(() => readFileSync(path))
  */
-export function must<T>(fn: () => Promise<T>): Promise<T>
-export function must<T>(fn: () => T): T
+export function must<T>(fn: () => Promise<T>): Promise<T>;
+export function must<T>(fn: () => T): T;
 export function must<T>(fn: () => T | Promise<T>): T | Promise<T> {
-  try {
-    const result = fn()
-    if (result instanceof Promise) {
-      return result.catch(e => {
-        throw new Panic(e instanceof Error ? e.message : String(e))
-      })
-    }
-    return result
-  } catch (e) {
-    throw new Panic(e instanceof Error ? e.message : String(e))
-  }
+	try {
+		const result = fn();
+		if (result instanceof Promise) {
+			return result.catch((e) => {
+				throw new Panic(e instanceof Error ? e.message : String(e));
+			});
+		}
+		return result;
+	} catch (e) {
+		throw new Panic(e instanceof Error ? e.message : String(e));
+	}
 }
 
 /**
@@ -132,8 +134,8 @@ export function must<T>(fn: () => T | Promise<T>): T | Promise<T> {
  * const el = unwrap(document.getElementById('app'))
  */
 export function unwrap<T>(value: T | null | undefined, ...msg: any[]): T {
-  if (value == null) throw new Panic(msg.join(' ') || `unwrap: got ${value}`)
-  return value
+	if (value == null) throw new Panic(msg.join(" ") || `unwrap: got ${value}`);
+	return value;
 }
 
 /**
@@ -158,38 +160,45 @@ export function unwrap<T>(value: T | null | undefined, ...msg: any[]): T {
  * }
  */
 export class SourcedError<S extends string = string> extends Error {
-  readonly source: S
-  readonly operation: string
-  readonly status?: number
-  readonly context: Record<string, unknown>
+	readonly source: S;
+	readonly operation: string;
+	readonly status?: number;
+	readonly context: Record<string, unknown>;
 
-  constructor(args: {
-    source: S
-    operation: string
-    message: string
-    status?: number
-    cause?: unknown
-    context?: Record<string, unknown>
-  }) {
-    const status = args.status != null ? ` status=${args.status}` : ''
-    super(`[${args.source}:${args.operation}${status}] ${args.message}`, { cause: args.cause })
-    this.name = 'SourcedError'
-    this.source = args.source
-    this.operation = args.operation
-    this.status = args.status
-    this.context = args.context ?? {}
-  }
+	constructor(args: {
+		source: S;
+		operation: string;
+		message: string;
+		status?: number;
+		cause?: unknown;
+		context?: Record<string, unknown>;
+	}) {
+		const status = args.status != null ? ` status=${args.status}` : "";
+		super(`[${args.source}:${args.operation}${status}] ${args.message}`, {
+			cause: args.cause,
+		});
+		this.name = "SourcedError";
+		this.source = args.source;
+		this.operation = args.operation;
+		this.status = args.status;
+		this.context = args.context ?? {};
+	}
 
-  toJSON(): Record<string, unknown> {
-    return {
-      source: this.source,
-      operation: this.operation,
-      status: this.status,
-      message: this.message,
-      context: this.context,
-      cause: this.cause instanceof Error ? this.cause.message : this.cause != null ? String(this.cause) : null,
-    }
-  }
+	toJSON(): Record<string, unknown> {
+		return {
+			source: this.source,
+			operation: this.operation,
+			status: this.status,
+			message: this.message,
+			context: this.context,
+			cause:
+				this.cause instanceof Error
+					? this.cause.message
+					: this.cause != null
+						? String(this.cause)
+						: null,
+		};
+	}
 }
 
 /**
@@ -205,17 +214,22 @@ export class SourcedError<S extends string = string> extends Error {
  *   throw e
  * }
  */
-export function isSourcedError<S extends string>(e: unknown, source?: S): e is SourcedError<S> {
-  return e instanceof SourcedError && (source === undefined || e.source === source)
+export function isSourcedError<S extends string>(
+	e: unknown,
+	source?: S,
+): e is SourcedError<S> {
+	return (
+		e instanceof SourcedError && (source === undefined || e.source === source)
+	);
 }
 
 export const offensive = {
-  Panic,
-  assert,
-  panic,
-  assertNever,
-  must,
-  unwrap,
-  SourcedError,
-  isSourcedError,
-}
+	Panic,
+	assert,
+	panic,
+	assertNever,
+	must,
+	unwrap,
+	SourcedError,
+	isSourcedError,
+};

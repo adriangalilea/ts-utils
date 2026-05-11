@@ -80,13 +80,14 @@
  * }
  * await stream.end()
  */
-import { type DeriveDefinitions, Plugin } from 'gramio'
-import { session } from '@gramio/session'
-import { expandableBlockquote, type FormattableString } from '@gramio/format'
-import { markdownToFormattable } from '@gramio/format/markdown'
 
-import { say, type Polyglot } from '../say/index.js'
-import type { MenuItem } from './menu.js'
+import { expandableBlockquote, type FormattableString } from "@gramio/format";
+import { markdownToFormattable } from "@gramio/format/markdown";
+import type { session } from "@gramio/session";
+import { type DeriveDefinitions, Plugin } from "gramio";
+
+import type { Polyglot } from "../say/index.js";
+import type { MenuItem } from "./menu.js";
 
 // ─── INPUT: OpenAI-compatible SSE parser ───────────────────────────
 
@@ -101,17 +102,17 @@ import type { MenuItem } from './menu.js'
  * (collapsed, italicized) if you want to surface thinking.
  */
 export type LLMChunk =
-  | { type: 'content'; text: string }
-  | { type: 'reasoning'; text: string }
+	| { type: "content"; text: string }
+	| { type: "reasoning"; text: string };
 
 /** OpenAI chat-completions chunk delta. Lifted into a real type so
  *  the parser's `any`-casts are contained to one spot. */
 type OpenAIDelta = {
-  content?: string
-  reasoning?: string
-  reasoning_content?: string
-}
-type OpenAIChunk = { choices?: Array<{ delta?: OpenAIDelta }> }
+	content?: string;
+	reasoning?: string;
+	reasoning_content?: string;
+};
+type OpenAIChunk = { choices?: Array<{ delta?: OpenAIDelta }> };
 
 /**
  * Parse an OpenAI-compatible chat-completions SSE response into a
@@ -142,237 +143,241 @@ type OpenAIChunk = { choices?: Array<{ delta?: OpenAIDelta }> }
  * }
  */
 export async function* streamChat(
-  response: Response,
+	response: Response,
 ): AsyncGenerator<LLMChunk> {
-  if (!response.body) throw new Error('streamChat: response.body is null')
+	if (!response.body) throw new Error("streamChat: response.body is null");
 
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
+	const reader = response.body.getReader();
+	const decoder = new TextDecoder();
+	let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? ''
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue
-      const data = line.slice(6).trim()
-      if (data === '[DONE]') continue
-      let parsed: OpenAIChunk
-      try {
-        parsed = JSON.parse(data) as OpenAIChunk
-      } catch {
-        continue
-      }
-      const delta = parsed.choices?.[0]?.delta
-      if (!delta) continue
-      const reasoning = delta.reasoning_content ?? delta.reasoning
-      if (typeof reasoning === 'string' && reasoning.length > 0) {
-        yield { type: 'reasoning', text: reasoning }
-      }
-      if (typeof delta.content === 'string' && delta.content.length > 0) {
-        yield { type: 'content', text: delta.content }
-      }
-    }
-  }
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		buffer += decoder.decode(value, { stream: true });
+		const lines = buffer.split("\n");
+		buffer = lines.pop() ?? "";
+		for (const line of lines) {
+			if (!line.startsWith("data: ")) continue;
+			const data = line.slice(6).trim();
+			if (data === "[DONE]") continue;
+			let parsed: OpenAIChunk;
+			try {
+				parsed = JSON.parse(data) as OpenAIChunk;
+			} catch {
+				continue;
+			}
+			const delta = parsed.choices?.[0]?.delta;
+			if (!delta) continue;
+			const reasoning = delta.reasoning_content ?? delta.reasoning;
+			if (typeof reasoning === "string" && reasoning.length > 0) {
+				yield { type: "reasoning", text: reasoning };
+			}
+			if (typeof delta.content === "string" && delta.content.length > 0) {
+				yield { type: "content", text: delta.content };
+			}
+		}
+	}
 }
 
 // ─── OUTPUT: Telegram streamer ─────────────────────────────────────
 
-const MAX_LEN = 4000 // Telegram caps at 4096; leave headroom for entity offsets
-const DEFAULT_DEBOUNCE_MS = 800
+const MAX_LEN = 4000; // Telegram caps at 4096; leave headroom for entity offsets
+const DEFAULT_DEBOUNCE_MS = 800;
 
 export type StreamOptions = {
-  /** Debounce window between edits, in ms. Default 800. */
-  debounceMs?: number
-  /** Initial placeholder shown until the first chunk arrives. Default "…". */
-  placeholder?: string
-  /** Parse buffer as markdown. Default true. Set false for plain text streaming. */
-  markdown?: boolean
-  /** Called on edit/send errors after internal recovery (rate limits, etc.). */
-  onError?: (err: unknown) => void
-}
+	/** Debounce window between edits, in ms. Default 800. */
+	debounceMs?: number;
+	/** Initial placeholder shown until the first chunk arrives. Default "…". */
+	placeholder?: string;
+	/** Parse buffer as markdown. Default true. Set false for plain text streaming. */
+	markdown?: boolean;
+	/** Called on edit/send errors after internal recovery (rate limits, etc.). */
+	onError?: (err: unknown) => void;
+};
 
 export class MarkdownStreamer {
-  private buffer = ''
-  private currentMessageId?: number
-  private firstSendPromise?: Promise<void>
-  private debounceTimer?: ReturnType<typeof setTimeout>
-  private inFlight = false
-  private dirty = false
-  private ended = false
-  /**
-   * `true` after `.end()` returns if the stream finished with un-flushed
-   * buffer or an outstanding error that the streamer couldn't recover
-   * from. Useful for partial-response diagnostics in catch blocks:
-   *
-   *   try { for await (...) await stream.append(...) }
-   *   finally {
-   *     await stream.end()
-   *     if (stream.wasPartial) logger.warn('LLM stream cut off')
-   *   }
-   */
-  wasPartial = false
+	private buffer = "";
+	private currentMessageId?: number;
+	private firstSendPromise?: Promise<void>;
+	private debounceTimer?: ReturnType<typeof setTimeout>;
+	private inFlight = false;
+	private dirty = false;
+	private ended = false;
+	/**
+	 * `true` after `.end()` returns if the stream finished with un-flushed
+	 * buffer or an outstanding error that the streamer couldn't recover
+	 * from. Useful for partial-response diagnostics in catch blocks:
+	 *
+	 *   try { for await (...) await stream.append(...) }
+	 *   finally {
+	 *     await stream.end()
+	 *     if (stream.wasPartial) logger.warn('LLM stream cut off')
+	 *   }
+	 */
+	wasPartial = false;
 
-  private chatId: number
-  private threadId?: number
-  // Match gramio's `bot.api` shape structurally. `text` accepts string or any
-  // `Formattable` (from `@gramio/format`) — both stringify safely. We don't
-  // import gramio's full Bot type to keep the streamer testable in isolation.
-  private bot: {
-    api: {
-      sendMessage: (p: {
-        chat_id: number
-        message_thread_id?: number
-        text: string | { toString(): string }
-      }) => Promise<{ message_id: number }>
-      editMessageText: (p: {
-        chat_id: number
-        message_id: number
-        text: string | { toString(): string }
-      }) => Promise<unknown>
-    }
-  }
-  private opts: Required<StreamOptions>
+	private chatId: number;
+	private threadId?: number;
+	// Match gramio's `bot.api` shape structurally. `text` accepts string or any
+	// `Formattable` (from `@gramio/format`) — both stringify safely. We don't
+	// import gramio's full Bot type to keep the streamer testable in isolation.
+	private bot: {
+		api: {
+			sendMessage: (p: {
+				chat_id: number;
+				message_thread_id?: number;
+				text: string | { toString(): string };
+			}) => Promise<{ message_id: number }>;
+			editMessageText: (p: {
+				chat_id: number;
+				message_id: number;
+				text: string | { toString(): string };
+			}) => Promise<unknown>;
+		};
+	};
+	private opts: Required<StreamOptions>;
 
-  constructor(
-    ctx: {
-      chat: { id: number }
-      threadId?: number
-      bot: MarkdownStreamer['bot']
-    },
-    opts: StreamOptions,
-  ) {
-    this.chatId = ctx.chat.id
-    // Captured so the streamed reply stays in the same thread.
-    // We call bot.api.sendMessage directly (no ctx.send), so the
-    // SendMixin's auto-thread doesn't help us here.
-    this.threadId = ctx.threadId
-    this.bot = ctx.bot
-    this.opts = {
-      debounceMs: opts.debounceMs ?? DEFAULT_DEBOUNCE_MS,
-      placeholder: opts.placeholder ?? '…',
-      markdown: opts.markdown ?? true,
-      onError: opts.onError ?? ((e) => console.error('[bot/llm:stream]', e)),
-    }
-  }
+	constructor(
+		ctx: {
+			chat: { id: number };
+			threadId?: number;
+			bot: MarkdownStreamer["bot"];
+		},
+		opts: StreamOptions,
+	) {
+		this.chatId = ctx.chat.id;
+		// Captured so the streamed reply stays in the same thread.
+		// We call bot.api.sendMessage directly (no ctx.send), so the
+		// SendMixin's auto-thread doesn't help us here.
+		this.threadId = ctx.threadId;
+		this.bot = ctx.bot;
+		this.opts = {
+			debounceMs: opts.debounceMs ?? DEFAULT_DEBOUNCE_MS,
+			placeholder: opts.placeholder ?? "…",
+			markdown: opts.markdown ?? true,
+			onError: opts.onError ?? ((e) => console.error("[bot/llm:stream]", e)),
+		};
+	}
 
-  /** Append a chunk. Schedules a debounced edit. */
-  async append(text: string): Promise<void> {
-    if (this.ended) throw new Error('stream already ended')
-    if (!text) return
+	/** Append a chunk. Schedules a debounced edit. */
+	async append(text: string): Promise<void> {
+		if (this.ended) throw new Error("stream already ended");
+		if (!text) return;
 
-    // first chunk: send the placeholder so we have a message_id to edit.
-    // Serialized via firstSendPromise so concurrent appends don't double-send.
-    if (this.currentMessageId === undefined && !this.firstSendPromise) {
-      this.firstSendPromise = (async () => {
-        const sent = await this.bot.api.sendMessage({
-          chat_id: this.chatId,
-          ...(this.threadId !== undefined && { message_thread_id: this.threadId }),
-          text: this.opts.placeholder,
-        })
-        this.currentMessageId = sent.message_id
-      })()
-    }
-    if (this.firstSendPromise) await this.firstSendPromise
+		// first chunk: send the placeholder so we have a message_id to edit.
+		// Serialized via firstSendPromise so concurrent appends don't double-send.
+		if (this.currentMessageId === undefined && !this.firstSendPromise) {
+			this.firstSendPromise = (async () => {
+				const sent = await this.bot.api.sendMessage({
+					chat_id: this.chatId,
+					...(this.threadId !== undefined && {
+						message_thread_id: this.threadId,
+					}),
+					text: this.opts.placeholder,
+				});
+				this.currentMessageId = sent.message_id;
+			})();
+		}
+		if (this.firstSendPromise) await this.firstSendPromise;
 
-    // overflow: freeze current message at last good split, start a new one.
-    const next = this.buffer + text
-    if (next.length > MAX_LEN) {
-      const splitAt = findSplit(next, MAX_LEN)
-      const head = next.slice(0, splitAt)
-      const tail = next.slice(splitAt).trimStart()
+		// overflow: freeze current message at last good split, start a new one.
+		const next = this.buffer + text;
+		if (next.length > MAX_LEN) {
+			const splitAt = findSplit(next, MAX_LEN);
+			const head = next.slice(0, splitAt);
+			const tail = next.slice(splitAt).trimStart();
 
-      this.buffer = head
-      this.dirty = true
-      await this.flushNow() // commits head into current message
+			this.buffer = head;
+			this.dirty = true;
+			await this.flushNow(); // commits head into current message
 
-      this.buffer = ''
-      this.currentMessageId = undefined
-      this.firstSendPromise = undefined
-      this.dirty = false
-      if (this.debounceTimer) {
-        clearTimeout(this.debounceTimer)
-        this.debounceTimer = undefined
-      }
+			this.buffer = "";
+			this.currentMessageId = undefined;
+			this.firstSendPromise = undefined;
+			this.dirty = false;
+			if (this.debounceTimer) {
+				clearTimeout(this.debounceTimer);
+				this.debounceTimer = undefined;
+			}
 
-      if (tail) await this.append(tail)
-      return
-    }
+			if (tail) await this.append(tail);
+			return;
+		}
 
-    this.buffer = next
-    this.dirty = true
-    this.scheduleFlush()
-  }
+		this.buffer = next;
+		this.dirty = true;
+		this.scheduleFlush();
+	}
 
-  /** Flush any pending edit and close the stream. Idempotent. */
-  async end(): Promise<void> {
-    if (this.ended) return
-    this.ended = true
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer)
-      this.debounceTimer = undefined
-    }
-    while (this.inFlight) await sleep(50)
-    if (this.dirty) {
-      await this.flushNow()
-      // If `dirty` is still set after the final flush, an edit error
-      // re-armed it and there's nothing more we'll do. Mark partial
-      // so the caller can log / fall back.
-      if (this.dirty) this.wasPartial = true
-    }
-  }
+	/** Flush any pending edit and close the stream. Idempotent. */
+	async end(): Promise<void> {
+		if (this.ended) return;
+		this.ended = true;
+		if (this.debounceTimer) {
+			clearTimeout(this.debounceTimer);
+			this.debounceTimer = undefined;
+		}
+		while (this.inFlight) await sleep(50);
+		if (this.dirty) {
+			await this.flushNow();
+			// If `dirty` is still set after the final flush, an edit error
+			// re-armed it and there's nothing more we'll do. Mark partial
+			// so the caller can log / fall back.
+			if (this.dirty) this.wasPartial = true;
+		}
+	}
 
-  private scheduleFlush(): void {
-    if (this.debounceTimer) return
-    this.debounceTimer = setTimeout(async () => {
-      this.debounceTimer = undefined
-      if (this.inFlight) {
-        this.scheduleFlush()
-        return
-      }
-      await this.flushNow()
-      if (this.dirty && !this.ended) this.scheduleFlush()
-    }, this.opts.debounceMs)
-  }
+	private scheduleFlush(): void {
+		if (this.debounceTimer) return;
+		this.debounceTimer = setTimeout(async () => {
+			this.debounceTimer = undefined;
+			if (this.inFlight) {
+				this.scheduleFlush();
+				return;
+			}
+			await this.flushNow();
+			if (this.dirty && !this.ended) this.scheduleFlush();
+		}, this.opts.debounceMs);
+	}
 
-  private async flushNow(): Promise<void> {
-    if (!this.dirty) return
-    if (this.currentMessageId === undefined) {
-      // No active message yet — likely the first send is still in flight
-      // or the recovery path cleared it. Caller's next append() will
-      // re-create one.
-      return
-    }
-    this.inFlight = true
-    this.dirty = false
-    const snapshot = this.buffer
-    try {
-      const payload = this.opts.markdown ? markdownToFormattable(snapshot) : snapshot
-      await this.bot.api.editMessageText({
-        chat_id: this.chatId,
-        message_id: this.currentMessageId,
-        text: payload,
-      })
-    } catch (e) {
-      const msg = String((e as { message?: string } | undefined)?.message ?? e)
-      if (msg.includes('message is not modified')) {
-        // identical content — fine
-      } else if (msg.includes('message to edit not found')) {
-        // message gone (deleted by user, etc.) — restart with a fresh send
-        this.currentMessageId = undefined
-        this.firstSendPromise = undefined
-        this.dirty = true
-      } else {
-        this.dirty = true
-        this.opts.onError(e)
-      }
-    } finally {
-      this.inFlight = false
-    }
-  }
+	private async flushNow(): Promise<void> {
+		if (!this.dirty) return;
+		if (this.currentMessageId === undefined) {
+			// No active message yet — likely the first send is still in flight
+			// or the recovery path cleared it. Caller's next append() will
+			// re-create one.
+			return;
+		}
+		this.inFlight = true;
+		this.dirty = false;
+		const snapshot = this.buffer;
+		try {
+			const payload = this.opts.markdown
+				? markdownToFormattable(snapshot)
+				: snapshot;
+			await this.bot.api.editMessageText({
+				chat_id: this.chatId,
+				message_id: this.currentMessageId,
+				text: payload,
+			});
+		} catch (e) {
+			const msg = String((e as { message?: string } | undefined)?.message ?? e);
+			if (msg.includes("message is not modified")) {
+				// identical content — fine
+			} else if (msg.includes("message to edit not found")) {
+				// message gone (deleted by user, etc.) — restart with a fresh send
+				this.currentMessageId = undefined;
+				this.firstSendPromise = undefined;
+				this.dirty = true;
+			} else {
+				this.dirty = true;
+				this.opts.onError(e);
+			}
+		} finally {
+			this.inFlight = false;
+		}
+	}
 }
 
 /**
@@ -382,34 +387,37 @@ export class MarkdownStreamer {
  * `ctx.startStream({...})` override them.
  */
 export const llmStream = (defaults: StreamOptions = {}) =>
-  new Plugin('@adriangalilea/utils/bot/llm/stream').derive('message', (ctx) => ({
-    // gramio's `message` scope guarantees `ctx.chat`. `ctx.bot.api` is on
-    // every Context. Structural compat → no cast needed.
-    startStream: (opts: StreamOptions = {}) =>
-      new MarkdownStreamer(ctx, { ...defaults, ...opts }),
-    /**
-     * One-call helper for chat completions: consumes a `Response`
-     * (or any `AsyncIterable<LLMChunk>`), renders reasoning to an
-     * expandable blockquote message + content to a streamed markdown
-     * message, returns `{ content, reasoning }` when the stream ends.
-     */
-    startChatStream: (
-      source: Response | AsyncIterable<LLMChunk>,
-      opts: ChatStreamOptions = {},
-    ) => consumeChatStream(ctx, source, { ...defaults, ...opts }),
-  }))
+	new Plugin("@adriangalilea/utils/bot/llm/stream").derive(
+		"message",
+		(ctx) => ({
+			// gramio's `message` scope guarantees `ctx.chat`. `ctx.bot.api` is on
+			// every Context. Structural compat → no cast needed.
+			startStream: (opts: StreamOptions = {}) =>
+				new MarkdownStreamer(ctx, { ...defaults, ...opts }),
+			/**
+			 * One-call helper for chat completions: consumes a `Response`
+			 * (or any `AsyncIterable<LLMChunk>`), renders reasoning to an
+			 * expandable blockquote message + content to a streamed markdown
+			 * message, returns `{ content, reasoning }` when the stream ends.
+			 */
+			startChatStream: (
+				source: Response | AsyncIterable<LLMChunk>,
+				opts: ChatStreamOptions = {},
+			) => consumeChatStream(ctx, source, { ...defaults, ...opts }),
+		}),
+	);
 
 function findSplit(text: string, maxLen: number): number {
-  // Prefer paragraph break, then line, then space. Reject splits in the
-  // first half — better to truncate at maxLen than to leave a stub.
-  for (const sep of ['\n\n', '\n', ' ']) {
-    const idx = text.lastIndexOf(sep, maxLen)
-    if (idx > maxLen / 2) return idx
-  }
-  return maxLen
+	// Prefer paragraph break, then line, then space. Reject splits in the
+	// first half — better to truncate at maxLen than to leave a stub.
+	for (const sep of ["\n\n", "\n", " "]) {
+		const idx = text.lastIndexOf(sep, maxLen);
+		if (idx > maxLen / 2) return idx;
+	}
+	return maxLen;
 }
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // ─── PIPELINE: streamChat → Telegram with reasoning support ────────
 
@@ -420,13 +428,13 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
  * Telegram message and is rarely worth storing).
  */
 export type ChatStreamResult = {
-  /** Full assistant text concatenated from all `content` chunks. */
-  content: string
-  /** Full reasoning text concatenated from all `reasoning` chunks. Empty for non-thinking models. */
-  reasoning: string
-}
+	/** Full assistant text concatenated from all `content` chunks. */
+	content: string;
+	/** Full reasoning text concatenated from all `reasoning` chunks. Empty for non-thinking models. */
+	reasoning: string;
+};
 
-export type ChatStreamOptions = StreamOptions
+export type ChatStreamOptions = StreamOptions;
 
 /**
  * One-shot helper that consumes an LLM stream and renders BOTH phases
@@ -456,152 +464,156 @@ export type ChatStreamOptions = StreamOptions
  * const { content, reasoning } = await consumeChatStream(ctx, response)
  */
 export const consumeChatStream = async (
-  ctx: { chat: { id: number }; threadId?: number; bot: MarkdownStreamer['bot'] },
-  source: Response | AsyncIterable<LLMChunk>,
-  opts: ChatStreamOptions = {},
+	ctx: {
+		chat: { id: number };
+		threadId?: number;
+		bot: MarkdownStreamer["bot"];
+	},
+	source: Response | AsyncIterable<LLMChunk>,
+	opts: ChatStreamOptions = {},
 ): Promise<ChatStreamResult> => {
-  const chatId = ctx.chat.id
-  const threadId = ctx.threadId
-  const bot = ctx.bot
-  const debounceMs = opts.debounceMs ?? DEFAULT_DEBOUNCE_MS
+	const chatId = ctx.chat.id;
+	const threadId = ctx.threadId;
+	const bot = ctx.bot;
+	const debounceMs = opts.debounceMs ?? DEFAULT_DEBOUNCE_MS;
 
-  const gen: AsyncIterable<LLMChunk> =
-    source instanceof Response ? streamChat(source) : source
+	const gen: AsyncIterable<LLMChunk> =
+		source instanceof Response ? streamChat(source) : source;
 
-  // ─── reasoning state ────────────────────────────────────────────
-  let reasoning = ''
-  let reasoningMessageId: number | undefined
-  let reasoningTimer: ReturnType<typeof setTimeout> | undefined
-  let reasoningDirty = false
-  let reasoningInFlight = false
+	// ─── reasoning state ────────────────────────────────────────────
+	let reasoning = "";
+	let reasoningMessageId: number | undefined;
+	let reasoningTimer: ReturnType<typeof setTimeout> | undefined;
+	let reasoningDirty = false;
+	let reasoningInFlight = false;
 
-  // Same graceful-degradation pipeline as the content phase:
-  // markdownToFormattable parses the reasoning (lists, code blocks,
-  // bold — thinking models do emit markdown) into a FormattableString
-  // with native Telegram entities, and `expandableBlockquote` wraps
-  // the whole thing in a collapsed-by-default block quotation by
-  // adding the `expandable_blockquote` entity over the full text.
-  // Malformed mid-stream markdown degrades to plain text inside the
-  // blockquote instead of failing the message.
-  const renderReasoning = (): FormattableString =>
-    expandableBlockquote(markdownToFormattable(reasoning))
+	// Same graceful-degradation pipeline as the content phase:
+	// markdownToFormattable parses the reasoning (lists, code blocks,
+	// bold — thinking models do emit markdown) into a FormattableString
+	// with native Telegram entities, and `expandableBlockquote` wraps
+	// the whole thing in a collapsed-by-default block quotation by
+	// adding the `expandable_blockquote` entity over the full text.
+	// Malformed mid-stream markdown degrades to plain text inside the
+	// blockquote instead of failing the message.
+	const renderReasoning = (): FormattableString =>
+		expandableBlockquote(markdownToFormattable(reasoning));
 
-  const sendReasoningMessage = async (): Promise<void> => {
-    type SendParams = {
-      chat_id: number
-      message_thread_id?: number
-      text: FormattableString
-    }
-    const params: SendParams = {
-      chat_id: chatId,
-      ...(threadId !== undefined && { message_thread_id: threadId }),
-      text: renderReasoning(),
-    }
-    const sent = await (
-      bot.api.sendMessage as unknown as (
-        p: SendParams,
-      ) => Promise<{ message_id: number }>
-    )(params)
-    reasoningMessageId = sent.message_id
-  }
+	const sendReasoningMessage = async (): Promise<void> => {
+		type SendParams = {
+			chat_id: number;
+			message_thread_id?: number;
+			text: FormattableString;
+		};
+		const params: SendParams = {
+			chat_id: chatId,
+			...(threadId !== undefined && { message_thread_id: threadId }),
+			text: renderReasoning(),
+		};
+		const sent = await (
+			bot.api.sendMessage as unknown as (
+				p: SendParams,
+			) => Promise<{ message_id: number }>
+		)(params);
+		reasoningMessageId = sent.message_id;
+	};
 
-  const flushReasoning = async (): Promise<void> => {
-    if (!reasoningDirty || reasoningMessageId === undefined) return
-    reasoningInFlight = true
-    reasoningDirty = false
-    try {
-      type EditParams = {
-        chat_id: number
-        message_id: number
-        text: FormattableString
-      }
-      await (
-        bot.api.editMessageText as unknown as (
-          p: EditParams,
-        ) => Promise<unknown>
-      )({
-        chat_id: chatId,
-        message_id: reasoningMessageId,
-        text: renderReasoning(),
-      })
-    } catch (e) {
-      const msg = String((e as { message?: string } | undefined)?.message ?? e)
-      // "message is not modified" is benign when reasoning chunks
-      // arrive faster than the debounce can render.
-      if (!msg.includes('message is not modified')) {
-        reasoningDirty = true
-        opts.onError?.(e)
-      }
-    } finally {
-      reasoningInFlight = false
-    }
-  }
+	const flushReasoning = async (): Promise<void> => {
+		if (!reasoningDirty || reasoningMessageId === undefined) return;
+		reasoningInFlight = true;
+		reasoningDirty = false;
+		try {
+			type EditParams = {
+				chat_id: number;
+				message_id: number;
+				text: FormattableString;
+			};
+			await (
+				bot.api.editMessageText as unknown as (
+					p: EditParams,
+				) => Promise<unknown>
+			)({
+				chat_id: chatId,
+				message_id: reasoningMessageId,
+				text: renderReasoning(),
+			});
+		} catch (e) {
+			const msg = String((e as { message?: string } | undefined)?.message ?? e);
+			// "message is not modified" is benign when reasoning chunks
+			// arrive faster than the debounce can render.
+			if (!msg.includes("message is not modified")) {
+				reasoningDirty = true;
+				opts.onError?.(e);
+			}
+		} finally {
+			reasoningInFlight = false;
+		}
+	};
 
-  const scheduleReasoningFlush = (): void => {
-    if (reasoningTimer) return
-    reasoningTimer = setTimeout(async () => {
-      reasoningTimer = undefined
-      if (reasoningInFlight) {
-        scheduleReasoningFlush()
-        return
-      }
-      await flushReasoning()
-      if (reasoningDirty) scheduleReasoningFlush()
-    }, debounceMs)
-  }
+	const scheduleReasoningFlush = (): void => {
+		if (reasoningTimer) return;
+		reasoningTimer = setTimeout(async () => {
+			reasoningTimer = undefined;
+			if (reasoningInFlight) {
+				scheduleReasoningFlush();
+				return;
+			}
+			await flushReasoning();
+			if (reasoningDirty) scheduleReasoningFlush();
+		}, debounceMs);
+	};
 
-  // ─── content state ──────────────────────────────────────────────
-  let contentStreamer: MarkdownStreamer | undefined
-  let content = ''
+	// ─── content state ──────────────────────────────────────────────
+	let contentStreamer: MarkdownStreamer | undefined;
+	let content = "";
 
-  // ─── main loop ──────────────────────────────────────────────────
-  for await (const chunk of gen) {
-    if (chunk.type === 'reasoning') {
-      reasoning += chunk.text
-      if (reasoningMessageId === undefined) {
-        // Defer the first send until there's actually visible content.
-        // Some models (e.g. Gemma 4 via mlx-vlm's gemma4 reasoning
-        // parser) emit a leading whitespace-only chunk; Telegram
-        // rejects `sendMessage` with empty body. Accumulated reasoning
-        // keeps its full text — we just wait for the first
-        // non-whitespace before opening the blockquote message.
-        if (reasoning.trim().length > 0) {
-          await sendReasoningMessage()
-        }
-      } else {
-        reasoningDirty = true
-        scheduleReasoningFlush()
-      }
-    } else if (chunk.type === 'content') {
-      if (!contentStreamer) {
-        // Close out reasoning cleanly before content starts: flush any
-        // pending edit, drop the debounce. The blockquote stays in
-        // the chat as a finished message.
-        if (reasoningTimer) {
-          clearTimeout(reasoningTimer)
-          reasoningTimer = undefined
-        }
-        if (reasoningDirty) await flushReasoning()
-        contentStreamer = new MarkdownStreamer(
-          { chat: { id: chatId }, threadId, bot },
-          opts,
-        )
-      }
-      content += chunk.text
-      await contentStreamer.append(chunk.text)
-    }
-  }
+	// ─── main loop ──────────────────────────────────────────────────
+	for await (const chunk of gen) {
+		if (chunk.type === "reasoning") {
+			reasoning += chunk.text;
+			if (reasoningMessageId === undefined) {
+				// Defer the first send until there's actually visible content.
+				// Some models (e.g. Gemma 4 via mlx-vlm's gemma4 reasoning
+				// parser) emit a leading whitespace-only chunk; Telegram
+				// rejects `sendMessage` with empty body. Accumulated reasoning
+				// keeps its full text — we just wait for the first
+				// non-whitespace before opening the blockquote message.
+				if (reasoning.trim().length > 0) {
+					await sendReasoningMessage();
+				}
+			} else {
+				reasoningDirty = true;
+				scheduleReasoningFlush();
+			}
+		} else if (chunk.type === "content") {
+			if (!contentStreamer) {
+				// Close out reasoning cleanly before content starts: flush any
+				// pending edit, drop the debounce. The blockquote stays in
+				// the chat as a finished message.
+				if (reasoningTimer) {
+					clearTimeout(reasoningTimer);
+					reasoningTimer = undefined;
+				}
+				if (reasoningDirty) await flushReasoning();
+				contentStreamer = new MarkdownStreamer(
+					{ chat: { id: chatId }, threadId, bot },
+					opts,
+				);
+			}
+			content += chunk.text;
+			await contentStreamer.append(chunk.text);
+		}
+	}
 
-  // Trailing reasoning (model emitted reasoning but no content yet).
-  if (reasoningTimer) {
-    clearTimeout(reasoningTimer)
-    reasoningTimer = undefined
-  }
-  if (reasoningDirty) await flushReasoning()
-  await contentStreamer?.end()
+	// Trailing reasoning (model emitted reasoning but no content yet).
+	if (reasoningTimer) {
+		clearTimeout(reasoningTimer);
+		reasoningTimer = undefined;
+	}
+	if (reasoningDirty) await flushReasoning();
+	await contentStreamer?.end();
 
-  return { content, reasoning }
-}
+	return { content, reasoning };
+};
 
 // ─── HISTORY: per-thread conversation buffer ───────────────────────
 
@@ -611,11 +623,11 @@ export const consumeChatStream = async (
  * both http(s) and Telegram `getFile` resolved paths.
  */
 export type ChatContent =
-  | string
-  | Array<
-      | { type: 'text'; text: string }
-      | { type: 'image_url'; image_url: { url: string } }
-    >
+	| string
+	| Array<
+			| { type: "text"; text: string }
+			| { type: "image_url"; image_url: { url: string } }
+	  >;
 
 /**
  * One turn in the conversation. The library does NOT filter by role —
@@ -624,58 +636,60 @@ export type ChatContent =
  * persist `user` / `assistant`.
  */
 export type ChatMessage = {
-  role: 'system' | 'user' | 'assistant' | 'tool'
-  content: ChatContent
-  /** Unix seconds when added — used for retention pruning. */
-  date: number
-}
+	role: "system" | "user" | "assistant" | "tool";
+	content: ChatContent;
+	/** Unix seconds when added — used for retention pruning. */
+	date: number;
+};
 
 /** Per-thread shards of `ChatMessage`s, persisted in the session. */
 type ChatRecord = {
-  shards: { [threadKey: string]: ChatMessage[] }
-}
+	shards: { [threadKey: string]: ChatMessage[] };
+};
 
 /** Loose session shape — this plugin only touches the `llm` field. */
-type LLMSessionLike = { llm?: ChatRecord }
+type LLMSessionLike = { llm?: ChatRecord };
 
 /** @internal — kept unexported so it doesn't clash with peers' refs. */
-type LLMSessionPluginRef = ReturnType<typeof session<LLMSessionLike, 'session'>>
+type LLMSessionPluginRef = ReturnType<
+	typeof session<LLMSessionLike, "session">
+>;
 
 export type LLMHistoryOptions = {
-  /**
-   * Shared session plugin. This plugin extends it for type flow;
-   * gramio's runtime dedup ensures the session derive runs once.
-   */
-  session: LLMSessionPluginRef
-  /** Ring buffer cap **per thread**. Oldest entries dropped past this. */
-  maxTurns: number
-  /** Entries older than this (in days) are dropped on read. */
-  retentionDays: number
-  /**
-   * Override the labels of the `menuItem` (the "🧹 clear this thread"
-   * button rendered inside a `botMenu`). Defaults are polyglot
-   * literals covering en + es.
-   */
-  menuLabels?: {
-    /** Button label. Default: `{ en: '🧹 Clear this thread', es: '🧹 Limpiar este hilo' }`. */
-    item?: Polyglot<string>
-    /** Toast shown after a successful clear. Default: `{ en: '🧹 Cleared.', es: '🧹 Limpio.' }`. */
-    cleared?: Polyglot<string>
-    /** Confirmation overlay text. Default explains the per-thread scope. */
-    confirmPrompt?: Polyglot<string>
-  }
-}
+	/**
+	 * Shared session plugin. This plugin extends it for type flow;
+	 * gramio's runtime dedup ensures the session derive runs once.
+	 */
+	session: LLMSessionPluginRef;
+	/** Ring buffer cap **per thread**. Oldest entries dropped past this. */
+	maxTurns: number;
+	/** Entries older than this (in days) are dropped on read. */
+	retentionDays: number;
+	/**
+	 * Override the labels of the `menuItem` (the "🧹 clear this thread"
+	 * button rendered inside a `botMenu`). Defaults are polyglot
+	 * literals covering en + es.
+	 */
+	menuLabels?: {
+		/** Button label. Default: `{ en: '🧹 Clear this thread', es: '🧹 Limpiar este hilo' }`. */
+		item?: Polyglot<string>;
+		/** Toast shown after a successful clear. Default: `{ en: '🧹 Cleared.', es: '🧹 Limpio.' }`. */
+		cleared?: Polyglot<string>;
+		/** Confirmation overlay text. Default explains the per-thread scope. */
+		confirmPrompt?: Polyglot<string>;
+	};
+};
 
 export type LLMHistoryFeature = {
-  plugin: ReturnType<typeof buildHistoryPlugin>
-  /**
-   * Drop-in `MenuItem` for `botMenu({ items: [...] })`: a "clear this
-   * thread" button that calls `ctx.llm.clear()` on the current
-   * (user, thread) shard and acknowledges with a toast. Sibling
-   * threads stay intact.
-   */
-  menuItem: MenuItem
-}
+	plugin: ReturnType<typeof buildHistoryPlugin>;
+	/**
+	 * Drop-in `MenuItem` for `botMenu({ items: [...] })`: a "clear this
+	 * thread" button that calls `ctx.llm.clear()` on the current
+	 * (user, thread) shard and acknowledges with a toast. Sibling
+	 * threads stay intact.
+	 */
+	menuItem: MenuItem;
+};
 
 /**
  * Methods decorated onto `ctx.llm`. All synchronous — reads/writes the
@@ -686,56 +700,56 @@ export type LLMHistoryFeature = {
  * = different conversations, no leakage.
  */
 export type LLMHistoryApi = {
-  /** Append one message to the CURRENT thread's shard. */
-  add: (message: Omit<ChatMessage, 'date'> & { date?: number }) => void
-  /** Pruned snapshot of the CURRENT thread, oldest-first. */
-  get: () => ReadonlyArray<ChatMessage>
-  /** Wipe the CURRENT thread's shard. */
-  clear: () => void
-  /**
-   * Full sharded map, pruned. Use for /export or admin views. Keys are
-   * thread ids (or `'general'`) → ordered messages.
-   */
-  all: () => Readonly<{ [threadKey: string]: ReadonlyArray<ChatMessage> }>
-  /** Wipe ALL threads for this user. */
-  clearAll: () => void
-}
+	/** Append one message to the CURRENT thread's shard. */
+	add: (message: Omit<ChatMessage, "date"> & { date?: number }) => void;
+	/** Pruned snapshot of the CURRENT thread, oldest-first. */
+	get: () => ReadonlyArray<ChatMessage>;
+	/** Wipe the CURRENT thread's shard. */
+	clear: () => void;
+	/**
+	 * Full sharded map, pruned. Use for /export or admin views. Keys are
+	 * thread ids (or `'general'`) → ordered messages.
+	 */
+	all: () => Readonly<{ [threadKey: string]: ReadonlyArray<ChatMessage> }>;
+	/** Wipe ALL threads for this user. */
+	clearAll: () => void;
+};
 
-type LLMHistoryDerives = { llm: LLMHistoryApi }
+type LLMHistoryDerives = { llm: LLMHistoryApi };
 
-const GENERAL_THREAD = 'general'
+const GENERAL_THREAD = "general";
 
 const threadKey = (ctx: {
-  threadId?: number
-  message?: { threadId?: number }
+	threadId?: number;
+	message?: { threadId?: number };
 }): string => {
-  // Message events: ctx.threadId. Callback events: ctx.message.threadId.
-  const tid = ctx.threadId ?? ctx.message?.threadId
-  return tid !== undefined ? String(tid) : GENERAL_THREAD
-}
+	// Message events: ctx.threadId. Callback events: ctx.message.threadId.
+	const tid = ctx.threadId ?? ctx.message?.threadId;
+	return tid !== undefined ? String(tid) : GENERAL_THREAD;
+};
 
 const prune = (
-  items: ChatMessage[],
-  maxTurns: number,
-  retentionDays: number,
+	items: ChatMessage[],
+	maxTurns: number,
+	retentionDays: number,
 ): ChatMessage[] => {
-  const cutoffSec = Math.floor(Date.now() / 1000) - retentionDays * 86400
-  const fresh = items.filter((m) => m.date >= cutoffSec)
-  return fresh.slice(-maxTurns)
-}
+	const cutoffSec = Math.floor(Date.now() / 1000) - retentionDays * 86400;
+	const fresh = items.filter((m) => m.date >= cutoffSec);
+	return fresh.slice(-maxTurns);
+};
 
 const pruneAll = (
-  shards: ChatRecord['shards'],
-  maxTurns: number,
-  retentionDays: number,
-): ChatRecord['shards'] => {
-  const out: ChatRecord['shards'] = {}
-  for (const k of Object.keys(shards)) {
-    const pruned = prune(shards[k], maxTurns, retentionDays)
-    if (pruned.length > 0) out[k] = pruned
-  }
-  return out
-}
+	shards: ChatRecord["shards"],
+	maxTurns: number,
+	retentionDays: number,
+): ChatRecord["shards"] => {
+	const out: ChatRecord["shards"] = {};
+	for (const k of Object.keys(shards)) {
+		const pruned = prune(shards[k], maxTurns, retentionDays);
+		if (pruned.length > 0) out[k] = pruned;
+	}
+	return out;
+};
 
 /**
  * Per-(user, thread) LLM conversation history. Opt-in. Persists in the
@@ -754,103 +768,103 @@ const pruneAll = (
  *    })
  */
 export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
-  if (opts.maxTurns <= 0) throw new Error('llmHistory: maxTurns must be > 0')
-  if (opts.retentionDays <= 0) throw new Error('llmHistory: retentionDays must be > 0')
+	if (opts.maxTurns <= 0) throw new Error("llmHistory: maxTurns must be > 0");
+	if (opts.retentionDays <= 0)
+		throw new Error("llmHistory: retentionDays must be > 0");
 
-  const plugin = buildHistoryPlugin({
-    sessionPlugin: opts.session,
-    maxTurns: opts.maxTurns,
-    retentionDays: opts.retentionDays,
-  })
+	const plugin = buildHistoryPlugin({
+		sessionPlugin: opts.session,
+		maxTurns: opts.maxTurns,
+		retentionDays: opts.retentionDays,
+	});
 
-  const itemLabel: Polyglot<string> = opts.menuLabels?.item ?? {
-    en: '🧹 Clear this thread',
-    es: '🧹 Limpiar este hilo',
-  }
-  const clearedToast: Polyglot<string> = opts.menuLabels?.cleared ?? {
-    en: '🧹 Cleared.',
-    es: '🧹 Limpio.',
-  }
-  const confirmPrompt: Polyglot<string> = opts.menuLabels?.confirmPrompt ?? {
-    en: '⚠️ Clear conversation in this thread?\n\nThis removes the LLM history for THIS thread only. Other threads stay intact.',
-    es: '⚠️ ¿Limpiar la conversación de este hilo?\n\nBorra el historial LLM SOLO de este hilo. Los demás quedan intactos.',
-  }
+	const itemLabel: Polyglot<string> = opts.menuLabels?.item ?? {
+		en: "🧹 Clear this thread",
+		es: "🧹 Limpiar este hilo",
+	};
+	const clearedToast: Polyglot<string> = opts.menuLabels?.cleared ?? {
+		en: "🧹 Cleared.",
+		es: "🧹 Limpio.",
+	};
+	const confirmPrompt: Polyglot<string> = opts.menuLabels?.confirmPrompt ?? {
+		en: "⚠️ Clear conversation in this thread?\n\nThis removes the LLM history for THIS thread only. Other threads stay intact.",
+		es: "⚠️ ¿Limpiar la conversación de este hilo?\n\nBorra el historial LLM SOLO de este hilo. Los demás quedan intactos.",
+	};
 
-  const menuItem: MenuItem = {
-    id: 'llmClear',
-    label: itemLabel,
-    // Destructive action → red. Consistent with `botMenu`'s 🗑 Forget.
-    style: 'danger',
-    // One-step confirm overlay before the wipe — clearing per-thread
-    // conversation is non-reversible and Telegram's `show_alert` is
-    // too disruptive. See `MenuItem.confirm` for the pattern.
-    confirm: { prompt: confirmPrompt },
-    action: (ctx) => {
-      // The `llm` decoration comes from llmHistory's own plugin — not
-      // on MenuCtx's static shape, so we narrow here. Return the
-      // polyglot toast: the menu plugin owns the single
-      // answerCallbackQuery for this tap (calling ctx.answer here
-      // would be a double-answer → rejected → action throws).
-      const c = ctx as unknown as { llm?: LLMHistoryApi }
-      c.llm?.clear()
-      return clearedToast
-    },
-  }
+	const menuItem: MenuItem = {
+		id: "llmClear",
+		label: itemLabel,
+		// Destructive action → red. Consistent with `botMenu`'s 🗑 Forget.
+		style: "danger",
+		// One-step confirm overlay before the wipe — clearing per-thread
+		// conversation is non-reversible and Telegram's `show_alert` is
+		// too disruptive. See `MenuItem.confirm` for the pattern.
+		confirm: { prompt: confirmPrompt },
+		action: (ctx) => {
+			// The `llm` decoration comes from llmHistory's own plugin — not
+			// on MenuCtx's static shape, so we narrow here. Return the
+			// polyglot toast: the menu plugin owns the single
+			// answerCallbackQuery for this tap (calling ctx.answer here
+			// would be a double-answer → rejected → action throws).
+			const c = ctx as unknown as { llm?: LLMHistoryApi };
+			c.llm?.clear();
+			return clearedToast;
+		},
+	};
 
-  return { plugin, menuItem }
-}
+	return { plugin, menuItem };
+};
 
 const buildHistoryPlugin = (args: {
-  sessionPlugin: LLMSessionPluginRef
-  maxTurns: number
-  retentionDays: number
+	sessionPlugin: LLMSessionPluginRef;
+	maxTurns: number;
+	retentionDays: number;
 }) => {
-  const { sessionPlugin, maxTurns, retentionDays } = args
+	const { sessionPlugin, maxTurns, retentionDays } = args;
 
-  return new Plugin<{}, DeriveDefinitions & { global: LLMHistoryDerives }>(
-    '@adriangalilea/utils/bot/llm/history',
-  )
-    .extend(sessionPlugin)
-    .derive(['message', 'callback_query'], (ctx): LLMHistoryDerives => {
-      const key = threadKey(ctx)
+	return new Plugin<{}, DeriveDefinitions & { global: LLMHistoryDerives }>(
+		"@adriangalilea/utils/bot/llm/history",
+	)
+		.extend(sessionPlugin)
+		.derive(["message", "callback_query"], (ctx): LLMHistoryDerives => {
+			const key = threadKey(ctx);
 
-      // Always operate against a freshly-pruned view. Writes go to the
-      // pruned base so stale entries never resurface after a read.
-      const readShards = (): ChatRecord['shards'] =>
-        pruneAll(ctx.session.llm?.shards ?? {}, maxTurns, retentionDays)
+			// Always operate against a freshly-pruned view. Writes go to the
+			// pruned base so stale entries never resurface after a read.
+			const readShards = (): ChatRecord["shards"] =>
+				pruneAll(ctx.session.llm?.shards ?? {}, maxTurns, retentionDays);
 
-      const writeShards = (shards: ChatRecord['shards']): void => {
-        ctx.session.llm = { shards }
-      }
+			const writeShards = (shards: ChatRecord["shards"]): void => {
+				ctx.session.llm = { shards };
+			};
 
-      return {
-        llm: {
-          add: (message) => {
-            const shards = readShards()
-            const cur = shards[key] ?? []
-            const entry: ChatMessage = {
-              role: message.role,
-              content: message.content,
-              date: message.date ?? Math.floor(Date.now() / 1000),
-            }
-            shards[key] = [...cur, entry].slice(-maxTurns)
-            writeShards(shards)
-          },
-          get: () =>
-            (readShards()[key] ?? []) as ReadonlyArray<ChatMessage>,
-          clear: () => {
-            const shards = readShards()
-            delete shards[key]
-            writeShards(shards)
-          },
-          all: () =>
-            readShards() as Readonly<{
-              [threadKey: string]: ReadonlyArray<ChatMessage>
-            }>,
-          clearAll: () => {
-            writeShards({})
-          },
-        },
-      }
-    })
-}
+			return {
+				llm: {
+					add: (message) => {
+						const shards = readShards();
+						const cur = shards[key] ?? [];
+						const entry: ChatMessage = {
+							role: message.role,
+							content: message.content,
+							date: message.date ?? Math.floor(Date.now() / 1000),
+						};
+						shards[key] = [...cur, entry].slice(-maxTurns);
+						writeShards(shards);
+					},
+					get: () => (readShards()[key] ?? []) as ReadonlyArray<ChatMessage>,
+					clear: () => {
+						const shards = readShards();
+						delete shards[key];
+						writeShards(shards);
+					},
+					all: () =>
+						readShards() as Readonly<{
+							[threadKey: string]: ReadonlyArray<ChatMessage>;
+						}>,
+					clearAll: () => {
+						writeShards({});
+					},
+				},
+			};
+		});
+};

@@ -42,7 +42,7 @@
  * Typing your own API: `function notify(msg: Polyglot<'en' | 'es'>)`
  * — callers must provide both keys.
  */
-export type Polyglot<L extends string> = Readonly<Record<L, string>>
+export type Polyglot<L extends string> = Readonly<Record<L, string>>;
 
 /**
  * Resolve a polyglot value to a string at `lang`.
@@ -61,8 +61,8 @@ export type Polyglot<L extends string> = Readonly<Record<L, string>>
  * say(raw, userLang)                            // dynamic, falls back if missing
  */
 export const say = <L extends string>(value: Polyglot<L>, lang: L): string => {
-  const direct = value[lang]
-  if (typeof direct === 'string') return direct
-  for (const k in value) return value[k as L]
-  return ''
-}
+	const direct = value[lang];
+	if (typeof direct === "string") return direct;
+	for (const k in value) return value[k as L];
+	return "";
+};
