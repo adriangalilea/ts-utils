@@ -13,8 +13,8 @@ optional** — install only what the subpaths you import need.
 | `bot/access-control` | `accessControl({ session, storage, defaults? })` — gates non-admin/non-default users; admin gets DM with `[✅ Aprobar][❌ Denegar]` on first attempt; persistent `/access` admin menu for revoke/reapprove/list. Exposes `simulateAccessRequest()` for tests. |
 | `bot/coalesce` | `coalesceLongMessages({ minLeadingLength?, windowMs?, acrossUsers?, log? })` — joins client-split inbound messages back into one event. Also exports `isCoalescent(prev, curr, opts)` as a pure utility. |
 | `bot/language` | `language({ session, supported, default, scope?, labels? })` — per-user BCP-47 preference; resolves `ctx.lang` (typed); decorates `ctx.say` (callable polyglot resolver + `.send` / `.edit` / `.answer` methods); supplies a `menuItem` for `botMenu`. |
-| `bot/llm` | The full LLM-chatbot pipeline in one module: `streamChat(response)` parses OpenAI-compatible SSE (OpenAI, vllm, mlx-lm, llama.cpp, Together, Groq, …) into `AsyncGenerator<{type, text}>` with `content` / `reasoning` separation; `llmStream()` adds `ctx.startStream()` for Telegram-side debounced markdown streaming; `llmHistory({ session, maxTurns, retentionDays })` decorates `ctx.llm` with `.add / .get / .clear / .all / .clearAll` — per-(user, thread) conversation buffer in OpenAI `ChatMessage` shape, persisted in the shared session record so the menu's 🗑 Forget wipes it automatically. |
-| `bot/menu` | `botMenu({ command, description, items, privacy?, personalData?, adminContact })` — `/settings` command + InlineKeyboard router. With `personalData: { storage }`, auto-adds 🗑 Forget + 📥 Export buttons. |
+| `bot/llm` | The full LLM-chatbot pipeline in one module. **Input:** `streamChat(response)` parses OpenAI-compatible SSE (OpenAI, vllm, mlx-lm, llama.cpp, Together, Groq, …) into `AsyncGenerator<{type, text}>` with `content` / `reasoning` separation. **Output:** `llmStream()` adds `ctx.startStream()` (low-level: debounced markdown to Telegram) AND `ctx.startChatStream(response)` (high-level: consumes the stream, renders reasoning as `expandable_blockquote` entity + content as streamed markdown — both phases go through `markdownToFormattable` with graceful degradation — returns `{ content, reasoning }`). `MarkdownStreamer.wasPartial` exposes whether `.end()` left buffered text un-flushed. **History:** `llmHistory({ session, maxTurns, retentionDays })` decorates `ctx.llm` with `.add / .get / .clear / .all / .clearAll` — per-(user, thread) conversation buffer in OpenAI `ChatMessage` shape, persisted in the shared session record so the menu's 🗑 Forget wipes it automatically. Also returns a drop-in `menuItem` ("🧹 Clear this thread") for `botMenu`. |
+| `bot/menu` | `botMenu({ command, description, items, privacy?, personalData?, adminContact })` — `/settings` command + InlineKeyboard router. With `personalData: { storage }`, auto-adds 🗑 Forget + 📥 Export buttons. `toggleMenuItem({ id, read, write, label: { off, on }, toast? })` factory builds a boolean-toggle menu item with dynamic label and optional toast — storage-agnostic via `read`/`write` closures. |
 
 Implementation files are flat under `src/bot/`. `index.ts` is the barrel for
 `@adriangalilea/utils/bot`.
@@ -59,9 +59,11 @@ const menu = botMenu({
   command: 'settings',
   description: 'Open settings',
   adminContact: '@yourhandle',
-  privacy: 'https://yourbot.com/privacy',     // override standard if you retain content
   personalData: { storage },                  // enables 🗑 Forget + 📥 Export (wipes ctx.llm too)
-  items: [lang.menuItem],
+  items: [
+    lang.menuItem,
+    chat.menuItem,                            // 🧹 Clear this thread
+  ],
 })
 
 const bot = new Bot(process.env.BOT_TOKEN!)

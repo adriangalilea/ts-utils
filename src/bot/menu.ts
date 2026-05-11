@@ -80,11 +80,31 @@ import { say, type Polyglot } from '../say/index.js'
 
 // ─── public types ──────────────────────────────────────────────────
 
-type MenuCtx = {
+/**
+ * Shape of the `ctx` an action / label / predicate sees.
+ *
+ * - Static fields (`bot`, `from`, `chat`, `session`, `threadId`,
+ *   `message`) come from gramio's `CallbackQueryContext`.
+ * - Common reply methods (`send`, `reply`, `answer`, `editText`) are
+ *   declared as optional so action callbacks can call them without
+ *   `as unknown as` casts. They exist at runtime on every callback ctx
+ *   gramio dispatches.
+ * - Plugin-decorated fields (`ctx.llm`, `ctx.say`, `ctx.lang`, …)
+ *   live on the real gramio ctx but aren't declared here — narrow
+ *   them via a local type assertion where you use them. The menu
+ *   stays plugin-agnostic.
+ */
+export type MenuCtx = {
   bot: unknown
   from?: { id: number }
   chat?: { id: number; type: string }
   session?: { language?: string }
+  threadId?: number
+  message?: { threadId?: number }
+  send?: (text: string | { toString(): string }, params?: object) => Promise<unknown>
+  reply?: (text: string | { toString(): string }, params?: object) => Promise<unknown>
+  answer?: (params: object) => Promise<unknown>
+  editText?: (text: string | { toString(): string }, params?: object) => Promise<unknown>
 }
 
 /**
@@ -233,6 +253,92 @@ export class BotMenu {
 }
 
 export const botMenu = (opts: BotMenuOptions): BotMenu => new BotMenu(opts)
+
+// ─── toggleMenuItem ────────────────────────────────────────────────
+
+export type ToggleMenuItemOptions = {
+  /** Item id within the menu. Must be unique among siblings. */
+  id: string
+  /**
+   * Reads the current boolean value. Typically `(ctx) =>
+   * ctx.session?.someField ?? false`. Storage-agnostic — return
+   * `false` by default so the toggle starts in the OFF state.
+   */
+  read: (ctx: MenuCtx) => boolean
+  /**
+   * Persists the new value. Typically `(ctx, v) => {
+   * (ctx.session as any).someField = v }`. The menu plugin does NOT
+   * own a session — write through whatever your bot already uses.
+   */
+  write: (ctx: MenuCtx, value: boolean) => void | Promise<void>
+  /**
+   * Button labels for each state. Polyglot literals resolve against
+   * `ctx.session?.language` (set by `bot/language`); strings render
+   * as-is. Use functions for runtime composition (e.g. emoji ✓/✗ +
+   * dynamic name).
+   */
+  label: {
+    off: Label
+    on: Label
+  }
+  /**
+   * Optional toast shown via `ctx.answer({ text })` after a tap. Same
+   * polyglot resolution as `label`. Omit to stay silent.
+   */
+  toast?: {
+    off?: Label
+    on?: Label
+  }
+  order?: number
+  visible?: Predicate
+}
+
+/**
+ * Convenience factory for a boolean-toggle `MenuItem`. The label
+ * tracks `read(ctx)` and the action flips it through `write(ctx, v)`.
+ * Storage is the caller's concern — pass closures that read/write the
+ * field wherever you keep it (typically `ctx.session.something`).
+ *
+ * The current menu message is NOT auto-re-rendered after a tap — the
+ * new label is visible the next time the user re-opens or navigates.
+ * The optional `toast` gives immediate feedback in the meantime.
+ *
+ * @example
+ * toggleMenuItem({
+ *   id: 'thinking',
+ *   read: (ctx) => (ctx.session as { thinking?: boolean }).thinking ?? false,
+ *   write: (ctx, v) => { (ctx.session as { thinking?: boolean }).thinking = v },
+ *   label: {
+ *     off: { en: '💭 Thinking: OFF', es: '💭 Razonamiento: OFF' },
+ *     on:  { en: '💭 Thinking: ON',  es: '💭 Razonamiento: ON'  },
+ *   },
+ *   toast: {
+ *     off: { en: 'Thinking off.', es: 'Razonamiento off.' },
+ *     on:  { en: 'Thinking on.',  es: 'Razonamiento on.'  },
+ *   },
+ * })
+ */
+export const toggleMenuItem = (opts: ToggleMenuItemOptions): MenuItem => ({
+  id: opts.id,
+  order: opts.order,
+  visible: opts.visible,
+  label: (ctx) => {
+    const l = opts.read(ctx) ? opts.label.on : opts.label.off
+    return typeof l === 'function' ? l(ctx) : l
+  },
+  action: async (ctx) => {
+    const wasOn = opts.read(ctx)
+    const willBeOn = !wasOn
+    await opts.write(ctx, willBeOn)
+
+    const t = willBeOn ? opts.toast?.on : opts.toast?.off
+    if (t === undefined) return
+    const resolved = typeof t === 'function' ? t(ctx) : t
+    const text =
+      typeof resolved === 'string' ? resolved : say(resolved, ctxLang(ctx))
+    await ctx.answer?.({ text })
+  },
+})
 
 // ─── internal: rendering + plugin ──────────────────────────────────
 

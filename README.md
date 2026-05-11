@@ -305,7 +305,8 @@ Then `pnpm install`. Every `ctx.send` / `ctx.sendDocument` / `ctx.reply` / etc. 
 | `@adriangalilea/utils/bot/kit` | `gracefulStart(bot)` — SIGINT/SIGTERM → `bot.stop()` → exit; force-kills if shutdown hangs.<br>`adminContext({ adminId? })` — reads `TELEGRAM_ADMIN_ID` from `kev` (with optional hardcoded fallback), decorates `ctx.adminId` + `ctx.isAdmin`. |
 | `@adriangalilea/utils/bot/access-control` | Personal-bot ACL — gates non-admin/non-default users; admin gets DM with `[✅ Aprobar][❌ Denegar]` on first attempt; `/access` opens a persistent menu (revoke / reapprove / list pending). Backed by `@gramio/session` per-user + a small index. |
 | `@adriangalilea/utils/bot/coalesce` | Joins client-split inbound messages back into one. When a user pastes >4096 chars, Telegram clients fragment it into separate `message` updates with no marker. Middleware detects the burst and emits one combined event. |
-| `@adriangalilea/utils/bot/llm` | The full LLM-chatbot pipeline in one module. **Input:** `streamChat(response)` parses OpenAI-compatible SSE (OpenAI, vllm, mlx-lm, llama.cpp, Together, Groq, …) into a typed `AsyncGenerator<{type: 'content' \| 'reasoning', text}>`. **Output:** `ctx.startStream()` debounces `editMessageText`, splits at 4000 chars on paragraph/line/word boundary, parses Markdown locally so malformed mid-stream markup degrades to plain text. **History:** `llmHistory({...}).plugin` decorates `ctx.llm` with `.add() / .get() / .clear() / .all()` — per-(user, thread) conversation in OpenAI `ChatMessage` shape, persisted in the shared session record so the menu's 🗑 Forget button wipes it together with everything else. |
+| `@adriangalilea/utils/bot/llm` | The full LLM-chatbot pipeline in one module. **Input:** `streamChat(response)` parses OpenAI-compatible SSE (OpenAI, vllm, mlx-lm, llama.cpp, Together, Groq, …) into a typed `AsyncGenerator<{type: 'content' \| 'reasoning', text}>`. **Output:** `ctx.startStream()` (low-level: debounced markdown to Telegram, 4000-char split, exposes `wasPartial` after `.end()`). `ctx.startChatStream(response)` (high-level: consumes the stream, renders reasoning as a Telegram `expandable_blockquote` entity + content as streamed markdown — both go through `markdownToFormattable` with graceful degradation — returns `{ content, reasoning }`). **History:** `llmHistory({...})` returns `.plugin` (decorates `ctx.llm` with `.add() / .get() / .clear() / .all() / .clearAll()`, per-(user, thread) OpenAI `ChatMessage` shape, persisted in the shared session record so the menu's 🗑 Forget wipes it automatically) AND `.menuItem` (drop-in "🧹 Clear this thread" for `botMenu`). |
+| `@adriangalilea/utils/bot/menu` | `botMenu({ command, description, items, privacy?, personalData?, adminContact })` — `/settings` command + InlineKeyboard router. With `personalData: { storage }`, auto-adds 🗑 Forget + 📥 Export buttons. `toggleMenuItem({ id, read, write, label: { off, on }, toast? })` — convenience factory for boolean-toggle items with dynamic label + optional toast, storage-agnostic via `read`/`write` closures. |
 
 Standard wiring:
 
@@ -315,7 +316,7 @@ import { redisStorage } from '@gramio/storage-redis'
 import { adminContext, gracefulStart } from '@adriangalilea/utils/bot/kit'
 import { accessControl } from '@adriangalilea/utils/bot/access-control'
 import { session } from '@gramio/session'
-import { llmStream, llmHistory, streamChat } from '@adriangalilea/utils/bot/llm'
+import { llmStream, llmHistory } from '@adriangalilea/utils/bot/llm'
 
 const storage = redisStorage()                      // ONE instance, shared
 const userSession = session({ storage, key: 'session', initial: () => ({}) })
@@ -342,17 +343,9 @@ const bot = new Bot(process.env.BOT_TOKEN!)
       }),
     })
 
-    const stream = ctx.startStream()
-    let assistant = ''
-    for await (const chunk of streamChat(response)) {
-      if (chunk.type === 'content') {
-        assistant += chunk.text
-        await stream.append(chunk.text)
-      }
-      // chunk.type === 'reasoning' is also yielded for thinking models
-    }
-    await stream.end()
-    ctx.llm.add({ role: 'assistant', content: assistant })
+    // High-level: handles reasoning (collapsed blockquote) + content streaming.
+    const { content } = await ctx.startChatStream(response)
+    ctx.llm.add({ role: 'assistant', content })
   })
 
 await gracefulStart(bot)

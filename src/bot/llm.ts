@@ -8,10 +8,21 @@
  *                              `AsyncGenerator` of `{type, text}` with
  *                              `content` / `reasoning` separation.
  *
- *   `ctx.startStream()`      — OUTPUT. Debounced `editMessageText` to
- *                              Telegram, local Markdown parse via
- *                              `@gramio/format`, 4000-char split on
- *                              paragraph / line / word boundary.
+ *   `ctx.startStream()`      — OUTPUT (low-level). Debounced
+ *                              `editMessageText` to Telegram, local
+ *                              Markdown parse via `@gramio/format`,
+ *                              4000-char split on paragraph / line /
+ *                              word boundary.
+ *
+ *   `ctx.startChatStream()`  — OUTPUT (high-level). Consumes a fetch
+ *                              `Response` (or any `AsyncIterable<LLMChunk>`)
+ *                              and renders BOTH phases of a thinking
+ *                              model: `reasoning` chunks go into one
+ *                              `<blockquote expandable>` message;
+ *                              `content` chunks go into a streamed
+ *                              markdown message below it. Returns
+ *                              `{ content, reasoning }` once the
+ *                              source generator ends.
  *
  *   `ctx.llm.add / .get / …` — HISTORY. Per-(user, thread) conversation
  *                              buffer in OpenAI `ChatMessage` shape.
@@ -30,12 +41,10 @@
  *
  * Peer deps: `gramio`, `@gramio/session`, `@gramio/format`, `marked`.
  *
- * @example
+ * @example  high-level — thinking model in ~10 LOC
  * import { Bot } from 'gramio'
  * import { session } from '@gramio/session'
- * import {
- *   llmStream, llmHistory, streamChat,
- * } from '@adriangalilea/utils/bot/llm'
+ * import { llmStream, llmHistory } from '@adriangalilea/utils/bot/llm'
  *
  * const userSession = session({ storage, key: 'session', initial: () => ({}) })
  * const chat = llmHistory({ session: userSession, maxTurns: 20, retentionDays: 7 })
@@ -46,35 +55,38 @@
  *   .extend(chat.plugin)
  *   .on('message', async (ctx) => {
  *     ctx.llm.add({ role: 'user', content: ctx.text ?? '' })
- *     const messages = ctx.llm.get()
- *
  *     const response = await fetch(process.env.LLM_URL!, {
  *       method: 'POST',
  *       headers: { 'Content-Type': 'application/json' },
  *       body: JSON.stringify({
  *         model: process.env.LLM_MODEL,
- *         messages: [{ role: 'system', content: 'You are helpful.' }, ...messages],
+ *         messages: [{ role: 'system', content: 'You are helpful.' }, ...ctx.llm.get()],
  *         stream: true,
  *       }),
  *     })
- *
- *     const stream = ctx.startStream()
- *     let assistant = ''
- *     for await (const chunk of streamChat(response)) {
- *       if (chunk.type === 'content') {
- *         assistant += chunk.text
- *         await stream.append(chunk.text)
- *       }
- *     }
- *     await stream.end()
- *     ctx.llm.add({ role: 'assistant', content: assistant })
+ *     const { content } = await ctx.startChatStream(response)
+ *     ctx.llm.add({ role: 'assistant', content })
  *   })
  *
  * bot.start()
+ *
+ * @example  low-level — manual loop when you need to map/filter chunks
+ * import { streamChat } from '@adriangalilea/utils/bot/llm'
+ *
+ * const stream = ctx.startStream()
+ * for await (const chunk of streamChat(response)) {
+ *   if (chunk.type === 'content') await stream.append(chunk.text)
+ *   // reasoning chunks dropped here
+ * }
+ * await stream.end()
  */
 import { type DeriveDefinitions, Plugin } from 'gramio'
 import { session } from '@gramio/session'
+import { expandableBlockquote, type FormattableString } from '@gramio/format'
 import { markdownToFormattable } from '@gramio/format/markdown'
+
+import { say, type Polyglot } from '../say/index.js'
+import type { MenuItem } from './menu.js'
 
 // ─── INPUT: OpenAI-compatible SSE parser ───────────────────────────
 
@@ -191,6 +203,18 @@ export class MarkdownStreamer {
   private inFlight = false
   private dirty = false
   private ended = false
+  /**
+   * `true` after `.end()` returns if the stream finished with un-flushed
+   * buffer or an outstanding error that the streamer couldn't recover
+   * from. Useful for partial-response diagnostics in catch blocks:
+   *
+   *   try { for await (...) await stream.append(...) }
+   *   finally {
+   *     await stream.end()
+   *     if (stream.wasPartial) logger.warn('LLM stream cut off')
+   *   }
+   */
+  wasPartial = false
 
   private chatId: number
   private threadId?: number
@@ -292,7 +316,13 @@ export class MarkdownStreamer {
       this.debounceTimer = undefined
     }
     while (this.inFlight) await sleep(50)
-    if (this.dirty) await this.flushNow()
+    if (this.dirty) {
+      await this.flushNow()
+      // If `dirty` is still set after the final flush, an edit error
+      // re-armed it and there's nothing more we'll do. Mark partial
+      // so the caller can log / fall back.
+      if (this.dirty) this.wasPartial = true
+    }
   }
 
   private scheduleFlush(): void {
@@ -357,6 +387,16 @@ export const llmStream = (defaults: StreamOptions = {}) =>
     // every Context. Structural compat → no cast needed.
     startStream: (opts: StreamOptions = {}) =>
       new MarkdownStreamer(ctx, { ...defaults, ...opts }),
+    /**
+     * One-call helper for chat completions: consumes a `Response`
+     * (or any `AsyncIterable<LLMChunk>`), renders reasoning to an
+     * expandable blockquote message + content to a streamed markdown
+     * message, returns `{ content, reasoning }` when the stream ends.
+     */
+    startChatStream: (
+      source: Response | AsyncIterable<LLMChunk>,
+      opts: ChatStreamOptions = {},
+    ) => consumeChatStream(ctx, source, { ...defaults, ...opts }),
   }))
 
 function findSplit(text: string, maxLen: number): number {
@@ -370,6 +410,190 @@ function findSplit(text: string, maxLen: number): number {
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+// ─── PIPELINE: streamChat → Telegram with reasoning support ────────
+
+/**
+ * Return shape of `consumeChatStream` / `ctx.startChatStream`. Both
+ * full transcripts are returned so the caller decides what to persist
+ * (typically `content` to `ctx.llm`; `reasoning` already lives in the
+ * Telegram message and is rarely worth storing).
+ */
+export type ChatStreamResult = {
+  /** Full assistant text concatenated from all `content` chunks. */
+  content: string
+  /** Full reasoning text concatenated from all `reasoning` chunks. Empty for non-thinking models. */
+  reasoning: string
+}
+
+export type ChatStreamOptions = StreamOptions
+
+/**
+ * One-shot helper that consumes an LLM stream and renders BOTH phases
+ * (reasoning, content) to Telegram with the canonical pattern:
+ *
+ *   - reasoning chunks → one message containing a single
+ *     `<blockquote expandable>…</blockquote>` (HTML), debounced edits,
+ *     stays expanded after the stream ends so the user can review it
+ *     collapsed/uncollapsed at will
+ *   - content chunks → a fresh `MarkdownStreamer` message below the
+ *     reasoning one (auto-threaded via SendMixin)
+ *
+ * Returns when the source generator ends. Equivalent to (and replaces)
+ * the ~50 LOC of bookkeeping every thinking-model bot would otherwise
+ * write by hand around `streamChat` + `ctx.startStream`.
+ *
+ * Accepts either a raw `fetch` `Response` (wrapped with `streamChat`
+ * internally) or an `AsyncIterable<LLMChunk>` (when you want to map /
+ * filter chunks before the stream hits Telegram).
+ *
+ * @example  via ctx.startChatStream from the llmStream plugin
+ * const response = await fetch(LLM_URL, { method: 'POST', body })
+ * const { content } = await ctx.startChatStream(response)
+ * ctx.llm.add({ role: 'assistant', content })
+ *
+ * @example  standalone, framework-agnostic
+ * const { content, reasoning } = await consumeChatStream(ctx, response)
+ */
+export const consumeChatStream = async (
+  ctx: { chat: { id: number }; threadId?: number; bot: MarkdownStreamer['bot'] },
+  source: Response | AsyncIterable<LLMChunk>,
+  opts: ChatStreamOptions = {},
+): Promise<ChatStreamResult> => {
+  const chatId = ctx.chat.id
+  const threadId = ctx.threadId
+  const bot = ctx.bot
+  const debounceMs = opts.debounceMs ?? DEFAULT_DEBOUNCE_MS
+
+  const gen: AsyncIterable<LLMChunk> =
+    source instanceof Response ? streamChat(source) : source
+
+  // ─── reasoning state ────────────────────────────────────────────
+  let reasoning = ''
+  let reasoningMessageId: number | undefined
+  let reasoningTimer: ReturnType<typeof setTimeout> | undefined
+  let reasoningDirty = false
+  let reasoningInFlight = false
+
+  // Same graceful-degradation pipeline as the content phase:
+  // markdownToFormattable parses the reasoning (lists, code blocks,
+  // bold — thinking models do emit markdown) into a FormattableString
+  // with native Telegram entities, and `expandableBlockquote` wraps
+  // the whole thing in a collapsed-by-default block quotation by
+  // adding the `expandable_blockquote` entity over the full text.
+  // Malformed mid-stream markdown degrades to plain text inside the
+  // blockquote instead of failing the message.
+  const renderReasoning = (): FormattableString =>
+    expandableBlockquote(markdownToFormattable(reasoning))
+
+  const sendReasoningMessage = async (): Promise<void> => {
+    type SendParams = {
+      chat_id: number
+      message_thread_id?: number
+      text: FormattableString
+    }
+    const params: SendParams = {
+      chat_id: chatId,
+      ...(threadId !== undefined && { message_thread_id: threadId }),
+      text: renderReasoning(),
+    }
+    const sent = await (
+      bot.api.sendMessage as unknown as (
+        p: SendParams,
+      ) => Promise<{ message_id: number }>
+    )(params)
+    reasoningMessageId = sent.message_id
+  }
+
+  const flushReasoning = async (): Promise<void> => {
+    if (!reasoningDirty || reasoningMessageId === undefined) return
+    reasoningInFlight = true
+    reasoningDirty = false
+    try {
+      type EditParams = {
+        chat_id: number
+        message_id: number
+        text: FormattableString
+      }
+      await (
+        bot.api.editMessageText as unknown as (
+          p: EditParams,
+        ) => Promise<unknown>
+      )({
+        chat_id: chatId,
+        message_id: reasoningMessageId,
+        text: renderReasoning(),
+      })
+    } catch (e) {
+      const msg = String((e as { message?: string } | undefined)?.message ?? e)
+      // "message is not modified" is benign when reasoning chunks
+      // arrive faster than the debounce can render.
+      if (!msg.includes('message is not modified')) {
+        reasoningDirty = true
+        opts.onError?.(e)
+      }
+    } finally {
+      reasoningInFlight = false
+    }
+  }
+
+  const scheduleReasoningFlush = (): void => {
+    if (reasoningTimer) return
+    reasoningTimer = setTimeout(async () => {
+      reasoningTimer = undefined
+      if (reasoningInFlight) {
+        scheduleReasoningFlush()
+        return
+      }
+      await flushReasoning()
+      if (reasoningDirty) scheduleReasoningFlush()
+    }, debounceMs)
+  }
+
+  // ─── content state ──────────────────────────────────────────────
+  let contentStreamer: MarkdownStreamer | undefined
+  let content = ''
+
+  // ─── main loop ──────────────────────────────────────────────────
+  for await (const chunk of gen) {
+    if (chunk.type === 'reasoning') {
+      reasoning += chunk.text
+      if (reasoningMessageId === undefined) {
+        await sendReasoningMessage()
+      } else {
+        reasoningDirty = true
+        scheduleReasoningFlush()
+      }
+    } else if (chunk.type === 'content') {
+      if (!contentStreamer) {
+        // Close out reasoning cleanly before content starts: flush any
+        // pending edit, drop the debounce. The blockquote stays in
+        // the chat as a finished message.
+        if (reasoningTimer) {
+          clearTimeout(reasoningTimer)
+          reasoningTimer = undefined
+        }
+        if (reasoningDirty) await flushReasoning()
+        contentStreamer = new MarkdownStreamer(
+          { chat: { id: chatId }, threadId, bot },
+          opts,
+        )
+      }
+      content += chunk.text
+      await contentStreamer.append(chunk.text)
+    }
+  }
+
+  // Trailing reasoning (model emitted reasoning but no content yet).
+  if (reasoningTimer) {
+    clearTimeout(reasoningTimer)
+    reasoningTimer = undefined
+  }
+  if (reasoningDirty) await flushReasoning()
+  await contentStreamer?.end()
+
+  return { content, reasoning }
+}
 
 // ─── HISTORY: per-thread conversation buffer ───────────────────────
 
@@ -419,10 +643,28 @@ export type LLMHistoryOptions = {
   maxTurns: number
   /** Entries older than this (in days) are dropped on read. */
   retentionDays: number
+  /**
+   * Override the labels of the `menuItem` (the "🧹 clear this thread"
+   * button rendered inside a `botMenu`). Defaults are polyglot
+   * literals covering en + es.
+   */
+  menuLabels?: {
+    /** Button label. Default: `{ en: '🧹 Clear this thread', es: '🧹 Limpiar este hilo' }`. */
+    item?: Polyglot<string>
+    /** Toast shown after a successful clear. Default: `{ en: '🧹 Cleared.', es: '🧹 Limpio.' }`. */
+    cleared?: Polyglot<string>
+  }
 }
 
 export type LLMHistoryFeature = {
   plugin: ReturnType<typeof buildHistoryPlugin>
+  /**
+   * Drop-in `MenuItem` for `botMenu({ items: [...] })`: a "clear this
+   * thread" button that calls `ctx.llm.clear()` on the current
+   * (user, thread) shard and acknowledges with a toast. Sibling
+   * threads stay intact.
+   */
+  menuItem: MenuItem
 }
 
 /**
@@ -511,7 +753,35 @@ export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
     retentionDays: opts.retentionDays,
   })
 
-  return { plugin }
+  const itemLabel: Polyglot<string> = opts.menuLabels?.item ?? {
+    en: '🧹 Clear this thread',
+    es: '🧹 Limpiar este hilo',
+  }
+  const clearedToast: Polyglot<string> = opts.menuLabels?.cleared ?? {
+    en: '🧹 Cleared.',
+    es: '🧹 Limpio.',
+  }
+
+  const menuItem: MenuItem = {
+    id: 'llmClear',
+    label: itemLabel,
+    action: async (ctx) => {
+      // The menu action's ctx is a callback_query ctx. The `llm`
+      // and `answer` decorations come from llmHistory's own plugin
+      // and gramio respectively — typed as optional on MenuCtx so
+      // we narrow here rather than at every call site.
+      type Helpers = {
+        llm?: LLMHistoryApi
+        lang?: string
+        answer?: (params: object) => Promise<unknown>
+      }
+      const c = ctx as unknown as Helpers
+      c.llm?.clear()
+      await c.answer?.({ text: say(clearedToast, c.lang ?? 'en') })
+    },
+  }
+
+  return { plugin, menuItem }
 }
 
 const buildHistoryPlugin = (args: {
