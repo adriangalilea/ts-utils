@@ -6,20 +6,12 @@
  * for process, window, Deno, etc.
  */
 
-// Ambient declarations for the runtime globals we touch. Declared here
-// (not as `@types/deno` / `@types/bun` / `lib.dom` deps) so we only
-// describe what we actually call and pull no extra dependencies.
-declare global {
-	// `var` makes the binding live on `globalThis` per ECMAScript spec.
-	// We declare a minimal `BrowserWindow` rather than pulling lib.dom
-	// — we only touch two custom fields injected by bundlers.
-	// eslint-disable-next-line no-var
-	var Deno: DenoNamespace | undefined;
-	// eslint-disable-next-line no-var
-	var Bun: object | undefined;
-	// eslint-disable-next-line no-var
-	var window: BrowserWindow | undefined;
-}
+// We deliberately DO NOT `declare global { var Deno / Bun / window: ... }`.
+// Doing so would merge with `@types/deno` / `@types/bun` in downstream
+// consumers and clobber their richer types (e.g. erase `Bun.spawn` by
+// merging with our `object` placeholder). Instead we read the runtime
+// globals through local structural casts on `globalThis` — the type
+// surface stays inside this module and never escapes to consumers.
 
 interface BrowserWindow {
 	__ENV__?: Record<string, string>;
@@ -40,6 +32,15 @@ interface DenoNamespace {
 	stderr: { writeSync(data: Uint8Array): number };
 	isatty(rid: number): boolean;
 }
+
+const getDeno = (): DenoNamespace | undefined =>
+	(globalThis as { Deno?: DenoNamespace }).Deno;
+
+const hasBun = (): boolean =>
+	typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
+
+const getBrowserWindow = (): BrowserWindow | undefined =>
+	(globalThis as { window?: BrowserWindow }).window;
 
 /**
  * Thrown by `runtime.exit(code)` in environments without process exit
@@ -89,13 +90,13 @@ interface RuntimeCapabilities {
 }
 
 // Capture the browser window once, if present. Local capture keeps
-// every subsequent access typed without re-checking `globalThis.window`.
-const browserWindow: BrowserWindow | undefined = globalThis.window;
+// every subsequent access typed without re-running the structural cast.
+const browserWindow = getBrowserWindow();
 
 const browserEnv = (): Record<string, string> | undefined =>
 	browserWindow?.__ENV__ ?? browserWindow?.process?.env;
 
-// Methods below repeat `const Deno = globalThis.Deno` instead of
+// Methods below repeat `const Deno = getDeno()` per call instead of
 // caching it on the instance: TS only narrows `DenoNamespace | undefined`
 // → `DenoNamespace` through a local-const + `if` pattern. A class
 // field would still be the union at the call sites. Same runtime cost,
@@ -108,8 +109,8 @@ class RuntimeOps implements RuntimeCapabilities {
 		"document" in globalThis;
 	readonly isNode =
 		typeof process !== "undefined" && process.versions?.node !== undefined;
-	readonly isDeno = typeof globalThis.Deno !== "undefined";
-	readonly isBun = typeof globalThis.Bun !== "undefined";
+	readonly isDeno = getDeno() !== undefined;
+	readonly isBun = hasBun();
 
 	// Capability checking
 	canExit(): boolean {
@@ -139,7 +140,7 @@ class RuntimeOps implements RuntimeCapabilities {
 	// Platform-agnostic operations
 	exit(code: number): never {
 		if (this.isNode || this.isBun) process.exit(code);
-		const Deno = globalThis.Deno;
+		const Deno = getDeno();
 		if (Deno) Deno.exit(code);
 		// Browser / unknown: no process to exit, so surface via a typed
 		// error the caller can choose to ignore or propagate.
@@ -148,7 +149,7 @@ class RuntimeOps implements RuntimeCapabilities {
 
 	env(key: string): string | undefined {
 		if (this.isNode || this.isBun) return process.env[key];
-		const Deno = globalThis.Deno;
+		const Deno = getDeno();
 		if (Deno) return Deno.env.get(key);
 		return browserEnv()?.[key];
 	}
@@ -158,7 +159,7 @@ class RuntimeOps implements RuntimeCapabilities {
 			process.env[key] = value;
 			return;
 		}
-		const Deno = globalThis.Deno;
+		const Deno = getDeno();
 		if (Deno) {
 			Deno.env.set(key, value);
 			return;
@@ -175,7 +176,7 @@ class RuntimeOps implements RuntimeCapabilities {
 			delete process.env[key];
 			return;
 		}
-		const Deno = globalThis.Deno;
+		const Deno = getDeno();
 		if (Deno) {
 			Deno.env.delete(key);
 			return;
@@ -186,7 +187,7 @@ class RuntimeOps implements RuntimeCapabilities {
 
 	hasEnv(key: string): boolean {
 		if (this.isNode || this.isBun) return key in process.env;
-		const Deno = globalThis.Deno;
+		const Deno = getDeno();
 		if (Deno) return Deno.env.has(key);
 		const env = browserEnv();
 		return env ? key in env : false;
@@ -195,7 +196,7 @@ class RuntimeOps implements RuntimeCapabilities {
 	allEnv(): Record<string, string> {
 		if (this.isNode || this.isBun)
 			return { ...process.env } as Record<string, string>;
-		const Deno = globalThis.Deno;
+		const Deno = getDeno();
 		if (Deno) return { ...Deno.env.toObject() };
 		const env = browserEnv();
 		return env ? { ...env } : {};
@@ -203,14 +204,14 @@ class RuntimeOps implements RuntimeCapabilities {
 
 	cwd(): string {
 		if (this.isNode || this.isBun) return process.cwd();
-		const Deno = globalThis.Deno;
+		const Deno = getDeno();
 		if (Deno) return Deno.cwd();
 		return "/"; // Default for browser
 	}
 
 	get stdout() {
 		const isNodeLike = this.isNode || this.isBun;
-		const Deno = globalThis.Deno;
+		const Deno = getDeno();
 		return {
 			write: (message: string) => {
 				if (isNodeLike) {
@@ -231,7 +232,7 @@ class RuntimeOps implements RuntimeCapabilities {
 
 	get stderr() {
 		const isNodeLike = this.isNode || this.isBun;
-		const Deno = globalThis.Deno;
+		const Deno = getDeno();
 		return {
 			write: (message: string) => {
 				if (isNodeLike) {
