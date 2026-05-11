@@ -523,11 +523,11 @@ const renderPrivacySubmenu = (menu: BotMenu, ctx: MenuCtx): InlineKeyboard => {
 		menu._opts.privacy,
 	);
 	kb.row();
+	// Submenu — Back and Close share one row.
 	kb.text(
 		say({ en: "⬅️ Back", es: "⬅️ Volver" }, lang),
 		navCb.pack({ path: "_root" }),
 	);
-	kb.row();
 	kb.text(say({ en: "✖️ Close", es: "✖️ Cerrar" }, lang), closeCb.pack({}));
 	return kb;
 };
@@ -569,17 +569,17 @@ const renderKeyboard = (
 			navCb.pack({ path: PRIVACY_PATH }),
 		);
 		kb.row();
+		// Root has no Back — Close gets its own row.
+		kb.text(say({ en: "✖️ Close", es: "✖️ Cerrar" }, lang), closeCb.pack({}));
 	} else {
+		// Submenus: Back and Close share one row.
 		const backPath = parentPath.slice(0, -1).join(".");
 		kb.text(
 			say({ en: "⬅️ Back", es: "⬅️ Volver" }, lang),
 			navCb.pack({ path: backPath || "_root" }),
 		);
-		kb.row();
+		kb.text(say({ en: "✖️ Close", es: "✖️ Cerrar" }, lang), closeCb.pack({}));
 	}
-	// Close is always available — taps delete the settings message so
-	// it doesn't linger in the chat history. Neutral (unstyled) button.
-	kb.text(say({ en: "✖️ Close", es: "✖️ Cerrar" }, lang), closeCb.pack({}));
 
 	return kb;
 };
