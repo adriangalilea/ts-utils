@@ -9,7 +9,7 @@ optional** — install only what the subpaths you import need.
 
 | Subpath | What it does |
 |---|---|
-| `bot/kit` | `gracefulStart(bot, opts?)` — SIGINT/SIGTERM → `bot.stop()` → exit; force-kills if shutdown hangs; calls `bot.syncCommands()` automatically before `bot.start()`. `adminContext({ adminId? })` — reads `TELEGRAM_ADMIN_ID` from KEV with optional hardcoded fallback, decorates `ctx.adminId` + `ctx.isAdmin`. |
+| `bot/kit` | `gracefulStart(bot, opts?)` — SIGINT/SIGTERM → `bot.stop()` → exit; force-kills if shutdown hangs; calls `bot.syncCommands()` automatically before `bot.start()`. DMs the admin `@<bot> started.` / `@<bot> shutting down.` by default when `KEV.TELEGRAM_ADMIN_ID` is set (graceful only — crashes don't fire `onStop`); pass `notifyAdmin: false` to disable, `notifyAdmin: 12345` for an explicit chat id. `adminContext({ adminId? })` — reads `TELEGRAM_ADMIN_ID` from KEV with optional hardcoded fallback, decorates `ctx.adminId` + `ctx.isAdmin`. `prefixStorage(storage, prefix)` — namespace every key on a shared `@gramio/storage` backend; REQUIRED when several bots share one Redis (default session key is `String(senderId)` which collides across bots). |
 | `bot/access-control` | `accessControl({ session, storage, defaults? })` — gates non-admin/non-default users; admin gets DM with `[✅ Aprobar][❌ Denegar]` on first attempt; persistent `/access` admin menu for revoke/reapprove/list. Exposes `simulateAccessRequest()` for tests. |
 | `bot/coalesce` | `coalesceLongMessages({ minLeadingLength?, windowMs?, acrossUsers?, log? })` — joins client-split inbound messages back into one event. Also exports `isCoalescent(prev, curr, opts)` as a pure utility. |
 | `bot/language` | `language({ session, supported, default, scope?, labels? })` — per-user BCP-47 preference; resolves `ctx.lang` (typed); decorates `ctx.say` (callable polyglot resolver + `.send` / `.edit` / `.answer` methods); supplies a `menuItem` for `botMenu`. |
@@ -26,14 +26,16 @@ import { Bot } from 'gramio'
 import { session } from '@gramio/session'
 import { redisStorage } from '@gramio/storage-redis'
 
-import { adminContext, gracefulStart } from '@adriangalilea/utils/bot/kit'
+import { adminContext, gracefulStart, prefixStorage } from '@adriangalilea/utils/bot/kit'
 import { accessControl } from '@adriangalilea/utils/bot/access-control'
 import { coalesceLongMessages } from '@adriangalilea/utils/bot/coalesce'
 import { llmStream, llmHistory, streamChat } from '@adriangalilea/utils/bot/llm'
 import { language } from '@adriangalilea/utils/bot/language'
 import { botMenu } from '@adriangalilea/utils/bot/menu'
 
-const storage = redisStorage()
+// Namespace EVERY storage key with this bot's prefix. Skip the prefix
+// only if this bot has the backend to itself. See § "Multi-bot collision".
+const storage = prefixStorage(redisStorage(), 'mybot:')
 
 // ONE session at bot level. All per-user state across plugins lives
 // in this record; plugins own distinct fields by convention.
@@ -76,7 +78,7 @@ const bot = new Bot(process.env.BOT_TOKEN!)
   .extend(lang.plugin)
   .extend(menu.plugin)
 
-await gracefulStart(bot)
+await gracefulStart(bot)   // DMs admin on start/stop by default (KEV.TELEGRAM_ADMIN_ID)
 ```
 
 **Order matters**:
@@ -168,6 +170,55 @@ derive:
 This package's own `language.menuItem` style resolver and any custom
 toggle / selection resolver should read `ctx.session.<field>`. The
 JSDoc on `MenuItem.style` / `LanguageDerives.lang` calls this out.
+
+## Multi-bot collision — `prefixStorage` is mandatory
+
+`@gramio/session`'s default `getSessionKey` is `String(senderId)`. If several
+bots share the same backend (one Redis, one SQLite file, one in-memory map
+re-imported, …), they all write the same user's record to the same key:
+
+```
+redis['190202471'] = { access, language, llm }   ← whichever bot wrote LAST
+```
+
+Symptom: `/settings → 📥 Export` on bot A returns the data bot B last wrote.
+`/settings → 🗑 Forget` on bot A wipes bot B's record too. Real bug we
+shipped before — silent, dangerous, only visible when the user notices
+their export contains the wrong threads.
+
+The fix is a single wrapper applied **once** at construction:
+
+```ts
+import { prefixStorage } from '@adriangalilea/utils/bot/kit'
+const storage = prefixStorage(redisStorage(), 'mybot:')
+```
+
+All downstream consumers (the shared `session()`, `accessControl`, `botMenu`'s
+`personalData`) read/write through this single wrapped instance, so the
+prefix propagates everywhere automatically. No per-plugin namespace option,
+no `getSessionKey` override needed — the storage layer below `getSessionKey`
+is what was colliding, not the keys themselves.
+
+Picking the prefix:
+
+- `'mybot:'` — short, human-readable in Redis GUIs. Just don't reuse it across bots.
+- `'<bot-username>:'` — derive from BotFather handle in a one-line constant
+  next to the storage construction.
+- `'<bot-id>:'` — Telegram's numeric bot id; requires an async `getMe` so
+  less ergonomic at startup.
+
+Storage layout with the prefix applied:
+
+```
+mybot:190202471      = { access, language, llm }   ← bot's user 190…
+mybot:ac:index       = { pending, approved, denied }
+
+otherbot:190202471   = { ... }                     ← same human, other bot
+```
+
+If the bot owns the backend (`redisStorage({ db: N })` with a per-bot db,
+or its own SQLite file), the prefix is redundant but harmless. The single
+"one Redis for everything" case is the one this prevents.
 
 ## Architecture: shared session, one record per user
 

@@ -320,6 +320,8 @@ const actConfirmCb = new CallbackData("mActC").string("path");
 const forgetConfirmCb = new CallbackData("mFcfm");
 const forgetCancelCb = new CallbackData("mFcnl");
 const exportCb = new CallbackData("mExp");
+/** Close button — dismisses the settings message entirely. */
+const closeCb = new CallbackData("mCls");
 
 // ─── BotMenu (the builder) ─────────────────────────────────────────
 
@@ -525,6 +527,8 @@ const renderPrivacySubmenu = (menu: BotMenu, ctx: MenuCtx): InlineKeyboard => {
 		say({ en: "⬅️ Back", es: "⬅️ Volver" }, lang),
 		navCb.pack({ path: "_root" }),
 	);
+	kb.row();
+	kb.text(say({ en: "✖️ Close", es: "✖️ Cerrar" }, lang), closeCb.pack({}));
 	return kb;
 };
 
@@ -571,7 +575,11 @@ const renderKeyboard = (
 			say({ en: "⬅️ Back", es: "⬅️ Volver" }, lang),
 			navCb.pack({ path: backPath || "_root" }),
 		);
+		kb.row();
 	}
+	// Close is always available — taps delete the settings message so
+	// it doesn't linger in the chat history. Neutral (unstyled) button.
+	kb.text(say({ en: "✖️ Close", es: "✖️ Cerrar" }, lang), closeCb.pack({}));
 
 	return kb;
 };
@@ -902,6 +910,15 @@ const buildMenuPlugin = (menu: BotMenu) => {
 							lang,
 						),
 					);
+				}
+			})
+			// Close — dismiss the settings message entirely.
+			.callbackQuery(closeCb, async (ctx) => {
+				await ctx.answer({});
+				try {
+					await ctx.message?.delete();
+				} catch {
+					/* message too old to delete */
 				}
 			})
 	);
