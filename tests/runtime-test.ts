@@ -56,10 +56,11 @@ try {
 	// Uncomment to test - will exit in Node or throw in browser
 	// offensive.panic('This is a test panic!')
 	log.info("Panic would exit process in Node or throw in browser");
-} catch (e: any) {
-	log.warn("Caught panic in browser:", e.message);
-	if (e.exitCode) {
-		console.log("  Exit code:", e.exitCode);
+} catch (e) {
+	const err = e as Error & { exitCode?: number };
+	log.warn("Caught panic in browser:", err.message);
+	if (err.exitCode) {
+		console.log("  Exit code:", err.exitCode);
 	}
 }
 

@@ -183,7 +183,7 @@ class LRUCache<K, V> {
 const warnOnceCache = new LRUCache<string, boolean>(10_000);
 
 // Core logging function
-function prefixedLog(level: LogLevel, ...messages: any[]): void {
+function prefixedLog(level: LogLevel, ...messages: unknown[]): void {
 	// Check if this log level should be displayed
 	const levelPriority =
 		LOG_LEVELS[level as keyof typeof LOG_LEVELS] ?? LOG_LEVELS.info;
@@ -224,40 +224,40 @@ export function bootstrap(...messages: string[]): void {
 }
 
 // Main logging functions
-export function wait(...messages: any[]): void {
+export function wait(...messages: unknown[]): void {
 	prefixedLog("wait", ...messages);
 }
 
-export function error(...messages: any[]): void {
+export function error(...messages: unknown[]): void {
 	prefixedLog("error", ...messages);
 }
 
-export function warn(...messages: any[]): void {
+export function warn(...messages: unknown[]): void {
 	prefixedLog("warn", ...messages);
 }
 
-export function ready(...messages: any[]): void {
+export function ready(...messages: unknown[]): void {
 	prefixedLog("ready", ...messages);
 }
 
-export function info(...messages: any[]): void {
+export function info(...messages: unknown[]): void {
 	prefixedLog("info", ...messages);
 }
 
-export function success(...messages: any[]): void {
+export function success(...messages: unknown[]): void {
 	prefixedLog("success", ...messages);
 }
 
-export function event(...messages: any[]): void {
+export function event(...messages: unknown[]): void {
 	prefixedLog("event", ...messages);
 }
 
-export function trace(...messages: any[]): void {
+export function trace(...messages: unknown[]): void {
 	prefixedLog("trace", ...messages);
 }
 
 // Special warn-once function
-export function warnOnce(...messages: any[]): void {
+export function warnOnce(...messages: unknown[]): void {
 	const key = messages.join(" ");
 	if (!warnOnceCache.has(key)) {
 		warnOnceCache.set(key, true);
@@ -293,15 +293,15 @@ export function timeEnd(label: string): void {
 // Utility function to create a prefixed logger instance
 export function createLogger(prefix: string) {
 	return {
-		wait: (...messages: any[]) => wait(`[${prefix}]`, ...messages),
-		error: (...messages: any[]) => error(`[${prefix}]`, ...messages),
-		warn: (...messages: any[]) => warn(`[${prefix}]`, ...messages),
-		ready: (...messages: any[]) => ready(`[${prefix}]`, ...messages),
-		info: (...messages: any[]) => info(`[${prefix}]`, ...messages),
-		success: (...messages: any[]) => success(`[${prefix}]`, ...messages),
-		event: (...messages: any[]) => event(`[${prefix}]`, ...messages),
-		trace: (...messages: any[]) => trace(`[${prefix}]`, ...messages),
-		warnOnce: (...messages: any[]) => warnOnce(`[${prefix}]`, ...messages),
+		wait: (...messages: unknown[]) => wait(`[${prefix}]`, ...messages),
+		error: (...messages: unknown[]) => error(`[${prefix}]`, ...messages),
+		warn: (...messages: unknown[]) => warn(`[${prefix}]`, ...messages),
+		ready: (...messages: unknown[]) => ready(`[${prefix}]`, ...messages),
+		info: (...messages: unknown[]) => info(`[${prefix}]`, ...messages),
+		success: (...messages: unknown[]) => success(`[${prefix}]`, ...messages),
+		event: (...messages: unknown[]) => event(`[${prefix}]`, ...messages),
+		trace: (...messages: unknown[]) => trace(`[${prefix}]`, ...messages),
+		warnOnce: (...messages: unknown[]) => warnOnce(`[${prefix}]`, ...messages),
 		time: (label: string) => time(`${prefix}:${label}`),
 		timeEnd: (label: string) => timeEnd(`${prefix}:${label}`),
 	};
@@ -378,11 +378,19 @@ function getNetworkAddress(): string {
 	if (!runtime.canFileSystem()) return "localhost"; // Can't get network address without file system access
 
 	try {
-		const os = require("node:os");
-		const interfaces = os.networkInterfaces();
-
-		for (const name of Object.keys(interfaces)) {
-			for (const iface of interfaces[name]!) {
+		// node:os is loaded dynamically — we run in browsers too and a
+		// static import would break tree-shaking. Type the return shape
+		// explicitly so iteration narrows without `any`.
+		const os = require("node:os") as {
+			networkInterfaces: () => Record<
+				string,
+				| Array<{ family: string; internal: boolean; address: string }>
+				| undefined
+			>;
+		};
+		for (const list of Object.values(os.networkInterfaces())) {
+			if (!list) continue;
+			for (const iface of list) {
 				if (iface.family === "IPv4" && !iface.internal) {
 					return iface.address;
 				}

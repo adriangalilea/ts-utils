@@ -860,9 +860,10 @@ const buildHistoryPlugin = (args: {
 }) => {
 	const { sessionPlugin, maxTurns, retentionDays } = args;
 
-	return new Plugin<{}, DeriveDefinitions & { global: LLMHistoryDerives }>(
-		"@adriangalilea/utils/bot/llm/history",
-	)
+	return new Plugin<
+		Record<string, never>,
+		DeriveDefinitions & { global: LLMHistoryDerives }
+	>("@adriangalilea/utils/bot/llm/history")
 		.extend(sessionPlugin)
 		.derive(["message", "callback_query"], (ctx): LLMHistoryDerives => {
 			const key = threadKey(ctx);

@@ -128,9 +128,10 @@ function isTurboRepo(turboJsonPath: string): boolean {
 }
 
 /**
- * Get the nearest package.json data
+ * Get the nearest package.json data. Returns a generic record — callers
+ * narrow by reading known fields (`name`, `version`, `dependencies`, …).
  */
-export function getPackageJson(): any | null {
+export function getPackageJson(): Record<string, unknown> | null {
 	const root = findProjectRoot();
 	if (!root) return null;
 
@@ -157,8 +158,12 @@ export function isTypeScriptProject(): boolean {
 	// Check for TypeScript in dependencies
 	const pkg = getPackageJson();
 	if (pkg) {
-		const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-		return "typescript" in deps;
+		const dependencies = (pkg.dependencies ?? {}) as Record<string, unknown>;
+		const devDependencies = (pkg.devDependencies ?? {}) as Record<
+			string,
+			unknown
+		>;
+		return "typescript" in dependencies || "typescript" in devDependencies;
 	}
 
 	return false;

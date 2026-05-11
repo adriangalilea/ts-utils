@@ -56,7 +56,10 @@ export class Panic extends Error {
  * assert(data.length > 0, 'empty packet')
  * assert(port > 0 && port < 65536, 'invalid port:', port)
  */
-export function assert(condition: boolean, ...msg: any[]): asserts condition {
+export function assert(
+	condition: boolean,
+	...msg: unknown[]
+): asserts condition {
 	if (!condition) throw new Panic(msg.join(" ") || "assertion failed");
 }
 
@@ -70,7 +73,7 @@ export function assert(condition: boolean, ...msg: any[]): asserts condition {
  *   default: panic('impossible state:', state)
  * }
  */
-export function panic(...msg: any[]): never {
+export function panic(...msg: unknown[]): never {
 	throw new Panic(msg.join(" ") || "panic");
 }
 
@@ -90,7 +93,7 @@ export function panic(...msg: any[]): never {
  *   }
  * }
  */
-export function assertNever(value: never, ...msg: any[]): never {
+export function assertNever(value: never, ...msg: unknown[]): never {
 	throw new Panic(
 		msg.join(" ") || `assertNever: unexpected value: ${JSON.stringify(value)}`,
 	);
@@ -133,7 +136,7 @@ export function must<T>(fn: () => T | Promise<T>): T | Promise<T> {
  * const user = unwrap(db.findUser(id), 'user not found:', id)
  * const el = unwrap(document.getElementById('app'))
  */
-export function unwrap<T>(value: T | null | undefined, ...msg: any[]): T {
+export function unwrap<T>(value: T | null | undefined, ...msg: unknown[]): T {
 	if (value == null) throw new Panic(msg.join(" ") || `unwrap: got ${value}`);
 	return value;
 }

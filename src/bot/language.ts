@@ -438,9 +438,10 @@ const buildLanguagePlugin = <Lang extends string>(args: {
 	} = args;
 
 	return (
-		new Plugin<{}, DeriveDefinitions & { global: LanguageDerives<Lang> }>(
-			"@adriangalilea/utils/bot/language",
-		)
+		new Plugin<
+			Record<string, never>,
+			DeriveDefinitions & { global: LanguageDerives<Lang> }
+		>("@adriangalilea/utils/bot/language")
 			// Declare the session as a dependency. gramio's runtime dedupes
 			// this against the bot's top-level session extension so the
 			// session derive runs exactly once per update — but the types

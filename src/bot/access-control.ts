@@ -420,9 +420,12 @@ export const accessControl = (opts: AccessControlOptions) => {
 		// ctx.adminId / ctx.isAdmin are typed inside our handlers.
 		// Session-side types flow through `.extend(opts.session)` below
 		// and TypeScript merges them with our generic via the chain.
-		new Plugin<{}, AcDerives>("@adriangalilea/utils/bot/access-control", {
-			dependencies: ["@adriangalilea/utils/bot/admin"],
-		})
+		new Plugin<Record<string, never>, AcDerives>(
+			"@adriangalilea/utils/bot/access-control",
+			{
+				dependencies: ["@adriangalilea/utils/bot/admin"],
+			},
+		)
 			// Declare the shared session as a dependency. gramio's runtime
 			// dedups against the bot's top-level extension; types flow.
 			.extend(sessionPlugin)
@@ -502,23 +505,27 @@ export const accessControl = (opts: AccessControlOptions) => {
 				const existing = ctx.session.access;
 				const now = Date.now();
 				const isFirstRequest = !existing || existing.status === "unknown";
-
-				const rec: AccessRecord = isFirstRequest
-					? {
-							status: "pending",
-							user: {
-								id: userId,
-								firstName: ctx.from.firstName,
-								lastName: ctx.from.lastName,
-								username: ctx.from.username,
-							},
-							chatId: ctx.chat.id,
-							requestedAt: now,
-							firstMessage: ctx.text?.slice(0, FIRST_MSG_LIMIT),
-							messageCount: 0,
-							rejectedAttempts: 0,
-						}
-					: { ...existing! };
+				// Always refresh user metadata from the current update (names
+				// change). Used both to seed a fresh record and to backfill
+				// when cloning an older record that might lack it.
+				const user: AccessUser = {
+					id: userId,
+					firstName: ctx.from.firstName,
+					lastName: ctx.from.lastName,
+					username: ctx.from.username,
+				};
+				const rec: AccessRecord =
+					existing && existing.status !== "unknown"
+						? { ...existing, user }
+						: {
+								status: "pending",
+								user,
+								chatId: ctx.chat.id,
+								requestedAt: now,
+								firstMessage: ctx.text?.slice(0, FIRST_MSG_LIMIT),
+								messageCount: 0,
+								rejectedAttempts: 0,
+							};
 
 				if (isFirstRequest) {
 					await indexAdd(storage, "pending", userId);
@@ -549,7 +556,7 @@ export const accessControl = (opts: AccessControlOptions) => {
 						);
 					}
 					opts.onAccessRequest?.({
-						user: rec.user!,
+						user,
 						firstMessage: rec.firstMessage,
 					});
 				}

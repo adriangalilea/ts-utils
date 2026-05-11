@@ -168,7 +168,12 @@ export const coalesceLongMessages = (
 
 	return new Plugin("@adriangalilea/utils/bot/coalesce").use(
 		async (ctx, next) => {
-			if (!ctx.is("message") || ctx.text === undefined) return next();
+			if (!ctx.is("message")) return next();
+			// Capture into a local so TS narrows `text: string` for the rest
+			// of this handler — gramio's `ctx.text` is `string | undefined`
+			// and accessor narrowing doesn't survive Promise constructors.
+			const text = ctx.text;
+			if (text === undefined) return next();
 
 			const key = keyFor(ctx.chat.id, ctx.from.id);
 			const existing = buffers.get(key);
@@ -181,20 +186,18 @@ export const coalesceLongMessages = (
 				// is swallowed. The first fragment held by `existing.flush`
 				// will eventually fire next() with the combined text.
 				dbg(
-					`join key=${key} len=${ctx.text.length} buffered=${existing.text.length}→${existing.text.length + ctx.text.length}`,
+					`join key=${key} len=${text.length} buffered=${existing.text.length}→${existing.text.length + text.length}`,
 				);
 				clearTimeout(existing.timer);
-				existing.text += ctx.text;
+				existing.text += text;
 				existing.timer = setTimeout(existing.flush, windowMs);
 				return;
 			}
 
-			if (ctx.text.length < minLeadingLength) {
+			if (text.length < minLeadingLength) {
 				// Short message → can never be the leading fragment of a real
 				// client split. Zero-latency passthrough.
-				dbg(
-					`passthrough key=${key} len=${ctx.text.length} (<${minLeadingLength})`,
-				);
+				dbg(`passthrough key=${key} len=${text.length} (<${minLeadingLength})`);
 				return next();
 			}
 
@@ -203,11 +206,11 @@ export const coalesceLongMessages = (
 			// (next() of THIS ctx is called with the combined text). This
 			// keeps gramio's middleware chain awaiting until we're done.
 			dbg(
-				`open key=${key} len=${ctx.text.length} (≥${minLeadingLength}, wait ${windowMs}ms)`,
+				`open key=${key} len=${text.length} (≥${minLeadingLength}, wait ${windowMs}ms)`,
 			);
 			return new Promise<void>((resolve, reject) => {
 				const buffered: FragmentBuffer = {
-					text: ctx.text!,
+					text,
 					timer: setTimeout(() => buffered.flush(), windowMs),
 					flush: () => {
 						// Detach from the map FIRST so any fragment arriving mid-flush

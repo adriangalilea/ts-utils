@@ -6,6 +6,50 @@
  * for process, window, Deno, etc.
  */
 
+// Ambient declarations for the runtime globals we touch. Declared here
+// (not as `@types/deno` / `@types/bun` deps) so we only describe what
+// we actually call and pull no extra dependencies.
+declare global {
+	// `var` makes Deno/Bun live on `globalThis` per ECMAScript spec.
+	// eslint-disable-next-line no-var
+	var Deno: DenoNamespace | undefined;
+	// eslint-disable-next-line no-var
+	var Bun: object | undefined;
+	interface Window {
+		__ENV__?: Record<string, string>;
+		process?: { env?: Record<string, string> };
+	}
+}
+
+interface DenoNamespace {
+	exit(code?: number): never;
+	cwd(): string;
+	env: {
+		get(key: string): string | undefined;
+		set(key: string, value: string): void;
+		delete(key: string): void;
+		has(key: string): boolean;
+		toObject(): Record<string, string>;
+	};
+	stdout: { writeSync(data: Uint8Array): number };
+	stderr: { writeSync(data: Uint8Array): number };
+	isatty(rid: number): boolean;
+}
+
+/**
+ * Thrown by `runtime.exit(code)` in environments without process exit
+ * (i.e. browsers). Carries the requested exit code on `.exitCode` so
+ * outer error handlers can still report it.
+ */
+export class ProcessExitError extends Error {
+	readonly exitCode: number;
+	constructor(code: number) {
+		super(`Process exited with code ${code}`);
+		this.name = "ProcessExitError";
+		this.exitCode = code;
+	}
+}
+
 interface RuntimeCapabilities {
 	// Environment detection
 	readonly isBrowser: boolean;
@@ -39,6 +83,16 @@ interface RuntimeCapabilities {
 	};
 }
 
+// Capture the browser window once, if present. Local capture keeps
+// every subsequent access typed without `globalThis.window` lookups.
+const browserWindow: Window | undefined =
+	typeof globalThis !== "undefined" && "window" in globalThis
+		? (globalThis as unknown as { window: Window }).window
+		: undefined;
+
+const browserEnv = (): Record<string, string> | undefined =>
+	browserWindow?.__ENV__ ?? browserWindow?.process?.env;
+
 class RuntimeOps implements RuntimeCapabilities {
 	// Environment detection - evaluated once
 	readonly isBrowser =
@@ -47,8 +101,8 @@ class RuntimeOps implements RuntimeCapabilities {
 		"document" in globalThis;
 	readonly isNode =
 		typeof process !== "undefined" && process.versions?.node !== undefined;
-	readonly isDeno = typeof (globalThis as any).Deno !== "undefined";
-	readonly isBun = typeof (globalThis as any).Bun !== "undefined";
+	readonly isDeno = typeof globalThis.Deno !== "undefined";
+	readonly isBun = typeof globalThis.Bun !== "undefined";
 
 	// Capability checking
 	canExit(): boolean {
@@ -77,145 +131,115 @@ class RuntimeOps implements RuntimeCapabilities {
 
 	// Platform-agnostic operations
 	exit(code: number): never {
-		if (this.isNode) {
-			process.exit(code);
-		} else if (this.isDeno) {
-			(globalThis as any).Deno.exit(code);
-		} else if (this.isBun) {
-			process.exit(code);
-		}
-		// In browser, we can't exit but we can throw
-		const error = new Error(`Process exited with code ${code}`);
-		(error as any).exitCode = code;
-		throw error;
+		if (this.isNode || this.isBun) process.exit(code);
+		const Deno = globalThis.Deno;
+		if (Deno) Deno.exit(code);
+		// Browser / unknown: no process to exit, so surface via a typed
+		// error the caller can choose to ignore or propagate.
+		throw new ProcessExitError(code);
 	}
 
 	env(key: string): string | undefined {
-		if (this.isNode || this.isBun) {
-			return process.env[key];
-		} else if (this.isDeno) {
-			return (globalThis as any).Deno.env.get(key);
-		} else if (this.isBrowser) {
-			// In browser, check if env was injected by bundler
-			if (typeof globalThis !== "undefined" && "window" in globalThis) {
-				const win = (globalThis as any).window;
-				const injected = win.__ENV__ || win.process?.env;
-				return injected?.[key];
-			}
-		}
-		return undefined;
+		if (this.isNode || this.isBun) return process.env[key];
+		const Deno = globalThis.Deno;
+		if (Deno) return Deno.env.get(key);
+		return browserEnv()?.[key];
 	}
 
 	setEnv(key: string, value: string): void {
 		if (this.isNode || this.isBun) {
 			process.env[key] = value;
-		} else if (this.isDeno) {
-			(globalThis as any).Deno.env.set(key, value);
-		} else if (this.isBrowser) {
-			// In browser, set on injected env object if available
-			if (typeof globalThis !== "undefined" && "window" in globalThis) {
-				const win = (globalThis as any).window;
-				if (!win.__ENV__) {
-					win.__ENV__ = {};
-				}
-				win.__ENV__[key] = value;
-			}
+			return;
+		}
+		const Deno = globalThis.Deno;
+		if (Deno) {
+			Deno.env.set(key, value);
+			return;
+		}
+		if (browserWindow) {
+			const env = browserWindow.__ENV__ ?? {};
+			env[key] = value;
+			browserWindow.__ENV__ = env;
 		}
 	}
 
 	deleteEnv(key: string): void {
 		if (this.isNode || this.isBun) {
 			delete process.env[key];
-		} else if (this.isDeno) {
-			(globalThis as any).Deno.env.delete(key);
-		} else if (this.isBrowser) {
-			if (typeof globalThis !== "undefined" && "window" in globalThis) {
-				const win = (globalThis as any).window;
-				const injected = win.__ENV__ || win.process?.env;
-				if (injected) delete injected[key];
-			}
+			return;
 		}
+		const Deno = globalThis.Deno;
+		if (Deno) {
+			Deno.env.delete(key);
+			return;
+		}
+		const env = browserEnv();
+		if (env) delete env[key];
 	}
 
 	hasEnv(key: string): boolean {
-		if (this.isNode || this.isBun) {
-			return key in process.env;
-		} else if (this.isDeno) {
-			return (globalThis as any).Deno.env.has(key);
-		} else if (this.isBrowser) {
-			if (typeof globalThis !== "undefined" && "window" in globalThis) {
-				const win = (globalThis as any).window;
-				const injected = win.__ENV__ || win.process?.env;
-				return injected ? key in injected : false;
-			}
-		}
-		return false;
+		if (this.isNode || this.isBun) return key in process.env;
+		const Deno = globalThis.Deno;
+		if (Deno) return Deno.env.has(key);
+		const env = browserEnv();
+		return env ? key in env : false;
 	}
 
 	allEnv(): Record<string, string> {
-		if (this.isNode || this.isBun) {
+		if (this.isNode || this.isBun)
 			return { ...process.env } as Record<string, string>;
-		} else if (this.isDeno) {
-			return { ...(globalThis as any).Deno.env.toObject() };
-		} else if (this.isBrowser) {
-			if (typeof globalThis !== "undefined" && "window" in globalThis) {
-				const win = (globalThis as any).window;
-				const injected = win.__ENV__ || win.process?.env;
-				return injected ? { ...injected } : {};
-			}
-		}
-		return {};
+		const Deno = globalThis.Deno;
+		if (Deno) return { ...Deno.env.toObject() };
+		const env = browserEnv();
+		return env ? { ...env } : {};
 	}
 
 	cwd(): string {
-		if (this.isNode || this.isBun) {
-			return process.cwd();
-		} else if (this.isDeno) {
-			return (globalThis as any).Deno.cwd();
-		} else {
-			return "/"; // Default for browser
-		}
+		if (this.isNode || this.isBun) return process.cwd();
+		const Deno = globalThis.Deno;
+		if (Deno) return Deno.cwd();
+		return "/"; // Default for browser
 	}
 
 	get stdout() {
+		const isNodeLike = this.isNode || this.isBun;
+		const Deno = globalThis.Deno;
 		return {
 			write: (message: string) => {
-				if (this.isNode || this.isBun) {
+				if (isNodeLike) {
 					process.stdout.write(message);
-				} else if (this.isDeno) {
-					(globalThis as any).Deno.stdout.writeSync(
-						new TextEncoder().encode(message),
-					);
-				} else {
-					console.log(message);
+					return;
 				}
+				if (Deno) {
+					Deno.stdout.writeSync(new TextEncoder().encode(message));
+					return;
+				}
+				console.log(message);
 			},
-			isTTY: this.isNode
+			isTTY: isNodeLike
 				? Boolean(process.stdout?.isTTY)
-				: this.isDeno
-					? ((globalThis as any).Deno.isatty?.(1) ?? false)
-					: false,
+				: (Deno?.isatty?.(1) ?? false),
 		};
 	}
 
 	get stderr() {
+		const isNodeLike = this.isNode || this.isBun;
+		const Deno = globalThis.Deno;
 		return {
 			write: (message: string) => {
-				if (this.isNode || this.isBun) {
+				if (isNodeLike) {
 					process.stderr.write(message);
-				} else if (this.isDeno) {
-					(globalThis as any).Deno.stderr.writeSync(
-						new TextEncoder().encode(message),
-					);
-				} else {
-					console.error(message);
+					return;
 				}
+				if (Deno) {
+					Deno.stderr.writeSync(new TextEncoder().encode(message));
+					return;
+				}
+				console.error(message);
 			},
-			isTTY: this.isNode
+			isTTY: isNodeLike
 				? Boolean(process.stderr?.isTTY)
-				: this.isDeno
-					? ((globalThis as any).Deno.isatty?.(2) ?? false)
-					: false,
+				: (Deno?.isatty?.(2) ?? false),
 		};
 	}
 }
@@ -226,15 +250,23 @@ export const runtime = new RuntimeOps();
 // Export type for extension
 export type { RuntimeCapabilities };
 
+// Narrow to the boolean-valued capability keys: detection flags and
+// `can*()` predicates. Excludes operations like `exit` / `env`.
+type CapabilityKey = {
+	[K in keyof RuntimeCapabilities]: RuntimeCapabilities[K] extends boolean
+		? K
+		: RuntimeCapabilities[K] extends () => boolean
+			? K
+			: never;
+}[keyof RuntimeCapabilities];
+
 // Helper to assert capability with helpful error
 export function requireCapability(
-	capability: keyof RuntimeCapabilities,
+	capability: CapabilityKey,
 	operation: string,
 ): void {
-	const can =
-		typeof runtime[capability] === "function"
-			? (runtime[capability] as any)()
-			: runtime[capability];
+	const value = runtime[capability];
+	const can = typeof value === "function" ? value.call(runtime) : value;
 	if (!can) {
 		const env = runtime.isBrowser
 			? "browser"
