@@ -9,7 +9,7 @@
  * state, recording, gates) have their OWN runtime behaviour independent
  * of any menu.
  *
- * ## GDPR rights (Forget / Export)
+ * ## Forget / Export buttons
  *
  * If you pass `personalData: { storage }`, the menu adds two buttons:
  *
@@ -17,7 +17,7 @@
  *   - 📥 Export my data — `storage.get(sessionKey(userId))` → JSON file
  *
  * Because all per-user state across our plugins lives in ONE shared
- * session record (see `bot/language`, `bot/message-history`), wiping
+ * session record (see `bot/language`, `bot/llm`'s `llmHistory`), wiping
  * or exporting that single key covers everything in one shot. No
  * registry, no cascade, no per-plugin coordination.
  *
@@ -28,9 +28,12 @@
  *
  * ## Privacy URL
  *
- * `privacy` defaults to [Telegram's Standard Bot Privacy Policy](https://telegram.org/privacy-tpa).
- * Override when you retain content or process data beyond what the
- * standard covers.
+ * `privacy` defaults to [Telegram's Standard Bot Privacy Policy](https://telegram.org/privacy-tpa)
+ * which covers everything the plugins in this package retain
+ * (language preference, access state, threaded LLM conversation
+ * history — Telegram designed Threaded Mode explicitly for AI
+ * chatbots with multi-turn memory). Override only if your bot retains
+ * data beyond what the plugins do.
  *
  * Peer deps: `gramio`, `@gramio/storage`.
  *
@@ -288,7 +291,7 @@ const renderKeyboard = (
 
   const lang = ctxLang(ctx)
   if (parentPath.length === 0) {
-    // GDPR rights buttons at the root view.
+    // Forget / Export buttons at the root view.
     if (menu._opts.personalData) {
       kb.text(
         say({ en: '🗑 Forget my data', es: '🗑 Olvidar mis datos' }, lang),

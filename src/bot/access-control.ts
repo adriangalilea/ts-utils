@@ -25,7 +25,7 @@
  *     storage[String(userId)] = {
  *       access:   { status, approvedAt, … },   // ← this plugin
  *       language: 'es',                         // ← bot/language
- *       history:  { items: [...] },             // ← bot/message-history
+ *       llm:      { shards: { 'general': [...] } },  // ← bot/llm (history)
  *     }
  *
  * Plus one tiny admin-side index so `/access` can list pending /

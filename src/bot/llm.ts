@@ -1,51 +1,79 @@
 /**
- * LLM streaming for GramIO bots — both halves of the pipeline:
+ * GramIO LLM toolkit — three primitives that together form a complete
+ * Telegram LLM-chatbot pipeline:
  *
- *   `streamChat(response)`   — INPUT: parse OpenAI-compatible SSE
- *                              (OpenAI, vllm, mlx-lm, llama.cpp, Together,
- *                              Groq, …) into a typed `AsyncGenerator` of
- *                              `{ type: 'content' | 'reasoning', text }`.
+ *   `streamChat(response)`   — INPUT. Parses OpenAI-compatible SSE
+ *                              (OpenAI, vllm, mlx-lm, llama.cpp,
+ *                              Together, Groq, …) into a typed
+ *                              `AsyncGenerator` of `{type, text}` with
+ *                              `content` / `reasoning` separation.
  *
- *   `ctx.startStream()`      — OUTPUT: debounced `editMessageText` to
- *                              Telegram. Local Markdown parse via
- *                              `@gramio/format` so malformed mid-stream
- *                              markup degrades to plain text instead of
- *                              failing. Splits at 4000 chars on
+ *   `ctx.startStream()`      — OUTPUT. Debounced `editMessageText` to
+ *                              Telegram, local Markdown parse via
+ *                              `@gramio/format`, 4000-char split on
  *                              paragraph / line / word boundary.
  *
- * The two compose into the canonical bot pipeline:
+ *   `ctx.llm.add / .get / …` — HISTORY. Per-(user, thread) conversation
+ *                              buffer in OpenAI `ChatMessage` shape.
+ *                              Persisted in the shared `@gramio/session`
+ *                              record under the `llm` field, so the
+ *                              `botMenu` 🗑 Forget button wipes it
+ *                              together with everything else (one
+ *                              record, one delete, no per-plugin
+ *                              registry).
  *
- *     fetch(...) ──streamChat──> {content, reasoning} chunks ──ctx.startStream──> Telegram
+ * The trio composes:
  *
- * Peer deps: `gramio`, `@gramio/format`, `marked`.
+ *     fetch(...) ──streamChat──> chunks ──ctx.startStream──> Telegram
+ *           ▲                                                   │
+ *           └──── ctx.llm.get() ◀──── ctx.llm.add(assistant) ◀──┘
+ *
+ * Peer deps: `gramio`, `@gramio/session`, `@gramio/format`, `marked`.
  *
  * @example
  * import { Bot } from 'gramio'
- * import { llmStream, streamChat } from '@adriangalilea/utils/bot/llm-stream'
+ * import { session } from '@gramio/session'
+ * import {
+ *   llmStream, llmHistory, streamChat,
+ * } from '@adriangalilea/utils/bot/llm'
+ *
+ * const userSession = session({ storage, key: 'session', initial: () => ({}) })
+ * const chat = llmHistory({ session: userSession, maxTurns: 20, retentionDays: 7 })
  *
  * const bot = new Bot(process.env.BOT_TOKEN!)
+ *   .extend(userSession)
  *   .extend(llmStream())
+ *   .extend(chat.plugin)
  *   .on('message', async (ctx) => {
+ *     ctx.llm.add({ role: 'user', content: ctx.text ?? '' })
+ *     const messages = ctx.llm.get()
+ *
  *     const response = await fetch(process.env.LLM_URL!, {
  *       method: 'POST',
  *       headers: { 'Content-Type': 'application/json' },
  *       body: JSON.stringify({
  *         model: process.env.LLM_MODEL,
- *         messages: [{ role: 'user', content: ctx.text ?? '' }],
+ *         messages: [{ role: 'system', content: 'You are helpful.' }, ...messages],
  *         stream: true,
  *       }),
  *     })
+ *
  *     const stream = ctx.startStream()
+ *     let assistant = ''
  *     for await (const chunk of streamChat(response)) {
- *       if (chunk.type === 'content') await stream.append(chunk.text)
- *       // chunk.type === 'reasoning' is also yielded for thinking models
+ *       if (chunk.type === 'content') {
+ *         assistant += chunk.text
+ *         await stream.append(chunk.text)
+ *       }
  *     }
  *     await stream.end()
+ *     ctx.llm.add({ role: 'assistant', content: assistant })
  *   })
  *
  * bot.start()
  */
-import { Plugin } from 'gramio'
+import { type DeriveDefinitions, Plugin } from 'gramio'
+import { session } from '@gramio/session'
 import { markdownToFormattable } from '@gramio/format/markdown'
 
 // ─── INPUT: OpenAI-compatible SSE parser ───────────────────────────
@@ -203,7 +231,7 @@ export class MarkdownStreamer {
       debounceMs: opts.debounceMs ?? DEFAULT_DEBOUNCE_MS,
       placeholder: opts.placeholder ?? '…',
       markdown: opts.markdown ?? true,
-      onError: opts.onError ?? ((e) => console.error('[llm-stream]', e)),
+      onError: opts.onError ?? ((e) => console.error('[bot/llm:stream]', e)),
     }
   }
 
@@ -324,7 +352,7 @@ export class MarkdownStreamer {
  * `ctx.startStream({...})` override them.
  */
 export const llmStream = (defaults: StreamOptions = {}) =>
-  new Plugin('@adriangalilea/utils/bot/llm-stream').derive('message', (ctx) => ({
+  new Plugin('@adriangalilea/utils/bot/llm/stream').derive('message', (ctx) => ({
     // gramio's `message` scope guarantees `ctx.chat`. `ctx.bot.api` is on
     // every Context. Structural compat → no cast needed.
     startStream: (opts: StreamOptions = {}) =>
@@ -342,3 +370,201 @@ function findSplit(text: string, maxLen: number): number {
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+// ─── HISTORY: per-thread conversation buffer ───────────────────────
+
+/**
+ * Multimodal content shape from OpenAI's chat-completions spec. Either
+ * a plain string or an ordered array of typed parts. Image URLs cover
+ * both http(s) and Telegram `getFile` resolved paths.
+ */
+export type ChatContent =
+  | string
+  | Array<
+      | { type: 'text'; text: string }
+      | { type: 'image_url'; image_url: { url: string } }
+    >
+
+/**
+ * One turn in the conversation. The library does NOT filter by role —
+ * if you persist `system` turns, they ride along on every `get()`.
+ * Most callers prepend their system prompt fresh each request and only
+ * persist `user` / `assistant`.
+ */
+export type ChatMessage = {
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: ChatContent
+  /** Unix seconds when added — used for retention pruning. */
+  date: number
+}
+
+/** Per-thread shards of `ChatMessage`s, persisted in the session. */
+type ChatRecord = {
+  shards: { [threadKey: string]: ChatMessage[] }
+}
+
+/** Loose session shape — this plugin only touches the `llm` field. */
+type LLMSessionLike = { llm?: ChatRecord }
+
+/** @internal — kept unexported so it doesn't clash with peers' refs. */
+type LLMSessionPluginRef = ReturnType<typeof session<LLMSessionLike, 'session'>>
+
+export type LLMHistoryOptions = {
+  /**
+   * Shared session plugin. This plugin extends it for type flow;
+   * gramio's runtime dedup ensures the session derive runs once.
+   */
+  session: LLMSessionPluginRef
+  /** Ring buffer cap **per thread**. Oldest entries dropped past this. */
+  maxTurns: number
+  /** Entries older than this (in days) are dropped on read. */
+  retentionDays: number
+}
+
+export type LLMHistoryFeature = {
+  plugin: ReturnType<typeof buildHistoryPlugin>
+}
+
+/**
+ * Methods decorated onto `ctx.llm`. All synchronous — reads/writes the
+ * session record via `@gramio/session`'s Proxy, which auto-persists.
+ *
+ * Thread isolation is automatic: every method operates on the shard
+ * for `ctx.threadId` (or `'general'` when no thread). Different threads
+ * = different conversations, no leakage.
+ */
+export type LLMHistoryApi = {
+  /** Append one message to the CURRENT thread's shard. */
+  add: (message: Omit<ChatMessage, 'date'> & { date?: number }) => void
+  /** Pruned snapshot of the CURRENT thread, oldest-first. */
+  get: () => ReadonlyArray<ChatMessage>
+  /** Wipe the CURRENT thread's shard. */
+  clear: () => void
+  /**
+   * Full sharded map, pruned. Use for /export or admin views. Keys are
+   * thread ids (or `'general'`) → ordered messages.
+   */
+  all: () => Readonly<{ [threadKey: string]: ReadonlyArray<ChatMessage> }>
+  /** Wipe ALL threads for this user. */
+  clearAll: () => void
+}
+
+type LLMHistoryDerives = { llm: LLMHistoryApi }
+
+const GENERAL_THREAD = 'general'
+
+const threadKey = (ctx: {
+  threadId?: number
+  message?: { threadId?: number }
+}): string => {
+  // Message events: ctx.threadId. Callback events: ctx.message.threadId.
+  const tid = ctx.threadId ?? ctx.message?.threadId
+  return tid !== undefined ? String(tid) : GENERAL_THREAD
+}
+
+const prune = (
+  items: ChatMessage[],
+  maxTurns: number,
+  retentionDays: number,
+): ChatMessage[] => {
+  const cutoffSec = Math.floor(Date.now() / 1000) - retentionDays * 86400
+  const fresh = items.filter((m) => m.date >= cutoffSec)
+  return fresh.slice(-maxTurns)
+}
+
+const pruneAll = (
+  shards: ChatRecord['shards'],
+  maxTurns: number,
+  retentionDays: number,
+): ChatRecord['shards'] => {
+  const out: ChatRecord['shards'] = {}
+  for (const k of Object.keys(shards)) {
+    const pruned = prune(shards[k], maxTurns, retentionDays)
+    if (pruned.length > 0) out[k] = pruned
+  }
+  return out
+}
+
+/**
+ * Per-(user, thread) LLM conversation history. Opt-in. Persists in the
+ * shared `@gramio/session` record under `llm`, so 🗑 Forget from
+ * `botMenu` wipes it together with everything else — one record, one
+ * delete, no per-plugin registry.
+ *
+ * @example
+ * const chat = llmHistory({ session: userSession, maxTurns: 20, retentionDays: 7 })
+ * bot.extend(chat.plugin)
+ *    .on('message', (ctx) => {
+ *      ctx.llm.add({ role: 'user', content: ctx.text ?? '' })
+ *      const messages = ctx.llm.get()        // ChatMessage[] for current thread
+ *      // ... call LLM with messages, then:
+ *      ctx.llm.add({ role: 'assistant', content: reply })
+ *    })
+ */
+export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
+  if (opts.maxTurns <= 0) throw new Error('llmHistory: maxTurns must be > 0')
+  if (opts.retentionDays <= 0) throw new Error('llmHistory: retentionDays must be > 0')
+
+  const plugin = buildHistoryPlugin({
+    sessionPlugin: opts.session,
+    maxTurns: opts.maxTurns,
+    retentionDays: opts.retentionDays,
+  })
+
+  return { plugin }
+}
+
+const buildHistoryPlugin = (args: {
+  sessionPlugin: LLMSessionPluginRef
+  maxTurns: number
+  retentionDays: number
+}) => {
+  const { sessionPlugin, maxTurns, retentionDays } = args
+
+  return new Plugin<{}, DeriveDefinitions & { global: LLMHistoryDerives }>(
+    '@adriangalilea/utils/bot/llm/history',
+  )
+    .extend(sessionPlugin)
+    .derive(['message', 'callback_query'], (ctx): LLMHistoryDerives => {
+      const key = threadKey(ctx)
+
+      // Always operate against a freshly-pruned view. Writes go to the
+      // pruned base so stale entries never resurface after a read.
+      const readShards = (): ChatRecord['shards'] =>
+        pruneAll(ctx.session.llm?.shards ?? {}, maxTurns, retentionDays)
+
+      const writeShards = (shards: ChatRecord['shards']): void => {
+        ctx.session.llm = { shards }
+      }
+
+      return {
+        llm: {
+          add: (message) => {
+            const shards = readShards()
+            const cur = shards[key] ?? []
+            const entry: ChatMessage = {
+              role: message.role,
+              content: message.content,
+              date: message.date ?? Math.floor(Date.now() / 1000),
+            }
+            shards[key] = [...cur, entry].slice(-maxTurns)
+            writeShards(shards)
+          },
+          get: () =>
+            (readShards()[key] ?? []) as ReadonlyArray<ChatMessage>,
+          clear: () => {
+            const shards = readShards()
+            delete shards[key]
+            writeShards(shards)
+          },
+          all: () =>
+            readShards() as Readonly<{
+              [threadKey: string]: ReadonlyArray<ChatMessage>
+            }>,
+          clearAll: () => {
+            writeShards({})
+          },
+        },
+      }
+    })
+}

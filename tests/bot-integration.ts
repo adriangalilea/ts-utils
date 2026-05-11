@@ -30,8 +30,8 @@
  * `message_thread_id`, surfaced as `ctx.threadId`. With this repo's
  * pinned fork of `@gramio/contexts`, the SendMixin auto-forwards
  * `message_thread_id` on every `ctx.send` family call — replies stay
- * in their thread automatically. Per-thread `message-history` shards
- * give each thread its own rolling buffer.
+ * in their thread automatically. `llmHistory` shards conversation
+ * state per thread, so each thread is its own conversation.
  */
 import { Bot } from 'gramio'
 import { session } from '@gramio/session'
@@ -40,17 +40,16 @@ import { kev } from '../src/platform/kev.js'
 import { adminContext, gracefulStart } from '../src/bot/kit.js'
 import { accessControl, simulateAccessRequest } from '../src/bot/access-control.js'
 import { coalesceLongMessages } from '../src/bot/coalesce.js'
-import { llmStream } from '../src/bot/llm-stream.js'
+import { llmStream, llmHistory } from '../src/bot/llm.js'
 import { botMenu } from '../src/bot/menu.js'
 import { language } from '../src/bot/language.js'
-import { messageHistory } from '../src/bot/message-history.js'
 
 const token = kev.mustGet('BOT_TOKEN')
 
 const storage = inMemoryStorage()
 
 // Shared session — one record per user, with each plugin owning a
-// distinct field by convention (`access`, `language`, `history`).
+// distinct field by convention (`access`, `language`, `llm`).
 // All session-using plugins below declare this as a dependency;
 // gramio's runtime deduplication ensures the session derive runs
 // exactly once per update.
@@ -66,9 +65,9 @@ const lang = language({
   default: 'en',
 })
 
-const history = messageHistory({
+const chat = llmHistory({
   session: userSession,
-  maxMessages: 50,
+  maxTurns: 20,
   retentionDays: 7,
 })
 
@@ -76,25 +75,30 @@ const menu = botMenu({
   command: 'settings',
   description: 'Open settings',
   adminContact: '@adriangalilea',
-  personalData: { storage },     // ← enables 🗑 Forget · 📥 Export
+  personalData: { storage },     // ← enables 🗑 Forget · 📥 Export (wipes ctx.llm too)
   items: [
     lang.menuItem,
     {
       id: 'recent',
-      label: '📜 Show last 3 messages',
+      label: '📜 Show last 3 turns (this thread)',
       action: async (ctx) => {
-        // message-history is sharded per thread → this shows the
-        // current thread's last 3 entries, not the global feed.
+        // ctx.llm is sharded per thread → this shows the current
+        // thread's last 3 messages, not the global feed.
         type Helpers = {
-          history?: ReadonlyArray<{ text: string }>
+          llm?: { get: () => ReadonlyArray<{ role: string; content: unknown }> }
           send: (t: string, params?: object) => Promise<unknown>
         }
         const c = ctx as unknown as Helpers
-        const last = (c.history ?? [])
+        const last = (c.llm?.get() ?? [])
           .slice(-3)
-          .map((e, i) => `${i + 1}. ${e.text}`)
+          .map(
+            (m, i) =>
+              `${i + 1}. [${m.role}] ${
+                typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+              }`,
+          )
           .join('\n')
-        await c.send(last || '(no history in this thread)')
+        await c.send(last || '(no turns in this thread yet)')
       },
     },
   ],
@@ -106,8 +110,8 @@ const bot = new Bot(token)
   .extend(accessControl({ session: userSession, storage, defaults: [] }))
   .extend(coalesceLongMessages({ log: true }))
   .extend(llmStream())
+  .extend(chat.plugin)
   .extend(lang.plugin)
-  .extend(history.plugin)
   .extend(menu.plugin)
 
   // ─── /start ────────────────────────────────────────────────────
@@ -117,7 +121,7 @@ const bot = new Bot(token)
       `🧵 ctx.threadId: ${ctx.threadId ?? '(none)'}\n` +
       `   isTopicMessage: ${ctx.isTopicMessage()}\n` +
       `   directMessagesTopic: ${ctx.directMessagesTopic?.topicId ?? '(none)'}`
-    // ctx.say.send auto-forwards ctx.threadId (see bot/kit:inThread).
+    // Auto-threads via gramio SendMixin (forked, see README).
     return ctx.say.send({
       en:
         `👋 hi\n\n` +
@@ -162,16 +166,21 @@ const bot = new Bot(token)
     },
   )
 
-  // ─── plain text echo — exercises coalesce + thread routing ─────
-  // Any non-command message: echo back into the same thread, plus
-  // diagnostic info (length, thread ids). If you paste >4096 chars,
-  // Telegram splits it client-side; coalesce joins them; this handler
-  // should see ONE event with the full length. If coalesce is broken
-  // you'd see two events of <4096 each.
+  // ─── plain text echo — exercises coalesce + thread routing + ctx.llm ─
+  // Any non-command message:
+  //   1. records the user turn in ctx.llm (so "Show last 3 turns"
+  //      in /settings actually has something to show)
+  //   2. echoes back into the same thread with diagnostic info
+  //   3. records the echo as the assistant turn in ctx.llm
   //
-  // For Threaded Mode demo: send the same text twice in two different
-  // threads — each echo should land in its own thread (not bleed across).
-  .on('message', (ctx) => {
+  // Coalesce: if you paste >4096 chars Telegram splits it client-side;
+  // coalesce joins them, this handler sees ONE event with the full
+  // length. If coalesce is broken you'd see two events of <4096 each.
+  //
+  // Threaded Mode demo: send the same text in two different threads —
+  // each echo lands in its own thread AND each /settings → Show last
+  // 3 turns lists only that thread's exchanges (no bleed).
+  .on('message', async (ctx) => {
     if (!ctx.access.allowed) return
     if (ctx.text?.startsWith('/')) return // commands handled above
 
@@ -191,11 +200,15 @@ const bot = new Bot(token)
               : ' (raw threadId, no topic flag set)')
         : '🧵 no thread'
 
-    // ctx.say.send auto-forwards ctx.threadId (see bot/kit:inThread).
-    return ctx.say.send({
+    ctx.llm.add({ role: 'user', content: echo })
+
+    // Auto-threads via gramio SendMixin (forked, see README).
+    await ctx.say.send({
       en: `📏 ${len} chars · ${threadInfo}\n\n🔁 echo:\n${echoTrimmed}`,
       es: `📏 ${len} chars · ${threadInfo}\n\n🔁 echo:\n${echoTrimmed}`,
     })
+
+    ctx.llm.add({ role: 'assistant', content: echoTrimmed })
   })
 
   // ─── /simulate — fake "stranger DMed the bot" ──────────────────

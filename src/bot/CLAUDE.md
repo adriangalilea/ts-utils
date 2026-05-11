@@ -13,9 +13,8 @@ optional** — install only what the subpaths you import need.
 | `bot/access-control` | `accessControl({ session, storage, defaults? })` — gates non-admin/non-default users; admin gets DM with `[✅ Aprobar][❌ Denegar]` on first attempt; persistent `/access` admin menu for revoke/reapprove/list. Exposes `simulateAccessRequest()` for tests. |
 | `bot/coalesce` | `coalesceLongMessages({ minLeadingLength?, windowMs?, acrossUsers?, log? })` — joins client-split inbound messages back into one event. Also exports `isCoalescent(prev, curr, opts)` as a pure utility. |
 | `bot/language` | `language({ session, supported, default, scope?, labels? })` — per-user BCP-47 preference; resolves `ctx.lang` (typed); decorates `ctx.say` (callable polyglot resolver + `.send` / `.edit` / `.answer` methods); supplies a `menuItem` for `botMenu`. |
-| `bot/llm-stream` | Both halves of the LLM pipeline: `streamChat(response)` parses OpenAI-compatible SSE (OpenAI, vllm, mlx-lm, llama.cpp, Together, Groq, …) into a typed `AsyncGenerator<{type, text}>` with `content` / `reasoning` separation. `llmStream()` adds `ctx.startStream()` for the Telegram side — debounced `editMessageText`, 4000-char split, local Markdown parse so malformed mid-stream markup degrades to plain text. |
+| `bot/llm` | The full LLM-chatbot pipeline in one module: `streamChat(response)` parses OpenAI-compatible SSE (OpenAI, vllm, mlx-lm, llama.cpp, Together, Groq, …) into `AsyncGenerator<{type, text}>` with `content` / `reasoning` separation; `llmStream()` adds `ctx.startStream()` for Telegram-side debounced markdown streaming; `llmHistory({ session, maxTurns, retentionDays })` decorates `ctx.llm` with `.add / .get / .clear / .all / .clearAll` — per-(user, thread) conversation buffer in OpenAI `ChatMessage` shape, persisted in the shared session record so the menu's 🗑 Forget wipes it automatically. |
 | `bot/menu` | `botMenu({ command, description, items, privacy?, personalData?, adminContact })` — `/settings` command + InlineKeyboard router. With `personalData: { storage }`, auto-adds 🗑 Forget + 📥 Export buttons. |
-| `bot/message-history` | `messageHistory({ session, maxMessages, retentionDays })` — opt-in per-user ring buffer with retention; exposes `ctx.history` (read-only pruned snapshot). |
 
 Implementation files are flat under `src/bot/`. `index.ts` is the barrel for
 `@adriangalilea/utils/bot`.
@@ -30,9 +29,8 @@ import { redisStorage } from '@gramio/storage-redis'
 import { adminContext, gracefulStart } from '@adriangalilea/utils/bot/kit'
 import { accessControl } from '@adriangalilea/utils/bot/access-control'
 import { coalesceLongMessages } from '@adriangalilea/utils/bot/coalesce'
-import { llmStream } from '@adriangalilea/utils/bot/llm-stream'
+import { llmStream, llmHistory, streamChat } from '@adriangalilea/utils/bot/llm'
 import { language } from '@adriangalilea/utils/bot/language'
-import { messageHistory } from '@adriangalilea/utils/bot/message-history'
 import { botMenu } from '@adriangalilea/utils/bot/menu'
 
 const storage = redisStorage()
@@ -51,9 +49,9 @@ const lang = language({
   default: 'en',
 })
 
-const history = messageHistory({
+const chat = llmHistory({
   session: userSession,
-  maxMessages: 100,
+  maxTurns: 20,
   retentionDays: 7,
 })
 
@@ -62,7 +60,7 @@ const menu = botMenu({
   description: 'Open settings',
   adminContact: '@yourhandle',
   privacy: 'https://yourbot.com/privacy',     // override standard if you retain content
-  personalData: { storage },                  // enables 🗑 Forget + 📥 Export
+  personalData: { storage },                  // enables 🗑 Forget + 📥 Export (wipes ctx.llm too)
   items: [lang.menuItem],
 })
 
@@ -72,8 +70,8 @@ const bot = new Bot(process.env.BOT_TOKEN!)
   .extend(accessControl({ session: userSession, storage, defaults: [] }))
   .extend(coalesceLongMessages())
   .extend(llmStream())
+  .extend(chat.plugin)
   .extend(lang.plugin)
-  .extend(history.plugin)
   .extend(menu.plugin)
 
 await gracefulStart(bot)
@@ -102,15 +100,17 @@ gramio's `SendMixin` auto-forwards `message_thread_id` on every
 `ctx.threadId` is set — covers both flavours. No helper needed; just
 call `ctx.send(text)` and the reply lands in the right thread.
 
-> Until [gramiojs/contexts#TBD](https://github.com/gramiojs/contexts)
+> Until [gramiojs/contexts#4](https://github.com/gramiojs/contexts/pull/4)
 > is merged upstream, this repo pins `@gramio/contexts` to our fork
 > via `pnpm.overrides`. The fork drops the `isTopicMessage()` guard
-> that was previously preventing auto-thread under Threaded Mode.
+> that was previously preventing auto-thread under Threaded Mode,
+> and adds a missing `threadId` getter to `CallbackQueryContext`
+> (so callbacks tapped inside a thread also auto-route correctly).
 
-`bot/llm-stream` calls `bot.api.sendMessage` directly (bypassing
-SendMixin), so it captures `ctx.threadId` at construction and forwards
-it on the initial send — `editMessageText` inherits the thread from
-the message id.
+`bot/llm`'s `MarkdownStreamer` calls `bot.api.sendMessage` directly
+(bypassing SendMixin), so it captures `ctx.threadId` at construction
+and forwards it on the initial send — `editMessageText` inherits the
+thread from the message id.
 
 ## Polyglot strings — the hard rule
 
@@ -145,9 +145,9 @@ All per-user state across the plugins in this package lives in ONE shared
 
 ```
 storage[String(userId)] = {
-  access:   { status, approvedAt, … },   // ← bot/access-control
-  language: 'es',                         // ← bot/language
-  history:  { items: [{...}, …] },        // ← bot/message-history
+  access:   { status, approvedAt, … },               // ← bot/access-control
+  language: 'es',                                     // ← bot/language
+  llm:      { shards: { '12345': [{role, content, date}, …] } },  // ← bot/llm (llmHistory)
   // (any field you add via your own handlers, or a future plugin)
 }
 ```
@@ -210,18 +210,14 @@ the right keys.
 There's no per-plugin cascade because the data layout is flat: one key, many
 fields, one delete clears them all.
 
-**What needs the buttons vs not**:
+Conversation history retained by `llmHistory` is covered by [Telegram's
+Standard Bot Privacy Policy](https://telegram.org/privacy-tpa) — Telegram
+explicitly designed Threaded Mode for AI chatbots to keep multi-turn
+context per topic. No custom privacy URL required.
 
-- Bots that only have `bot/language` (or no persistent per-user state at all) —
-  language preferences are trivially covered by [Telegram's Standard Bot
-  Privacy Policy](https://telegram.org/privacy-tpa) under "data necessary to
-  function." Skip `personalData`, use the default Telegram-standard privacy URL.
-- Bots that extend `bot/message-history` — you're retaining **message content**,
-  which the standard policy does NOT cover by default. Set a custom `privacy`
-  URL describing what you keep and pass `personalData: { storage }` so /forget
-  and /export are exposed. **This plugin does not enforce that linkage** (it
-  would couple `bot/message-history` to `bot/menu`), it's documented as the
-  bot author's legal responsibility.
+Exposing 🗑 Forget / 📥 Export via `personalData: { storage }` is still
+recommended for user transparency (one-tap data review + wipe) but isn't
+legally required by the standard policy.
 
 `adminContact` is **required** on `botMenu` — when /export's `sendDocument`
 fails (transient network, file too big, etc.), the user gets a clear error
@@ -281,17 +277,6 @@ always have a human escape hatch.
 - **Scope**: per-user in private chats, per-chat in groups by default — see
   the file docstring for the rationale.
 
-### `message-history.ts`
-
-- **Opt-in**: extending this plugin says "I want to retain user content."
-  GDPR responsibility shifts to the bot author at that point.
-- **Two prune dimensions**: `maxMessages` (count cap) and `retentionDays`
-  (age cap). Both apply on every read so handlers always see a fresh view.
-- **`ctx.history` is a read-only snapshot**, not the mutable session field.
-  The plugin appends to `ctx.session.history.items` in `.on('message')` and
-  exposes the pruned slice via derive. Consumers can't accidentally mutate
-  the session and skip retention.
-
 ### `coalesce.ts`
 
 - See file docstring. Detection rule = (same chat) ∧ (same user, default) ∧
@@ -299,13 +284,32 @@ always have a human escape hatch.
 - Defaults `minLeadingLength: 3750` / `windowMs: 500` are current guesses
   documented as such in the source — adjust based on `log: true` output.
 
-### `llm-stream.ts`
+### `llm.ts`
 
-- See file docstring. Markdown parsed locally via `@gramio/format/markdown`
-  so malformed mid-stream markup degrades to plain text instead of failing
-  the whole message.
-- Splits at 4000 chars on paragraph/line/word boundary (4096 is Telegram's
-  hard limit; 4000 leaves headroom for entity offsets).
+Three primitives in one file because they only make sense together:
+`streamChat` (parse SSE input), `llmStream()` → `ctx.startStream()`
+(Telegram streaming output), `llmHistory({...}).plugin` →
+`ctx.llm.{add,get,clear,all,clearAll}` (per-thread conversation buffer).
+
+- **`streamChat`**: constrained-SSE assumption (no comments, no multi-line
+  `data:`, no `retry`/`id`) — matches every OpenAI-compat server in the
+  wild. Swap to `eventsource-parser` if a producer needs the full spec.
+  Reasoning aliases (`reasoning_content` vs `reasoning`) live as a single
+  source of truth in this file; new model? Add the key here.
+- **`ctx.startStream`**: Markdown parsed locally via
+  `@gramio/format/markdown` so malformed mid-stream markup degrades to
+  plain text instead of failing the whole message. Splits at 4000 chars
+  on paragraph/line/word boundary (4096 is Telegram's hard limit; 4000
+  leaves headroom for entity offsets). Bypasses gramio's `SendMixin` —
+  uses `bot.api.sendMessage` directly — so it captures `ctx.threadId`
+  at construction to keep the streamed reply in the originating thread.
+- **`ctx.llm`** (from `llmHistory({...}).plugin`): synchronous read/write
+  through `@gramio/session`'s auto-persisting Proxy. Per-(user, thread)
+  shards keyed by `String(ctx.threadId)` or `'general'`. Two prune
+  dimensions: `maxTurns` and `retentionDays`, applied on every read.
+  Stores any role (`user` / `assistant` / `system` / `tool`); caller
+  decides what to persist. Last-write-wins on concurrent appends —
+  acceptable for chatbots (users rarely race themselves).
 
 ### `menu.ts`
 
@@ -379,7 +383,7 @@ Rejected because:
 
 - Loses the auto-persist Proxy ergonomics inside the plugin (`ctx.session.x
   = y` triggers persistence vs explicit `await storage.set(...)`).
-- For the consumer, the user-facing `ctx.lang` / `ctx.history` types are the
+- For the consumer, the user-facing `ctx.lang` / `ctx.llm` types are the
   same either way — but storage-direct adds 2 reads per update where session
   caches.
 - We're not really avoiding session; we'd be re-implementing it badly. The
@@ -432,8 +436,6 @@ final architecture.
 
 ## Open / TODO
 
-- **i18n plugin** — pairs with `language`. Lookup
-  `messages[ctx.lang][key]` or consume `@gramio/i18n` directly.
 - **Lazy session** — `@gramio/session` supports `lazy: true` which defers
   the storage read until `ctx.session` is accessed. Worth wiring once we
   have a real bot under traffic to verify the cost of eager loads.
@@ -445,6 +447,8 @@ final architecture.
   `acApprove`/`acDeny`/menu's `navCb`/etc. breaks inline buttons cached in
   old chat history. Stick to "add optional fields at the end" per gramio's
   [callback-data migration guide](https://gramio.dev/triggers/callback-query.html#schema-migrations).
+- **Drop the `@gramio/contexts` fork override** when
+  [PR #4](https://github.com/gramiojs/contexts/pull/4) merges upstream.
 
 ---
 

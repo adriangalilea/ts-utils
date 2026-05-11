@@ -6,7 +6,7 @@
  *
  *   import { adminContext, gracefulStart } from '@adriangalilea/utils/bot/kit'
  *   import { accessControl } from '@adriangalilea/utils/bot/access-control'
- *   import { llmStream } from '@adriangalilea/utils/bot/llm-stream'
+ *   import { llmStream } from '@adriangalilea/utils/bot/llm'
  *
  * Or all-in-one (pulls every subpath):
  *   import { ... } from '@adriangalilea/utils/bot'
@@ -14,7 +14,6 @@
 export * from './kit.js'
 export * from './access-control.js'
 export * from './coalesce.js'
-export * from './llm-stream.js'
+export * from './llm.js'
 export * from './menu.js'
 export * from './language.js'
-export * from './message-history.js'
