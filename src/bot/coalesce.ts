@@ -84,7 +84,9 @@ export type CoalesceCriteria = {
 	minLeadingLength?: number;
 	/**
 	 * Max ms between consecutive fragments to consider them part of
-	 * one client-split burst.
+	 * one client-split burst. Debounced — each continuation resets the
+	 * timer, so this is the MAX inter-fragment gap, not the total wait.
+	 * Default 2000ms tolerates slow clients / huge pastes (≥12 frags).
 	 */
 	windowMs?: number;
 	/**

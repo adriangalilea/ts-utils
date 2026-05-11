@@ -312,8 +312,10 @@ always have a human escape hatch.
 
 - See file docstring. Detection rule = (same chat) ∧ (same user, default) ∧
   (leading fragment length ≥ `minLeadingLength`) ∧ (within `windowMs`).
-- Defaults `minLeadingLength: 3750` / `windowMs: 500` are current guesses
+- Defaults `minLeadingLength: 3750` / `windowMs: 2000` are current guesses
   documented as such in the source — adjust based on `log: true` output.
+  `windowMs` is the max gap between fragments (timer is debounced — each
+  continuation resets it), not the total wait.
 
 ### `llm.ts`
 
