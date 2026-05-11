@@ -185,6 +185,13 @@ const styleOf = (
  * coloured inline-button modes; the resolver form `(ctx) => style`
  * is for state-dependent colouring (e.g. blue on the currently-selected
  * language).
+ *
+ * **Live state inside resolvers run by `refresh: true`.** Label /
+ * style resolvers fire AFTER the action mutated the session. Read
+ * mutable state from `ctx.session.<field>` directly — *not* from
+ * derives that snapshot at event start (e.g. `ctx.lang` from
+ * `bot/language` is the event-start value, NOT the post-mutation
+ * one). `ctx.say(...)` IS live and safe to use anywhere.
  */
 export type MenuItem =
   | {

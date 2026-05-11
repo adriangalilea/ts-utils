@@ -155,28 +155,66 @@ export type Sayer<L extends string> = {
   answer<V extends Polyglot<L>>(value: V, params?: object): Promise<unknown>
 }
 
+/**
+ * What this plugin decorates onto `ctx`. Two surfaces:
+ *
+ *   - `ctx.lang` — the user's current language, **resolved once at
+ *     event start and frozen** for the rest of the handler. Cheap to
+ *     read repeatedly, but goes stale if you mutate
+ *     `ctx.session.language` mid-handler (typical inside a
+ *     `MenuItem.action` that flips the user's selection). For
+ *     post-mutation freshness use `ctx.session.language` directly,
+ *     or call `ctx.say(...)` which is live.
+ *
+ *   - `ctx.say(value)` — callable + namespace, **resolves the lang
+ *     on every call** by re-reading `ctx.session.language`. Safe to
+ *     use both before and after a mid-handler mutation. Plus
+ *     `.send / .edit / .answer` that forward to gramio's
+ *     `ctx.send / .editText / .answer` with the resolved string.
+ */
 type LanguageDerives<Lang extends string> = {
   lang: Lang
   say: Sayer<Lang>
 }
 
+/**
+ * Builds `ctx.say` with LIVE lang resolution — the lang is re-read
+ * from `ctx.session.language` on every `say(value)` / `.send` / `.edit`
+ * / `.answer` call. That way handlers that mutate the session
+ * (e.g. a `MenuItem.action` flipping the user's language) and then
+ * emit further messages within the same event get the freshly-stored
+ * lang, NOT the one that was captured when `derive` ran at event start.
+ *
+ * Contrast with `ctx.lang`, which IS a snapshot at event start and
+ * stays static through the handler. Read `ctx.session.language`
+ * directly (or call `ctx.say(...)`) when you need post-mutation
+ * freshness.
+ */
 const buildSayer = <L extends string>(
   ctx: unknown,
-  lang: L,
-  fallback: L,
+  canonicalSet: ReadonlySet<string>,
+  defaultLang: L,
 ): Sayer<L> => {
-  const resolve = <V extends Polyglot<L>>(value: V): string =>
-    value[lang] ?? value[fallback] ?? say(value as Polyglot<string>, lang)
-
-  const fn = (<V extends Polyglot<L>>(value: V): string =>
-    resolve(value)) as Sayer<L>
-
   type CtxLike = {
+    session?: { language?: string }
     send?: (text: string, params?: object) => Promise<unknown>
     editText?: (text: string, params?: object) => Promise<unknown>
     answer?: (params: object) => Promise<unknown>
   }
   const c = ctx as CtxLike
+
+  const currentLang = (): L => {
+    const stored = c.session?.language
+    return stored && canonicalSet.has(stored) ? (stored as L) : defaultLang
+  }
+
+  const resolve = <V extends Polyglot<L>>(value: V): string => {
+    const lang = currentLang()
+    return value[lang] ?? value[defaultLang] ?? say(value as Polyglot<string>, lang)
+  }
+
+  const fn = (<V extends Polyglot<L>>(value: V): string =>
+    resolve(value)) as Sayer<L>
 
   fn.send = (value, params) => {
     if (typeof c.send !== 'function') {
@@ -325,16 +363,15 @@ export const language = <const Langs extends readonly string[]>(
       // `primary` style); the rest stay at app default. Replaces the
       // old `●` / `○` markers — same signal, native Telegram styling.
       //
-      // Reads `ctx.session.language` (not `ctx.lang`) because this
-      // resolver fires AFTER the sibling action mutated the session
-      // — `ctx.lang` is computed by the derive at event start and is
-      // stale within the same callback_query event.
-      style: (ctx) => {
-        const stored = (ctx as unknown as { session?: { language?: string } })
-          .session?.language
-        const fallback = (ctx as unknown as { lang?: string }).lang
-        return (stored ?? fallback) === l ? 'primary' : undefined
-      },
+      // Reads `ctx.session.language` (the live store), NOT `ctx.lang`
+      // (the event-start snapshot from the language derive — would
+      // be stale within the same callback after the sibling action
+      // mutated the session).
+      style: (ctx) =>
+        (ctx as unknown as { session?: { language?: string } }).session
+          ?.language === l
+          ? 'primary'
+          : undefined,
       // Re-render the submenu in place after the tap so the colour
       // moves to the newly-selected language without the user having
       // to re-open the menu.
@@ -380,6 +417,9 @@ const buildLanguagePlugin = <Lang extends string>(args: {
       // (ctx.session: SessionLike) flow into our handlers below.
       .extend(sessionPlugin)
       .derive(['message', 'callback_query'], (ctx) => {
+        // Snapshot resolved at event start. Stays static through the
+        // handler — see the JSDoc on `LanguageDerives.lang` below for
+        // the staleness gotcha and why `ctx.say` is the live escape.
         const resolveLang = (): Lang => {
           // 1) stored override
           const stored = ctx.session.language
@@ -400,8 +440,12 @@ const buildLanguagePlugin = <Lang extends string>(args: {
           return defaultLanguage
         }
 
-        const lang = resolveLang()
-        return { lang, say: buildSayer<Lang>(ctx, lang, defaultLanguage) }
+        return {
+          lang: resolveLang(),
+          // LIVE: re-resolves ctx.session.language on every call so
+          // post-mutation reads inside a handler get the new value.
+          say: buildSayer<Lang>(ctx, canonicalSet, defaultLanguage),
+        }
       })
   )
 }
