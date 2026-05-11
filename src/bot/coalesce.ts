@@ -68,7 +68,11 @@ import { Plugin } from "gramio";
 // real-world data comes in. Single source of truth — both
 // `isCoalescent` and the middleware read from here.
 const DEFAULT_MIN_LEADING_LENGTH = 3750;
-const DEFAULT_WINDOW_MS = 500;
+// Debounced per fragment (each continuation resets the timer), so this
+// is the MAX inter-fragment gap, not total wait. 2000ms tolerates slow
+// clients / huge pastes (≥12 fragments). Real-world gaps inside a burst
+// are usually <100ms; the ceiling only matters when the client throttles.
+const DEFAULT_WINDOW_MS = 2000;
 const DEFAULT_ACROSS_USERS = false;
 
 export type CoalesceCriteria = {
