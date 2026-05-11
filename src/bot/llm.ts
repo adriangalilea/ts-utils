@@ -559,7 +559,15 @@ export const consumeChatStream = async (
     if (chunk.type === 'reasoning') {
       reasoning += chunk.text
       if (reasoningMessageId === undefined) {
-        await sendReasoningMessage()
+        // Defer the first send until there's actually visible content.
+        // Some models (e.g. Gemma 4 via mlx-vlm's gemma4 reasoning
+        // parser) emit a leading whitespace-only chunk; Telegram
+        // rejects `sendMessage` with empty body. Accumulated reasoning
+        // keeps its full text — we just wait for the first
+        // non-whitespace before opening the blockquote message.
+        if (reasoning.trim().length > 0) {
+          await sendReasoningMessage()
+        }
       } else {
         reasoningDirty = true
         scheduleReasoningFlush()
