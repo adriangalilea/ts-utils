@@ -854,15 +854,20 @@ export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
 				chat?: { id: number };
 				from?: { id: number };
 				threadId?: number;
-				message?: { threadId?: number };
+				message?: { threadId?: number; chat?: { id: number } };
 			};
 			// Wipe Redis first — always succeeds and is the source of truth
 			// the LLM consults. If the Telegram-side deletion below fails
 			// (no thread, missing permissions, etc.), the next message in
 			// this thread still starts with a clean context.
 			c.llm?.clear();
+			// Both fall back via `message.{...}` because in a callback_query
+			// ctx, gramio puts the chat / thread metadata on the originating
+			// message — top-level `ctx.chat` / `ctx.threadId` are undefined.
+			// In a command ctx the top-level fields exist directly. Symmetric
+			// access covers both shapes.
 			const tid = c.threadId ?? c.message?.threadId;
-			const chatId = c.chat?.id;
+			const chatId = c.chat?.id ?? c.message?.chat?.id;
 			const userId = c.from?.id;
 			let threadDeleted = false;
 			if (
