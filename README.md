@@ -198,7 +198,7 @@ Every `SourcedError` carries `source`, `operation`, `status`, `context`, and the
 - **XDG**: XDG Base Directory paths — reads env vars set by [xdg-dirs](https://github.com/adriangalilea/xdg-dirs), falls back to spec defaults
 - **Unseen**: Persistent dedup filter — "what's new since last time?" for cron/monitoring workflows
 - **Project Discovery**: Find project/monorepo roots, detect JS/TS projects
-- **Bot plugins (GramIO)**: `kit` (graceful shutdown + admin context), `access-control` (gate + approve/deny menu, backed by sessions), `llm-stream` (streaming LLM markdown to Telegram with graceful degradation)
+- **Bot plugins (GramIO)**: `kit` (graceful shutdown + admin context), `access-control` (gate + approve/deny menu, backed by sessions), `llm-stream` (OpenAI-compat SSE parser `streamChat` + Telegram streaming output `ctx.startStream`), `coalesce`, `language`, `menu`, `message-history`
 
 ### XDG Base Directories
 
@@ -305,7 +305,7 @@ Then `pnpm install`. Every `ctx.send` / `ctx.sendDocument` / `ctx.reply` / etc. 
 | `@adriangalilea/utils/bot/kit` | `gracefulStart(bot)` — SIGINT/SIGTERM → `bot.stop()` → exit; force-kills if shutdown hangs.<br>`adminContext({ adminId? })` — reads `TELEGRAM_ADMIN_ID` from `kev` (with optional hardcoded fallback), decorates `ctx.adminId` + `ctx.isAdmin`. |
 | `@adriangalilea/utils/bot/access-control` | Personal-bot ACL — gates non-admin/non-default users; admin gets DM with `[✅ Aprobar][❌ Denegar]` on first attempt; `/access` opens a persistent menu (revoke / reapprove / list pending). Backed by `@gramio/session` per-user + a small index. |
 | `@adriangalilea/utils/bot/coalesce` | Joins client-split inbound messages back into one. When a user pastes >4096 chars, Telegram clients fragment it into separate `message` updates with no marker. Middleware detects the burst and emits one combined event. |
-| `@adriangalilea/utils/bot/llm-stream` | `ctx.startStream()` for LLM token streams. Debounced `editMessageText`, splits at 4000 chars on paragraph/line/word boundary, parses Markdown locally so malformed mid-stream markup degrades to plain text instead of failing. |
+| `@adriangalilea/utils/bot/llm-stream` | Both halves of the LLM pipeline. **Input:** `streamChat(response)` parses OpenAI-compatible SSE (OpenAI, vllm, mlx-lm, llama.cpp, Together, Groq, …) into a typed `AsyncGenerator<{type: 'content' \| 'reasoning', text}>`. **Output:** `ctx.startStream()` debounces `editMessageText`, splits at 4000 chars on paragraph/line/word boundary, parses Markdown locally so malformed mid-stream markup degrades to plain text. |
 
 Standard wiring:
 
@@ -314,7 +314,7 @@ import { Bot } from 'gramio'
 import { redisStorage } from '@gramio/storage-redis'
 import { adminContext, gracefulStart } from '@adriangalilea/utils/bot/kit'
 import { accessControl } from '@adriangalilea/utils/bot/access-control'
-import { llmStream } from '@adriangalilea/utils/bot/llm-stream'
+import { llmStream, streamChat } from '@adriangalilea/utils/bot/llm-stream'
 
 const storage = redisStorage()                      // ONE instance, shared
 
@@ -323,8 +323,21 @@ const bot = new Bot(process.env.BOT_TOKEN!)
   .extend(accessControl({ storage, defaults: [] })) // gate; depends on adminContext
   .extend(llmStream())
   .command('chat', async (ctx) => {
+    // Any OpenAI-compatible endpoint: vllm-mlx, mlx-lm, llama.cpp, Together, Groq, OpenAI, …
+    const response = await fetch(process.env.LLM_URL!, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: process.env.LLM_MODEL,
+        messages: [{ role: 'user', content: ctx.text ?? '' }],
+        stream: true,
+      }),
+    })
     const stream = ctx.startStream()
-    for await (const chunk of yourLLM()) await stream.append(chunk.text)
+    for await (const chunk of streamChat(response)) {
+      if (chunk.type === 'content') await stream.append(chunk.text)
+      // chunk.type === 'reasoning' is also yielded for thinking models
+    }
     await stream.end()
   })
 
