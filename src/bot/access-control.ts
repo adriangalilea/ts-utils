@@ -2,6 +2,23 @@
  * Access control for personal GramIO bots — a one-stop guard +
  * approve/deny + revocable allow-list with an inline admin menu.
  *
+ * **Native alternative** (BotFather → Bot Settings → Access →
+ * "Restrict bot usage"). Toggling that ON makes Telegram itself reject
+ * any non-allowlisted user before the update ever reaches your bot.
+ * It's the right pick when you want a flat "me + a few hand-picked
+ * accounts" allow-list and never need to approve from inside the bot.
+ *
+ * This plugin is preferable when you want:
+ *   - In-bot approval flow (admin gets a DM with `[✅ Approve][❌ Deny]`
+ *     buttons when a stranger DMs the bot), not a BotFather round-trip
+ *   - Dynamic revoke / re-approve from `/access` without leaving Telegram
+ *   - Pending / approved / denied lists visible to the admin
+ *   - `ctx.access.source` (`admin` / `default` / `approved`) on every
+ *     update for downstream logic
+ *
+ * Both can coexist: BotFather's native flag is a hard pre-filter, this
+ * plugin is the dynamic UX on top of whoever gets through.
+ *
  *                stranger DMs your bot
  *                       │
  *                       ▼

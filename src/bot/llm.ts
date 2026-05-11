@@ -666,16 +666,16 @@ export type LLMHistoryOptions = {
 	/** Entries older than this (in days) are dropped on read. */
 	retentionDays: number;
 	/**
-	 * Override the labels of the `menuItem` (the "🧹 clear this thread"
+	 * Override the labels of the `menuItem` (the "🗑 Delete this thread"
 	 * button rendered inside a `botMenu`). Defaults are polyglot
 	 * literals covering en + es.
 	 */
 	menuLabels?: {
-		/** Button label. Default: `{ en: '🧹 Clear this thread', es: '🧹 Limpiar este hilo' }`. */
+		/** Button label. Default: `{ en: '🗑 Delete this thread', es: '🗑 Borrar este hilo' }`. */
 		item?: Polyglot<string>;
-		/** Toast shown after a successful clear. Default: `{ en: '🧹 Cleared.', es: '🧹 Limpio.' }`. */
+		/** Toast shown after a successful clear. Default: `{ en: '🗑 Deleted.', es: '🗑 Borrado.' }`. */
 		cleared?: Polyglot<string>;
-		/** Confirmation overlay text. Default explains the per-thread scope. */
+		/** Confirmation overlay text. Default explains the full-delete scope. */
 		confirmPrompt?: Polyglot<string>;
 	};
 };
@@ -683,10 +683,13 @@ export type LLMHistoryOptions = {
 export type LLMHistoryFeature = {
 	plugin: ReturnType<typeof buildHistoryPlugin>;
 	/**
-	 * Drop-in `MenuItem` for `botMenu({ items: [...] })`: a "clear this
-	 * thread" button that calls `ctx.llm.clear()` on the current
-	 * (user, thread) shard and acknowledges with a toast. Sibling
-	 * threads stay intact.
+	 * Drop-in `MenuItem` for `botMenu({ items: [...] })`: a "delete this
+	 * thread" button that BOTH wipes `ctx.llm` for the current
+	 * (user, thread) shard AND calls `deleteForumTopic` to remove the
+	 * Telegram thread (and all its messages) from the chat. Sibling
+	 * threads stay intact. Falls back to Redis-only clear when there is
+	 * no `threadId` (general/non-threaded chats) or Telegram rejects
+	 * the deletion (e.g. forum supergroup without admin rights).
 	 */
 	menuItem: MenuItem;
 };
@@ -779,16 +782,16 @@ export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
 	});
 
 	const itemLabel: Polyglot<string> = opts.menuLabels?.item ?? {
-		en: "🧹 Clear this thread",
-		es: "🧹 Limpiar este hilo",
+		en: "🗑 Delete this thread",
+		es: "🗑 Borrar este hilo",
 	};
 	const clearedToast: Polyglot<string> = opts.menuLabels?.cleared ?? {
-		en: "🧹 Cleared.",
-		es: "🧹 Limpio.",
+		en: "🗑 Deleted.",
+		es: "🗑 Borrado.",
 	};
 	const confirmPrompt: Polyglot<string> = opts.menuLabels?.confirmPrompt ?? {
-		en: "⚠️ Clear conversation in this thread?\n\nThis removes the LLM history for THIS thread only. Other threads stay intact.",
-		es: "⚠️ ¿Limpiar la conversación de este hilo?\n\nBorra el historial LLM SOLO de este hilo. Los demás quedan intactos.",
+		en: "⚠️ Delete this thread?\n\nWipes the LLM history AND removes the thread (with all its messages) from this chat. Sibling threads stay intact.",
+		es: "⚠️ ¿Borrar este hilo?\n\nElimina el historial LLM Y el hilo entero (con todos sus mensajes) de este chat. Los demás hilos quedan intactos.",
 	};
 
 	const menuItem: MenuItem = {
@@ -796,18 +799,53 @@ export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
 		label: itemLabel,
 		// Destructive action → red. Consistent with `botMenu`'s 🗑 Forget.
 		style: "danger",
-		// One-step confirm overlay before the wipe — clearing per-thread
-		// conversation is non-reversible and Telegram's `show_alert` is
-		// too disruptive. See `MenuItem.confirm` for the pattern.
+		// One-step confirm overlay before the wipe — fully irreversible:
+		// the Telegram thread and all its messages get removed. See
+		// `MenuItem.confirm` for the pattern.
 		confirm: { prompt: confirmPrompt },
-		action: (ctx) => {
+		action: async (ctx) => {
 			// The `llm` decoration comes from llmHistory's own plugin — not
 			// on MenuCtx's static shape, so we narrow here. Return the
 			// polyglot toast: the menu plugin owns the single
 			// answerCallbackQuery for this tap (calling ctx.answer here
 			// would be a double-answer → rejected → action throws).
-			const c = ctx as unknown as { llm?: LLMHistoryApi };
+			const c = ctx as unknown as {
+				llm?: LLMHistoryApi;
+				bot?: {
+					api?: {
+						deleteForumTopic?: (p: {
+							chat_id: number;
+							message_thread_id: number;
+						}) => Promise<unknown>;
+					};
+				};
+				chat?: { id: number };
+				threadId?: number;
+				message?: { threadId?: number };
+			};
+			// Wipe Redis first — always succeeds and is the source of truth
+			// the LLM consults. If the Telegram-side deletion below fails
+			// (no thread, missing permissions, etc.), the next message in
+			// this thread still starts with a clean context.
 			c.llm?.clear();
+			const tid = c.threadId ?? c.message?.threadId;
+			const chatId = c.chat?.id;
+			if (
+				tid !== undefined &&
+				chatId !== undefined &&
+				c.bot?.api?.deleteForumTopic
+			) {
+				try {
+					await c.bot.api.deleteForumTopic({
+						chat_id: chatId,
+						message_thread_id: tid,
+					});
+				} catch {
+					// Thread already gone (404), supergroup-without-admin (400),
+					// or the chat type doesn't support it — Redis is already
+					// cleared so the user has a clean conversation either way.
+				}
+			}
 			return clearedToast;
 		},
 	};
