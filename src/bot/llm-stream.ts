@@ -1,34 +1,44 @@
 /**
- * LLM streaming output for GramIO bots.
+ * LLM streaming for GramIO bots — both halves of the pipeline:
  *
- * Sends a placeholder, then debounces `editMessageText` calls as the
- * LLM produces chunks. Markdown is parsed locally with
- * `markdownToFormattable` — invalid markup degrades to plain text
- * instead of failing (Telegram's `parse_mode` would reject the whole
- * message). Splits at 4000 chars by promoting the next chunk to a
- * fresh message at a paragraph/line/word boundary.
+ *   `streamChat(response)`   — INPUT: parse OpenAI-compatible SSE
+ *                              (OpenAI, vllm, mlx-lm, llama.cpp, Together,
+ *                              Groq, …) into a typed `AsyncGenerator` of
+ *                              `{ type: 'content' | 'reasoning', text }`.
+ *
+ *   `ctx.startStream()`      — OUTPUT: debounced `editMessageText` to
+ *                              Telegram. Local Markdown parse via
+ *                              `@gramio/format` so malformed mid-stream
+ *                              markup degrades to plain text instead of
+ *                              failing. Splits at 4000 chars on
+ *                              paragraph / line / word boundary.
+ *
+ * The two compose into the canonical bot pipeline:
+ *
+ *     fetch(...) ──streamChat──> {content, reasoning} chunks ──ctx.startStream──> Telegram
  *
  * Peer deps: `gramio`, `@gramio/format`, `marked`.
  *
  * @example
  * import { Bot } from 'gramio'
- * import { llmStream } from '@adriangalilea/utils/bot/llm-stream'
- * import Anthropic from '@anthropic-ai/sdk'
+ * import { llmStream, streamChat } from '@adriangalilea/utils/bot/llm-stream'
  *
- * const claude = new Anthropic()
  * const bot = new Bot(process.env.BOT_TOKEN!)
  *   .extend(llmStream())
  *   .on('message', async (ctx) => {
- *     const stream = ctx.startStream()
- *     const sse = await claude.messages.stream({
- *       model: 'claude-opus-4-5',
- *       max_tokens: 1024,
- *       messages: [{ role: 'user', content: ctx.text ?? '' }],
+ *     const response = await fetch(process.env.LLM_URL!, {
+ *       method: 'POST',
+ *       headers: { 'Content-Type': 'application/json' },
+ *       body: JSON.stringify({
+ *         model: process.env.LLM_MODEL,
+ *         messages: [{ role: 'user', content: ctx.text ?? '' }],
+ *         stream: true,
+ *       }),
  *     })
- *     for await (const chunk of sse) {
- *       if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
- *         await stream.append(chunk.delta.text)
- *       }
+ *     const stream = ctx.startStream()
+ *     for await (const chunk of streamChat(response)) {
+ *       if (chunk.type === 'content') await stream.append(chunk.text)
+ *       // chunk.type === 'reasoning' is also yielded for thinking models
  *     }
  *     await stream.end()
  *   })
@@ -37,6 +47,99 @@
  */
 import { Plugin } from 'gramio'
 import { markdownToFormattable } from '@gramio/format/markdown'
+
+// ─── INPUT: OpenAI-compatible SSE parser ───────────────────────────
+
+/**
+ * A single chunk yielded by `streamChat`. Two kinds:
+ *
+ *   - `content`   — the visible reply text the user should see
+ *   - `reasoning` — chain-of-thought / "thinking" text from reasoning
+ *                   models. Empty unless the model emits it.
+ *
+ * Most callers care about `content` only. Render `reasoning` separately
+ * (collapsed, italicized) if you want to surface thinking.
+ */
+export type LLMChunk =
+  | { type: 'content'; text: string }
+  | { type: 'reasoning'; text: string }
+
+/** OpenAI chat-completions chunk delta. Lifted into a real type so
+ *  the parser's `any`-casts are contained to one spot. */
+type OpenAIDelta = {
+  content?: string
+  reasoning?: string
+  reasoning_content?: string
+}
+type OpenAIChunk = { choices?: Array<{ delta?: OpenAIDelta }> }
+
+/**
+ * Parse an OpenAI-compatible chat-completions SSE response into a
+ * typed `AsyncGenerator<LLMChunk>`. Reads `response.body` once.
+ *
+ * Recognised reasoning aliases (as of 2026): `reasoning_content`
+ * (vllm, qwen3, DeepSeek-R1, gpt-oss harmony) and `reasoning` (some
+ * mlx-lm forks, gemma builds). If a model surfaces a new key, add it
+ * here — single source of truth for the field.
+ *
+ * Constrained-SSE assumption: lines are `\n`-delimited and each event
+ * is `data: <json>` or `data: [DONE]`. This matches every OpenAI-compat
+ * server in the wild but is NOT the full SSE spec (no comments, no
+ * multi-line `data:`, no `retry`/`id` fields). Swap to
+ * `eventsource-parser` if you hit a producer that needs them.
+ *
+ * Malformed JSON lines are silently skipped; the generator ends when
+ * the stream closes.
+ *
+ * @param response  the `fetch` `Response` from a `stream: true` chat
+ *                  completion call. Must not be already consumed.
+ * @throws if `response.body` is null (non-streaming response).
+ *
+ * @example  framework-agnostic — parser doesn't know about Telegram
+ * const res = await fetch(url, { method: 'POST', body })
+ * for await (const chunk of streamChat(res)) {
+ *   if (chunk.type === 'content') process.stdout.write(chunk.text)
+ * }
+ */
+export async function* streamChat(
+  response: Response,
+): AsyncGenerator<LLMChunk> {
+  if (!response.body) throw new Error('streamChat: response.body is null')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const data = line.slice(6).trim()
+      if (data === '[DONE]') continue
+      let parsed: OpenAIChunk
+      try {
+        parsed = JSON.parse(data) as OpenAIChunk
+      } catch {
+        continue
+      }
+      const delta = parsed.choices?.[0]?.delta
+      if (!delta) continue
+      const reasoning = delta.reasoning_content ?? delta.reasoning
+      if (typeof reasoning === 'string' && reasoning.length > 0) {
+        yield { type: 'reasoning', text: reasoning }
+      }
+      if (typeof delta.content === 'string' && delta.content.length > 0) {
+        yield { type: 'content', text: delta.content }
+      }
+    }
+  }
+}
+
+// ─── OUTPUT: Telegram streamer ─────────────────────────────────────
 
 const MAX_LEN = 4000 // Telegram caps at 4096; leave headroom for entity offsets
 const DEFAULT_DEBOUNCE_MS = 800
