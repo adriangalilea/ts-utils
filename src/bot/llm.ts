@@ -765,19 +765,17 @@ export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
   const menuItem: MenuItem = {
     id: 'llmClear',
     label: itemLabel,
-    action: async (ctx) => {
-      // The menu action's ctx is a callback_query ctx. The `llm`
-      // and `answer` decorations come from llmHistory's own plugin
-      // and gramio respectively — typed as optional on MenuCtx so
-      // we narrow here rather than at every call site.
-      type Helpers = {
-        llm?: LLMHistoryApi
-        lang?: string
-        answer?: (params: object) => Promise<unknown>
-      }
-      const c = ctx as unknown as Helpers
+    // Destructive action → red. Consistent with `botMenu`'s 🗑 Forget.
+    style: 'danger',
+    action: (ctx) => {
+      // The `llm` decoration comes from llmHistory's own plugin — not
+      // on MenuCtx's static shape, so we narrow here. Return the
+      // polyglot toast: the menu plugin owns the single
+      // answerCallbackQuery for this tap (calling ctx.answer here
+      // would be a double-answer → rejected → action throws).
+      const c = ctx as unknown as { llm?: LLMHistoryApi }
       c.llm?.clear()
-      await c.answer?.({ text: say(clearedToast, c.lang ?? 'en') })
+      return clearedToast
     },
   }
 

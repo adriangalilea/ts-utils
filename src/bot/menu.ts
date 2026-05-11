@@ -122,20 +122,96 @@ type Label =
   | Polyglot<string>
   | ((ctx: MenuCtx) => string | Polyglot<string>)
 type Predicate = (ctx: MenuCtx) => boolean
-type Action = (ctx: MenuCtx) => Promise<void> | void
+
+/**
+ * What a menu action's return value means:
+ *
+ *   - `undefined` / `void` — menu sends an empty `answerCallbackQuery`
+ *     (just clears the loading spinner).
+ *   - `string` — menu sends `answerCallbackQuery({ text })`. The string
+ *     pops as a toast on top of the chat.
+ *   - `Polyglot<string>` — menu resolves at `ctx.session?.language` and
+ *     sends as toast.
+ *
+ * DO NOT call `ctx.answer(...)` from inside an action — Telegram
+ * rejects the second answer ("query is too old"), the action throws,
+ * and `refresh: true` never runs. Return the toast instead; the menu
+ * sends the single answer.
+ */
+type ActionResult = void | string | Polyglot<string>
+type Action = (ctx: MenuCtx) => Promise<ActionResult> | ActionResult
+
+/**
+ * Telegram's inline-keyboard-button colour modes
+ * ([Bot API InlineKeyboardButton.style](https://core.telegram.org/bots/api#inlinekeyboardbutton)):
+ *
+ *   - `primary` — blue, "selected / active / default action"
+ *   - `success` — green, "positive / approve / confirm"
+ *   - `danger`  — red, "destructive / reject / forget"
+ *
+ * On clients that don't render the style (older Telegram releases),
+ * the button falls back to the app-default look — no breakage. Use
+ * `style` instead of emoji markers (●/○) to mark active state, which
+ * is consistent with how Telegram itself surfaces selection state.
+ */
+export type ButtonStyle = 'primary' | 'success' | 'danger'
+
+type StyleResolver = ButtonStyle | ((ctx: MenuCtx) => ButtonStyle | undefined)
 
 const FALLBACK_LANG = 'en'
 const ctxLang = (ctx: MenuCtx): string => ctx.session?.language ?? FALLBACK_LANG
 
+const styleOf = (
+  s: StyleResolver | undefined,
+  ctx: MenuCtx,
+): ButtonStyle | undefined => {
+  if (s === undefined) return undefined
+  if (typeof s === 'function') return s(ctx)
+  return s
+}
+
+/**
+ * An entry in the menu. Three variants:
+ *
+ *   - `action` — callback button; taps run `action(ctx)`. If
+ *                `refresh: true`, the current menu message
+ *                re-renders right after — useful for selections /
+ *                toggles whose visible state depends on what the
+ *                action mutated (typical: `style` based on session).
+ *   - `url`    — link button (Telegram opens it externally).
+ *   - `submenu` — nested item tree, navigated to via callback.
+ *
+ * `style` (`primary` / `success` / `danger`) maps to Telegram's
+ * coloured inline-button modes; the resolver form `(ctx) => style`
+ * is for state-dependent colouring (e.g. blue on the currently-selected
+ * language).
+ */
 export type MenuItem =
-  | { id: string; label: Label; action: Action; order?: number; visible?: Predicate }
-  | { id: string; label: Label; url: string; order?: number; visible?: Predicate }
+  | {
+      id: string
+      label: Label
+      action: Action
+      order?: number
+      visible?: Predicate
+      style?: StyleResolver
+      /** Re-render the menu message after the action runs. */
+      refresh?: boolean
+    }
+  | {
+      id: string
+      label: Label
+      url: string
+      order?: number
+      visible?: Predicate
+      style?: StyleResolver
+    }
   | {
       id: string
       label: Label
       submenu: MenuItem[]
       order?: number
       visible?: Predicate
+      style?: StyleResolver
     }
 
 export type PersonalDataOptions = {
@@ -322,6 +398,12 @@ export const toggleMenuItem = (opts: ToggleMenuItemOptions): MenuItem => ({
   id: opts.id,
   order: opts.order,
   visible: opts.visible,
+  // ON state is the active state → 'primary' (blue, Telegram's
+  // "selected" colour). OFF state stays unstyled (app default).
+  style: (ctx) => (opts.read(ctx) ? 'primary' : undefined),
+  // Re-render the menu after the tap so the user sees the colour /
+  // label flip immediately, without having to re-open /settings.
+  refresh: true,
   label: (ctx) => {
     const l = opts.read(ctx) ? opts.label.on : opts.label.off
     return typeof l === 'function' ? l(ctx) : l
@@ -331,12 +413,12 @@ export const toggleMenuItem = (opts: ToggleMenuItemOptions): MenuItem => ({
     const willBeOn = !wasOn
     await opts.write(ctx, willBeOn)
 
+    // Return the toast for the menu to send as the single
+    // answerCallbackQuery — don't call ctx.answer directly here.
     const t = willBeOn ? opts.toast?.on : opts.toast?.off
     if (t === undefined) return
     const resolved = typeof t === 'function' ? t(ctx) : t
-    const text =
-      typeof resolved === 'string' ? resolved : say(resolved, ctxLang(ctx))
-    await ctx.answer?.({ text })
+    return resolved
   },
 })
 
@@ -384,13 +466,15 @@ const renderKeyboard = (
   for (const item of sorted) {
     const path = [...parentPath, item.id].join('.')
     const label = labelOf(item.label, ctx)
+    const style = styleOf(item.style, ctx)
+    const opts = style ? { style } : undefined
 
     if ('action' in item) {
-      kb.text(label, actCb.pack({ path }))
+      kb.text(label, actCb.pack({ path }), opts)
     } else if ('url' in item) {
-      kb.url(label, item.url)
+      kb.url(label, item.url, opts)
     } else {
-      kb.text(label, navCb.pack({ path }))
+      kb.text(label, navCb.pack({ path }), opts)
     }
     kb.row()
   }
@@ -402,6 +486,7 @@ const renderKeyboard = (
       kb.text(
         say({ en: '🗑 Forget my data', es: '🗑 Olvidar mis datos' }, lang),
         actCb.pack({ path: '_forget' }),
+        { style: 'danger' },
       )
       kb.row()
       kb.text(
@@ -429,6 +514,7 @@ const renderConfirmForget = (lang: string): InlineKeyboard =>
     .text(
       say({ en: '✅ Confirm delete', es: '✅ Confirmar borrado' }, lang),
       forgetConfirmCb.pack({}),
+      { style: 'danger' },
     )
     .row()
     .text(
@@ -492,15 +578,59 @@ const buildMenuPlugin = (menu: BotMenu) => {
         }
         return
       }
-      const item = itemForPath(menu._items, raw.split('.'))
+      const segments = raw.split('.')
+      const item = itemForPath(menu._items, segments)
       if (!item || !('action' in item)) {
         await ctx.answer({
           text: say({ en: 'Item not found.', es: 'Elemento no encontrado.' }, lang),
         })
         return
       }
-      await ctx.answer({})
-      await item.action(ctx)
+
+      // Run the action, capture its toast (if any). The menu owns the
+      // single `answerCallbackQuery` call for this query — actions
+      // return strings / polyglots instead of calling answer
+      // themselves, so we never double-answer (Telegram rejects that
+      // and would block `refresh: true` from running).
+      let toast: ActionResult
+      try {
+        toast = await item.action(ctx)
+      } catch (e) {
+        // Clear the spinner so the user isn't left hanging, then
+        // re-throw so gramio's error handler / our `onError` paths see
+        // the failure.
+        try {
+          await ctx.answer({})
+        } catch {
+          /* ignore — Telegram already closed the query */
+        }
+        throw e
+      }
+
+      const text =
+        typeof toast === 'string'
+          ? toast
+          : toast === undefined
+            ? undefined
+            : say(toast, lang)
+      await ctx.answer(text === undefined ? {} : { text })
+
+      // If the action wants the menu to reflect mutated state (toggles,
+      // mutually-exclusive selections, …), re-render the parent path
+      // in place so dynamic `label` / `style` resolvers update without
+      // the user having to re-open the menu.
+      if (item.refresh) {
+        const parentPath = segments.slice(0, -1)
+        const items = itemsForPath(menu._items, parentPath)
+        if (items) {
+          const kb = renderKeyboard(menu, items, ctx, parentPath)
+          try {
+            await ctx.editText(labelOf(header, ctx), { reply_markup: kb })
+          } catch {
+            // message too old to edit
+          }
+        }
+      }
     })
     // Forget — confirm path
     .callbackQuery(forgetConfirmCb, async (ctx) => {

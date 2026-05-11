@@ -320,28 +320,38 @@ export const language = <const Langs extends readonly string[]>(
     label: menuLabel,
     submenu: canonical.map((l) => ({
       id: l,
-      label: (ctx) => {
-        const current = (ctx as unknown as { lang?: string }).lang
-        const marker = current === l ? '●' : '○'
-        const base = labels[l] ?? defaultLabel(l)
-        return `${marker} ${base}`
+      label: labels[l] ?? defaultLabel(l),
+      // The currently-selected language renders blue (Telegram's
+      // `primary` style); the rest stay at app default. Replaces the
+      // old `●` / `○` markers — same signal, native Telegram styling.
+      //
+      // Reads `ctx.session.language` (not `ctx.lang`) because this
+      // resolver fires AFTER the sibling action mutated the session
+      // — `ctx.lang` is computed by the derive at event start and is
+      // stale within the same callback_query event.
+      style: (ctx) => {
+        const stored = (ctx as unknown as { session?: { language?: string } })
+          .session?.language
+        const fallback = (ctx as unknown as { lang?: string }).lang
+        return (stored ?? fallback) === l ? 'primary' : undefined
       },
-      action: async (ctx) => {
+      // Re-render the submenu in place after the tap so the colour
+      // moves to the newly-selected language without the user having
+      // to re-open the menu.
+      refresh: true,
+      action: (ctx) => {
         // ctx.session is the shared session record. Mutating any
         // field on it goes through @gramio/session's Proxy and
         // auto-persists. We own the `language` field by convention.
-        const c = ctx as unknown as {
-          session: { language?: Lang }
-          answer: (p: object) => Promise<unknown>
-          delete?: () => Promise<unknown>
-        }
+        //
+        // The menu plugin owns the single `answerCallbackQuery` for
+        // this tap — we return the toast string and it gets sent.
+        // Calling ctx.answer directly here would be a second answer
+        // → Telegram rejects → action throws → `refresh: true` skipped
+        // → button colour wouldn't update.
+        const c = ctx as unknown as { session: { language?: Lang } }
         c.session.language = l
-        await c.answer({ text: `✓ ${l}` })
-        try {
-          await c.delete?.()
-        } catch {
-          // not always deletable
-        }
+        return `✓ ${l}`
       },
     })),
   }

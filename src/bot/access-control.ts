@@ -265,8 +265,16 @@ const requestNotificationText = (
 
 const requestKeyboard = (uid: number, lang: string) =>
   new InlineKeyboard()
-    .text(say({ en: '✅ Approve', es: '✅ Aprobar' }, lang), acApprove.pack({ uid }))
-    .text(say({ en: '❌ Deny', es: '❌ Denegar' }, lang), acDeny.pack({ uid }))
+    .text(
+      say({ en: '✅ Approve', es: '✅ Aprobar' }, lang),
+      acApprove.pack({ uid }),
+      { style: 'success' },
+    )
+    .text(
+      say({ en: '❌ Deny', es: '❌ Denegar' }, lang),
+      acDeny.pack({ uid }),
+      { style: 'danger' },
+    )
 
 // ─── index helpers ─────────────────────────────────────────────────
 
@@ -826,14 +834,19 @@ const listView = async (
     )
     if (filter === 'pending') {
       keyboard
-        .text(`✅ ${i + 1}`, acApprove.pack({ uid: id, v: 'pending' }))
-        .text(`❌ ${i + 1}`, acDeny.pack({ uid: id, v: 'pending' }))
+        .text(`✅ ${i + 1}`, acApprove.pack({ uid: id, v: 'pending' }), {
+          style: 'success',
+        })
+        .text(`❌ ${i + 1}`, acDeny.pack({ uid: id, v: 'pending' }), {
+          style: 'danger',
+        })
         .row()
     } else if (filter === 'approved') {
       keyboard
         .text(
           `${say({ en: '↩️ Revoke', es: '↩️ Revocar' }, lang)} #${i + 1}`,
           acRevoke.pack({ uid: id }),
+          { style: 'danger' },
         )
         .row()
     } else if (filter === 'denied') {
@@ -841,6 +854,7 @@ const listView = async (
         .text(
           `${say({ en: '✅ Reapprove', es: '✅ Reaprobar' }, lang)} #${i + 1}`,
           acApprove.pack({ uid: id, v: 'denied' }),
+          { style: 'success' },
         )
         .row()
     }
