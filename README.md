@@ -355,6 +355,70 @@ Inside handlers, `ctx.access` is a typed discriminated union — `{ allowed: tru
 
 For tests/demos without a second Telegram account, `simulateAccessRequest(bot, storage, adminId, fakeUser, msg)` injects a synthetic pending request so admin can exercise the approve/deny flow.
 
+### Menu items — coloured buttons, refresh, toast-return, confirm
+
+`MenuItem` supports four cooperating fields for richer UX. Each is opt-in:
+
+```typescript
+import { botMenu, toggleMenuItem } from '@adriangalilea/utils/bot/menu'
+
+const menu = botMenu({
+  command: 'settings',
+  description: 'Open settings',
+  adminContact: '@yourhandle',
+  personalData: { storage },
+  items: [
+    lang.menuItem,           // ← submenu, selected lang renders as a blue (primary) button
+    chat.menuItem,           // ← red (danger) button with built-in "⚠️ Sure?" confirm step
+
+    // Boolean toggle — dynamic label + automatic colour + auto-refresh + toast.
+    toggleMenuItem({
+      id: 'thinking',
+      read: (ctx) => (ctx.session as { thinking?: boolean }).thinking ?? false,
+      write: (ctx, v) => { (ctx.session as { thinking?: boolean }).thinking = v },
+      label: {
+        off: { en: '💭 Thinking: OFF', es: '💭 Razonamiento: OFF' },
+        on:  { en: '💭 Thinking: ON',  es: '💭 Razonamiento: ON'  },
+      },
+      toast: {
+        on:  { en: 'Thinking on.',  es: 'Razonamiento activado.'  },
+        off: { en: 'Thinking off.', es: 'Razonamiento desactivado.' },
+      },
+    }),
+
+    // Custom destructive action with an explicit confirm step. The
+    // action only runs after the user taps Confirm in the overlay.
+    {
+      id: 'reset',
+      label: { en: '💥 Reset everything', es: '💥 Resetear todo' },
+      style: 'danger',
+      confirm: {
+        prompt: {
+          en: '⚠️ Reset ALL your data?\n\nThis is irreversible.',
+          es: '⚠️ ¿Resetear TODOS tus datos?\n\nNo se puede deshacer.',
+        },
+      },
+      action: (ctx) => {
+        ctx.session.somethingHeavy = undefined
+        // Return the toast string — the menu plugin owns the single
+        // answerCallbackQuery for the tap. Calling ctx.answer here
+        // would be a double-answer and would break refresh.
+        return { en: '✅ Reset.', es: '✅ Reseteado.' }
+      },
+    },
+  ],
+})
+```
+
+Field summary:
+
+- `style: 'primary' | 'success' | 'danger'` (or `(ctx) => …` for state-dependent colouring) maps to Telegram's native [InlineKeyboardButton.style](https://core.telegram.org/bots/api#inlinekeyboardbutton). Use `style` instead of emoji markers (`●`/`○`) for active-selection signalling — same UX, native rendering.
+- `refresh: true` re-renders the menu in place after `action` runs, so dynamic `label` / `style` resolvers reflect mutated state without the user re-opening `/settings`. `toggleMenuItem` enables this by default.
+- `action` returns `void | string | Polyglot<string>`; the menu plugin sends a single `answerCallbackQuery` with that text. **Never call `ctx.answer(...)` from inside an action** — Telegram rejects the second answer, the action throws, and `refresh` never runs.
+- `confirm: { prompt }` adds a one-step confirmation overlay before the action runs. Cancel returns to root. Use this for destructive actions instead of `ctx.answer({ show_alert: true })` — Telegram's alert UI doesn't compose with refresh / toast.
+
+**Live state inside resolvers**: `label` / `style` resolvers fire AFTER the action mutated the session. Read mutable state from `ctx.session.<field>` directly. `ctx.lang` from `bot/language` is a snapshot at event start and goes stale within the same callback; `ctx.say(...)` IS live and safe to use anywhere.
+
 See `src/bot/CLAUDE.md` for storage layout, design decisions, and gotchas.
 
 ## Release

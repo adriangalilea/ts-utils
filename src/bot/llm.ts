@@ -653,6 +653,8 @@ export type LLMHistoryOptions = {
     item?: Polyglot<string>
     /** Toast shown after a successful clear. Default: `{ en: '🧹 Cleared.', es: '🧹 Limpio.' }`. */
     cleared?: Polyglot<string>
+    /** Confirmation overlay text. Default explains the per-thread scope. */
+    confirmPrompt?: Polyglot<string>
   }
 }
 
@@ -761,12 +763,20 @@ export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
     en: '🧹 Cleared.',
     es: '🧹 Limpio.',
   }
+  const confirmPrompt: Polyglot<string> = opts.menuLabels?.confirmPrompt ?? {
+    en: '⚠️ Clear conversation in this thread?\n\nThis removes the LLM history for THIS thread only. Other threads stay intact.',
+    es: '⚠️ ¿Limpiar la conversación de este hilo?\n\nBorra el historial LLM SOLO de este hilo. Los demás quedan intactos.',
+  }
 
   const menuItem: MenuItem = {
     id: 'llmClear',
     label: itemLabel,
     // Destructive action → red. Consistent with `botMenu`'s 🗑 Forget.
     style: 'danger',
+    // One-step confirm overlay before the wipe — clearing per-thread
+    // conversation is non-reversible and Telegram's `show_alert` is
+    // too disruptive. See `MenuItem.confirm` for the pattern.
+    confirm: { prompt: confirmPrompt },
     action: (ctx) => {
       // The `llm` decoration comes from llmHistory's own plugin — not
       // on MenuCtx's static shape, so we narrow here. Return the

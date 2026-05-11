@@ -203,6 +203,26 @@ export type MenuItem =
       style?: StyleResolver
       /** Re-render the menu message after the action runs. */
       refresh?: boolean
+      /**
+       * Adds a one-step confirmation before the action runs. First tap
+       * edits the menu message in place to show `prompt` + "Confirm" /
+       * "Cancel" buttons; the action only runs on Confirm.
+       *
+       * Use this for destructive actions instead of
+       * `ctx.answer({ show_alert: true })` — Telegram's alert UI is
+       * disruptive and doesn't compose with refresh / toast.
+       *
+       * After Confirm runs the action, the menu navigates back to
+       * root (so the user lands in a known-good state).
+       */
+      confirm?: {
+        /** Body text rendered above the Confirm/Cancel buttons. */
+        prompt: Label
+        /** Override "✅ Confirm" label. Default: polyglot en/es. */
+        confirmLabel?: Label
+        /** Override "⬅️ Cancel" label. Default: polyglot en/es. */
+        cancelLabel?: Label
+      }
     }
   | {
       id: string
@@ -280,6 +300,9 @@ const DEFAULT_SESSION_KEY = (userId: number) => String(userId)
 
 const navCb = new CallbackData('mNav').string('path')
 const actCb = new CallbackData('mAct').string('path')
+/** Fired when the user taps Confirm in a `confirm:` flow. `path`
+ *  identifies the underlying MenuItem.action to run. */
+const actConfirmCb = new CallbackData('mActC').string('path')
 const forgetConfirmCb = new CallbackData('mFcfm')
 const forgetCancelCb = new CallbackData('mFcnl')
 const exportCb = new CallbackData('mExp')
@@ -594,6 +617,33 @@ const buildMenuPlugin = (menu: BotMenu) => {
         return
       }
 
+      // If the item declares a `confirm` step, this first tap renders
+      // the confirmation overlay in place instead of running the
+      // action. The real action runs on actConfirmCb (Confirm tap).
+      if (item.confirm) {
+        await ctx.answer({})
+        const promptText = labelOf(item.confirm.prompt, ctx)
+        const confirmLabel = item.confirm.confirmLabel
+          ? labelOf(item.confirm.confirmLabel, ctx)
+          : say({ en: '✅ Confirm', es: '✅ Confirmar' }, lang)
+        const cancelLabel = item.confirm.cancelLabel
+          ? labelOf(item.confirm.cancelLabel, ctx)
+          : say({ en: '⬅️ Cancel', es: '⬅️ Cancelar' }, lang)
+        try {
+          await ctx.editText(promptText, {
+            reply_markup: new InlineKeyboard()
+              .text(confirmLabel, actConfirmCb.pack({ path: raw }), {
+                style: 'danger',
+              })
+              .row()
+              .text(cancelLabel, navCb.pack({ path: '_root' })),
+          })
+        } catch {
+          /* message too old to edit */
+        }
+        return
+      }
+
       // Run the action, capture its toast (if any). The menu owns the
       // single `answerCallbackQuery` call for this query — actions
       // return strings / polyglots instead of calling answer
@@ -637,6 +687,51 @@ const buildMenuPlugin = (menu: BotMenu) => {
             // message too old to edit
           }
         }
+      }
+    })
+    // Confirmed tap on a `confirm:`-flagged action item: run the
+    // action with the same return-value contract as actCb, then
+    // navigate back to root so the user lands in a meaningful state.
+    .callbackQuery(actConfirmCb, async (ctx) => {
+      const lang = ctxLang(ctx)
+      const raw = ctx.queryData.path
+      const segments = raw.split('.')
+      const item = itemForPath(menu._items, segments)
+      if (!item || !('action' in item)) {
+        await ctx.answer({
+          text: say({ en: 'Item not found.', es: 'Elemento no encontrado.' }, lang),
+        })
+        return
+      }
+
+      let toast: ActionResult
+      try {
+        toast = await item.action(ctx)
+      } catch (e) {
+        try {
+          await ctx.answer({})
+        } catch {
+          /* ignore */
+        }
+        throw e
+      }
+
+      const text =
+        typeof toast === 'string'
+          ? toast
+          : toast === undefined
+            ? undefined
+            : say(toast, lang)
+      await ctx.answer(text === undefined ? {} : { text })
+
+      // Always navigate back to root after a confirmed destructive
+      // action — the previous context (where the user tapped) might
+      // not make sense anymore.
+      const kb = renderKeyboard(menu, menu._items, ctx, [])
+      try {
+        await ctx.editText(labelOf(header, ctx), { reply_markup: kb })
+      } catch {
+        /* ignore */
       }
     })
     // Forget — confirm path

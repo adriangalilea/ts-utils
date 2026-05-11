@@ -141,6 +141,14 @@ export type AccessSource = 'admin' | 'default' | 'store'
 /**
  * What handlers downstream see on `ctx.access`. A discriminated union —
  * use the `allowed` field to narrow.
+ *
+ * **Snapshot semantics.** `ctx.access` is computed by this plugin's
+ * derive at event start and stays static through the handler — same
+ * pattern as `ctx.lang` from `bot/language`. If you mutate the user's
+ * access state mid-handler (rare — usually the admin's tap mutates
+ * the *target's* session record, not their own), re-read from
+ * storage / `ctx.session.access` directly rather than from
+ * `ctx.access`.
  */
 export type AccessInfo =
   | {
