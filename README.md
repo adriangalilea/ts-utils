@@ -302,7 +302,7 @@ Then `pnpm install`. Every `ctx.send` / `ctx.sendDocument` / `ctx.reply` / etc. 
 
 | Subpath | What it does |
 |---|---|
-| `@adriangalilea/utils/bot/kit` | `gracefulStart(bot, opts?)` — SIGINT/SIGTERM → `bot.stop()` → exit; force-kills if shutdown hangs. DMs the admin `@<bot> started.` / `@<bot> shutting down.` by default when `KEV.TELEGRAM_ADMIN_ID` is set (graceful only — crashes don't trigger `onStop`); pass `notifyAdmin: false` to disable or `notifyAdmin: 12345` for an explicit chat id.<br>`adminContext({ adminId? })` — reads `TELEGRAM_ADMIN_ID` from `kev` (with optional hardcoded fallback), decorates `ctx.adminId` + `ctx.isAdmin`.<br>`prefixStorage(storage, prefix)` — namespaces every key on a shared `@gramio/storage` backend. **Required when several bots share one Redis** — `@gramio/session`'s default key is `String(senderId)`, so the same user collides across bots and the last writer wins (silently). Apply once at construction; everything downstream inherits the namespace. |
+| `@adriangalilea/utils/bot/kit` | `gracefulStart(bot, opts?)` — SIGINT/SIGTERM → `bot.stop()` → exit; force-kills if shutdown hangs. DMs the admin `@<bot> started.` / `@<bot> shutting down.` by default when `KEV.TELEGRAM_ADMIN_ID` is set (graceful only — crashes don't trigger `onStop`); pass `notifyAdmin: false` to disable or `notifyAdmin: 12345` for an explicit chat id.<br>`adminContext({ adminId? })` — reads `TELEGRAM_ADMIN_ID` from `kev` (with optional hardcoded fallback), decorates `ctx.adminId` + `ctx.isAdmin`.<br>`botSession(opts)` — **drop-in replacement for `@gramio/session`'s `session()`** that auto-namespaces every key as `bot-<id>:<senderId>` using `ctx.bot.info.id` (populated by `getMe()` at startup). Use this instead of `session()` — full stop. Multiple bots sharing one Redis stay isolated by construction; every plugin in this package derives the same prefix internally via `botStorageKey(ctx, userId)` / `botSubKey(ctx, sub)`. No regex, no manual prefix argument, no way to forget.<br>`prefixStorage(storage, prefix)` — escape hatch for adding a top-level prefix on top of the bot-id namespace; almost never needed. |
 | `@adriangalilea/utils/bot/access-control` | Personal-bot ACL — gates non-admin/non-default users; admin gets DM with `[✅ Aprobar][❌ Denegar]` on first attempt; `/access` opens a persistent menu (revoke / reapprove / list pending). Backed by `@gramio/session` per-user + a small index. **Native alternative**: BotFather → Bot Settings → Access → "Restrict bot usage" — flat allow-list at Telegram. Use this plugin when you want in-bot approval flow instead of a BotFather round-trip; both can coexist. |
 | `@adriangalilea/utils/bot/coalesce` | Joins client-split inbound messages back into one. When a user pastes >4096 chars, Telegram clients fragment it into separate `message` updates with no marker. Middleware detects the burst and emits one combined event. |
 | `@adriangalilea/utils/bot/llm` | The full LLM-chatbot pipeline in one module. **Input:** `streamChat(response)` parses OpenAI-compatible SSE (OpenAI, vllm, mlx-lm, llama.cpp, Together, Groq, …) into a typed `AsyncGenerator<{type: 'content' \| 'reasoning', text}>`. **Output:** `ctx.startStream()` (low-level: debounced markdown to Telegram, 4000-char split, exposes `wasPartial` after `.end()`). `ctx.startChatStream(response)` (high-level: consumes the stream, renders reasoning as a Telegram `expandable_blockquote` entity + content as streamed markdown — both go through `markdownToFormattable` with graceful degradation — returns `{ content, reasoning }`). **History:** `llmHistory({...})` returns `.plugin` (decorates `ctx.llm` with `.add() / .get() / .clear() / .all() / .clearAll()`, per-(user, thread) OpenAI `ChatMessage` shape, persisted in the shared session record so the menu's 🗑 Forget wipes it automatically) AND `.menuItem` (drop-in "🗑 Delete this thread" for `botMenu` — wipes the LLM history AND calls `deleteForumTopic` so the Telegram thread + all its messages disappear from the chat; falls back to Redis-only clear when no `threadId` is present). |
@@ -313,16 +313,15 @@ Standard wiring:
 ```typescript
 import { Bot } from 'gramio'
 import { redisStorage } from '@gramio/storage-redis'
-import { adminContext, gracefulStart, prefixStorage } from '@adriangalilea/utils/bot/kit'
+import { adminContext, botSession, gracefulStart } from '@adriangalilea/utils/bot/kit'
 import { accessControl } from '@adriangalilea/utils/bot/access-control'
-import { session } from '@gramio/session'
 import { llmStream, llmHistory } from '@adriangalilea/utils/bot/llm'
 
-// Wrap the raw backend once. The prefix MUST be unique per bot — without
-// it, multiple bots sharing the same Redis collide on `String(senderId)`
-// and silently overwrite each other's user records.
-const storage = prefixStorage(redisStorage(), 'mybot:')
-const userSession = session({ storage, key: 'session', initial: () => ({}) })
+// Raw redis is fine — bot-id namespacing happens inside botSession +
+// every plugin via ctx.bot.info.id. Multiple bots sharing this Redis
+// stay isolated by construction. No manual prefix to remember.
+const storage = redisStorage()
+const userSession = botSession({ storage, key: 'session', initial: () => ({}) })
 const chat = llmHistory({ session: userSession, maxTurns: 20, retentionDays: 7 })
 
 const bot = new Bot(process.env.BOT_TOKEN!)

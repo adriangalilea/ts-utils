@@ -103,14 +103,18 @@ import {
 } from "gramio";
 
 import { say } from "../say/index.js";
+import { botStorageKey, botSubKey } from "./kit.js";
 
-const INDEX_KEY = "ac:index";
 const FIRST_MSG_LIMIT = 200;
 const DEFAULT_THROTTLE_MS = 6 * 60 * 60 * 1000;
 const FALLBACK_LANG = "en";
 
-/** gramio's `@gramio/session` default `getSessionKey` is `String(senderId)`. */
-const sessionKey = (userId: number) => String(userId);
+// Storage keys are computed via `botStorageKey(ctx, userId)` and
+// `botSubKey(ctx, 'ac:index')` — both prefix with the calling bot's
+// numeric id (parsed from `ctx.bot.info.id`) so multiple bots sharing
+// one Redis stay isolated by construction. See `kit.ts` for the why.
+
+type BotCtx = { bot: unknown };
 
 // ─── public types ──────────────────────────────────────────────────
 
@@ -309,8 +313,13 @@ const requestKeyboard = (uid: number, lang: string) =>
 
 // ─── index helpers ─────────────────────────────────────────────────
 
-const loadIndex = async (storage: Storage): Promise<AccessIndex> => {
-	const raw = (await storage.get(INDEX_KEY)) as
+const indexKey = (ctx: BotCtx): string => botSubKey(ctx, "ac:index");
+
+const loadIndex = async (
+	storage: Storage,
+	ctx: BotCtx,
+): Promise<AccessIndex> => {
+	const raw = (await storage.get(indexKey(ctx))) as
 		| Partial<AccessIndex>
 		| undefined;
 	return {
@@ -320,26 +329,28 @@ const loadIndex = async (storage: Storage): Promise<AccessIndex> => {
 	};
 };
 
-const saveIndex = (storage: Storage, idx: AccessIndex) =>
-	storage.set(INDEX_KEY, idx);
+const saveIndex = (storage: Storage, ctx: BotCtx, idx: AccessIndex) =>
+	storage.set(indexKey(ctx), idx);
 
 const indexAdd = async (
 	storage: Storage,
+	ctx: BotCtx,
 	bucket: keyof AccessIndex,
 	uid: number,
 ): Promise<void> => {
-	const idx = await loadIndex(storage);
+	const idx = await loadIndex(storage, ctx);
 	if (!idx[bucket].includes(uid)) idx[bucket].push(uid);
-	await saveIndex(storage, idx);
+	await saveIndex(storage, ctx, idx);
 };
 
 const indexMove = async (
 	storage: Storage,
+	ctx: BotCtx,
 	uid: number,
 	from: keyof AccessIndex | "any",
 	to: keyof AccessIndex,
 ): Promise<void> => {
-	const idx = await loadIndex(storage);
+	const idx = await loadIndex(storage, ctx);
 	const remove = (list: number[]) => {
 		const i = list.indexOf(uid);
 		if (i >= 0) list.splice(i, 1);
@@ -352,7 +363,7 @@ const indexMove = async (
 		remove(idx[from]);
 	}
 	if (!idx[to].includes(uid)) idx[to].push(uid);
-	await saveIndex(storage, idx);
+	await saveIndex(storage, ctx, idx);
 };
 
 // ─── per-user record helpers (cross-user storage access) ───────────
@@ -371,35 +382,40 @@ type FullSessionRecord = {
 
 const loadFullRecord = async (
 	storage: Storage,
+	ctx: BotCtx,
 	userId: number,
 ): Promise<FullSessionRecord> =>
-	((await storage.get(sessionKey(userId))) as FullSessionRecord | undefined) ??
-	{};
+	((await storage.get(botStorageKey(ctx, userId))) as
+		| FullSessionRecord
+		| undefined) ?? {};
 
 const saveAccess = async (
 	storage: Storage,
+	ctx: BotCtx,
 	userId: number,
 	rec: AccessRecord,
 ): Promise<void> => {
-	const full = await loadFullRecord(storage, userId);
+	const full = await loadFullRecord(storage, ctx, userId);
 	full.access = rec;
-	await storage.set(sessionKey(userId), full);
+	await storage.set(botStorageKey(ctx, userId), full);
 };
 
 const loadAccess = async (
 	storage: Storage,
+	ctx: BotCtx,
 	userId: number,
 ): Promise<AccessRecord | undefined> => {
-	const full = await loadFullRecord(storage, userId);
+	const full = await loadFullRecord(storage, ctx, userId);
 	return full.access;
 };
 
 /** Read recipient's stored language (set by bot/language); fallback to en. */
 const langOfUser = async (
 	storage: Storage,
+	ctx: BotCtx,
 	userId: number,
 ): Promise<string> => {
-	const full = await loadFullRecord(storage, userId);
+	const full = await loadFullRecord(storage, ctx, userId);
 	return full.language ?? FALLBACK_LANG;
 };
 
@@ -528,7 +544,7 @@ export const accessControl = (opts: AccessControlOptions) => {
 							};
 
 				if (isFirstRequest) {
-					await indexAdd(storage, "pending", userId);
+					await indexAdd(storage, ctx, "pending", userId);
 				} else {
 					rec.rejectedAttempts = (rec.rejectedAttempts ?? 0) + 1;
 				}
@@ -538,7 +554,7 @@ export const accessControl = (opts: AccessControlOptions) => {
 				if (shouldNotify) {
 					rec.lastNotifiedAt = now;
 					try {
-						const adminLang = await langOfUser(storage, ctx.adminId);
+						const adminLang = await langOfUser(storage, ctx, ctx.adminId);
 						await ctx.bot.api.sendMessage({
 							chat_id: ctx.adminId,
 							text: requestNotificationText(
@@ -590,7 +606,7 @@ export const accessControl = (opts: AccessControlOptions) => {
 						show_alert: true,
 					});
 				const uid = ctx.queryData.uid;
-				const rec = await loadAccess(storage, uid);
+				const rec = await loadAccess(storage, ctx, uid);
 				if (!rec)
 					return ctx.answer({
 						text: say({ en: "Not found.", es: "No encontrado." }, aLang),
@@ -603,9 +619,10 @@ export const accessControl = (opts: AccessControlOptions) => {
 				rec.approvedBy = ctx.adminId;
 				rec.deniedAt = undefined;
 				rec.deniedBy = undefined;
-				await saveAccess(storage, uid, rec);
+				await saveAccess(storage, ctx, uid, rec);
 				await indexMove(
 					storage,
+					ctx,
 					uid,
 					wasPending ? "pending" : wasDenied ? "denied" : "any",
 					"approved",
@@ -613,7 +630,7 @@ export const accessControl = (opts: AccessControlOptions) => {
 
 				if (rec.chatId !== undefined) {
 					try {
-						const sLang = await langOfUser(storage, uid);
+						const sLang = await langOfUser(storage, ctx, uid);
 						await ctx.bot.api.sendMessage({
 							chat_id: rec.chatId,
 							text: say(
@@ -658,7 +675,7 @@ export const accessControl = (opts: AccessControlOptions) => {
 						show_alert: true,
 					});
 				const uid = ctx.queryData.uid;
-				const rec = await loadAccess(storage, uid);
+				const rec = await loadAccess(storage, ctx, uid);
 				if (!rec)
 					return ctx.answer({
 						text: say({ en: "Not found.", es: "No encontrado." }, aLang),
@@ -668,12 +685,18 @@ export const accessControl = (opts: AccessControlOptions) => {
 				rec.status = "denied";
 				rec.deniedAt = Date.now();
 				rec.deniedBy = ctx.adminId;
-				await saveAccess(storage, uid, rec);
-				await indexMove(storage, uid, wasPending ? "pending" : "any", "denied");
+				await saveAccess(storage, ctx, uid, rec);
+				await indexMove(
+					storage,
+					ctx,
+					uid,
+					wasPending ? "pending" : "any",
+					"denied",
+				);
 
 				if (rec.chatId !== undefined) {
 					try {
-						const sLang = await langOfUser(storage, uid);
+						const sLang = await langOfUser(storage, ctx, uid);
 						await ctx.bot.api.sendMessage({
 							chat_id: rec.chatId,
 							text: say(
@@ -710,7 +733,7 @@ export const accessControl = (opts: AccessControlOptions) => {
 						show_alert: true,
 					});
 				const uid = ctx.queryData.uid;
-				const rec = await loadAccess(storage, uid);
+				const rec = await loadAccess(storage, ctx, uid);
 				if (!rec)
 					return ctx.answer({
 						text: say({ en: "Not found.", es: "No encontrado." }, aLang),
@@ -719,12 +742,12 @@ export const accessControl = (opts: AccessControlOptions) => {
 				rec.status = "denied";
 				rec.deniedAt = Date.now();
 				rec.deniedBy = ctx.adminId;
-				await saveAccess(storage, uid, rec);
-				await indexMove(storage, uid, "approved", "denied");
+				await saveAccess(storage, ctx, uid, rec);
+				await indexMove(storage, ctx, uid, "approved", "denied");
 
 				if (rec.chatId !== undefined) {
 					try {
-						const sLang = await langOfUser(storage, uid);
+						const sLang = await langOfUser(storage, ctx, uid);
 						await ctx.bot.api.sendMessage({
 							chat_id: rec.chatId,
 							text: say(
@@ -783,7 +806,7 @@ export const accessControl = (opts: AccessControlOptions) => {
 				async (ctx) => {
 					if (!ctx.isAdmin) return;
 					const aLang = ctxLang(ctx);
-					const v = mainView(await loadIndex(storage), defaults, aLang);
+					const v = mainView(await loadIndex(storage, ctx), defaults, aLang);
 					await ctx.send(v.text, { reply_markup: v.keyboard });
 				},
 			)
@@ -792,7 +815,7 @@ export const accessControl = (opts: AccessControlOptions) => {
 
 // ─── views ─────────────────────────────────────────────────────────
 
-type ViewableCtx = {
+type ViewableCtx = BotCtx & {
 	editText: (
 		text: string,
 		params?: { reply_markup?: InlineKeyboard },
@@ -806,14 +829,14 @@ const renderView = async (
 	view: string,
 	lang: string,
 ): Promise<void> => {
-	const idx = await loadIndex(storage);
+	const idx = await loadIndex(storage, ctx);
 	const v =
 		view === "approved"
-			? await listView(storage, idx, "approved", defaults, lang)
+			? await listView(storage, ctx, idx, "approved", defaults, lang)
 			: view === "pending"
-				? await listView(storage, idx, "pending", defaults, lang)
+				? await listView(storage, ctx, idx, "pending", defaults, lang)
 				: view === "denied"
-					? await listView(storage, idx, "denied", defaults, lang)
+					? await listView(storage, ctx, idx, "denied", defaults, lang)
 					: mainView(idx, defaults, lang);
 	try {
 		await ctx.editText(v.text, { reply_markup: v.keyboard });
@@ -863,6 +886,7 @@ const mainView = (
 
 const listView = async (
 	storage: Storage,
+	ctx: BotCtx,
 	idx: AccessIndex,
 	filter: "pending" | "approved" | "denied",
 	defaults: ReadonlySet<number>,
@@ -872,7 +896,7 @@ const listView = async (
 	// Cap at 20 to keep callback_data + rendering sane.
 	const shownIds = ids.slice(0, 20);
 	const records = await Promise.all(
-		shownIds.map(async (id) => ({ id, rec: await loadAccess(storage, id) })),
+		shownIds.map(async (id) => ({ id, rec: await loadAccess(storage, ctx, id) })),
 	);
 
 	const headerEmoji =
@@ -987,10 +1011,13 @@ export const simulateAccessRequest = async (
 		rejectedAttempts: 0,
 		lastNotifiedAt: now,
 	};
-	await saveAccess(storage, fakeUser.id, rec);
-	await indexAdd(storage, "pending", fakeUser.id);
+	// `BotCtx` shape (`{ bot: { info } }`) — `bot` here is the Bot
+	// instance itself, which exposes `info` directly after `bot.start`.
+	const botCtx: BotCtx = { bot: { info: bot.info } };
+	await saveAccess(storage, botCtx, fakeUser.id, rec);
+	await indexAdd(storage, botCtx, "pending", fakeUser.id);
 
-	const adminLang = await langOfUser(storage, adminId);
+	const adminLang = await langOfUser(storage, botCtx, adminId);
 
 	await bot.api.sendMessage({
 		chat_id: adminId,

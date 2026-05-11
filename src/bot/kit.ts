@@ -1,5 +1,5 @@
 /**
- * Foundational helpers every bot wants. Three things:
+ * Foundational helpers every bot wants.
  *
  *   `gracefulStart(bot, opts?)` — wires SIGINT/SIGTERM to bot.stop(),
  *     runs an optional shutdown hook, force-kills if it hangs. DMs the
@@ -12,31 +12,37 @@
  *     every context with `ctx.adminId` (number) and `ctx.isAdmin`
  *     (boolean). Throws at startup if neither source provides an id.
  *
- *   `prefixStorage(storage, prefix)` — wraps any `@gramio/storage`
- *     adapter to namespace every key with a fixed prefix. ESSENTIAL
- *     when several bots share the same backend (e.g. one Redis): the
- *     session plugin keys records by `String(senderId)`, so the same
- *     user's id collides across bots and the last writer wins.
+ *   `botSession(opts)` — drop-in replacement for `@gramio/session`'s
+ *     `session()` that AUTOMATICALLY namespaces every key with the
+ *     calling bot's id (parsed from `ctx.bot.options.token`). When
+ *     several bots share one Redis instance, each writes to a disjoint
+ *     keyspace (`bot-<id>:<senderId>`) with no manual wiring. Every
+ *     plugin in this package (`accessControl`, `botMenu`,
+ *     `llmHistory`, …) derives the SAME prefix from `ctx.bot` for its
+ *     own storage access, so the whole package stays isolated by
+ *     construction. Use this instead of `session()` — full stop.
  *
- * Peer deps: `gramio`, `@gramio/storage`.
+ * Peer deps: `gramio`, `@gramio/session`, `@gramio/storage`.
  *
  * @example
  * import { Bot } from 'gramio'
  * import { redisStorage } from '@gramio/storage-redis'
- * import { adminContext, gracefulStart, prefixStorage } from '@adriangalilea/utils/bot/kit'
+ * import { adminContext, gracefulStart, botSession } from '@adriangalilea/utils/bot/kit'
  *
- * // ONE prefixed storage instance — pass it to session AND every plugin.
- * const storage = prefixStorage(redisStorage(), 'mybot:')
+ * const storage = redisStorage()                          // share across bots, safe
+ * const userSession = botSession({ storage, initial: () => ({}) })
  *
  * const bot = new Bot(process.env.BOT_TOKEN!)
- *   .extend(adminContext({ adminId: 190202471 }))   // KEV wins, 190… is fallback
+ *   .extend(adminContext({ adminId: 190202471 }))         // KEV wins, 190… is fallback
+ *   .extend(userSession)
  *   .command('whoami', (ctx) => ctx.send(`admin? ${ctx.isAdmin}`))
  *
  * await gracefulStart(bot, { onShutdown: () => db.end() })
  */
+import { session, type SessionOptions } from "@gramio/session";
 import type { Storage } from "@gramio/storage";
-import type { AnyBot } from "gramio";
-import { Plugin } from "gramio";
+import type { Plugin as PluginType } from "gramio";
+import { type AnyBot, Plugin } from "gramio";
 import { kev } from "../platform/kev.js";
 
 // ─── gracefulStart ─────────────────────────────────────────────────
@@ -187,45 +193,150 @@ export const adminContext = (opts: AdminContextOptions = {}) => {
 		}));
 };
 
-// ─── prefixStorage ─────────────────────────────────────────────────
+// ─── bot-id-namespaced keys ────────────────────────────────────────
+//
+// gramio fills `bot.info` from `getMe()` during `bot.init` / `bot.start`,
+// so by the time any handler runs `ctx.bot.info.id` is the bot's stable
+// numeric id. We use it to prefix every storage key the library writes:
+// `bot-<id>:<userId>` (per-user) or `bot-<id>:<subKey>` (bot-side).
+//
+// Why this exists: `@gramio/session` defaults `getSessionKey` to
+// `String(senderId)`. If two bots share one Redis (the canonical
+// "personal bot fleet" setup), every user id collides across bots and
+// the last writer wins — silently corrupting state and leaking
+// neighbouring bots' data on /export. Putting the bot id in the key
+// removes the collision entirely without forcing the user to remember
+// to wrap storage manually.
 
 /**
- * Wraps any `@gramio/storage` adapter so every read / write goes
- * through `${prefix}${key}`. Pass the wrapped instance to your
- * `session({...})` AND to every plugin's `storage` option — they all
- * inherit the namespace, no per-plugin wiring needed.
+ * Returns the calling bot's numeric id from `ctx.bot.info.id`. Throws
+ * if called before `bot.start()` / `bot.init()` populates it — should
+ * never happen from inside an event handler, where gramio guarantees
+ * `bot.info` is set.
  *
- * **Why this exists.** `@gramio/session`'s default `getSessionKey` is
- * `String(senderId)`. If two bots share the same Redis (or any
- * shared-backend storage), the same Telegram user id collides across
- * bots — the last writer wins, `/settings → 📥 Export` returns whatever
- * the other bot last wrote, etc. A unique prefix per bot makes the
- * keyspace disjoint.
+ * Note on the structural cast: gramio's `BotLike` (the interface
+ * contexts are typed against) intentionally omits `info` to decouple
+ * Context types from the full Bot class. At runtime `ctx.bot` IS the
+ * full Bot, so the cast is sound — just papering over a deliberate
+ * type-vs-runtime gap.
+ */
+export const botId = (ctx: { bot: unknown }): number => {
+	const id = (ctx.bot as { info?: { id: number } }).info?.id;
+	if (id === undefined)
+		throw new Error(
+			"bot/kit: ctx.bot.info.id is undefined — botId() called before bot.start()/bot.init() ran.",
+		);
+	return id;
+};
+
+/**
+ * Computes the storage key for an arbitrary user under the CALLING
+ * bot's namespace. Use whenever a plugin needs to read or write
+ * **another user's** session record from inside a handler (typical:
+ * admin approves a stranger, /forget wipes a stranger after a takedown
+ * request). For the current user, the session plugin handles keying
+ * automatically when wired via `botSession`.
+ */
+export const botStorageKey = (
+	ctx: { bot: unknown },
+	userId: number,
+): string => `bot-${botId(ctx)}:${userId}`;
+
+/**
+ * Static-key variant — namespace an arbitrary sub-key (e.g. an admin
+ * index, a feature flag, a counter) under the calling bot's prefix.
+ * Use this for bot-side state that isn't keyed by a specific user.
  *
- * Recommended prefix shapes:
- *   - `'mybot:'` — explicit, human-readable in Redis GUIs.
- *   - `'<bot-username>:'` — derive from BotFather handle once at start.
- *   - `'<bot-id>:'` — Telegram's numeric bot id from `getMe`.
+ *   botSubKey(ctx, 'ac:index')   →  'bot-<id>:ac:index'
+ *   botSubKey(ctx, 'metrics')    →  'bot-<id>:metrics'
+ */
+export const botSubKey = (
+	ctx: { bot: unknown },
+	subKey: string,
+): string => `bot-${botId(ctx)}:${subKey}`;
+
+// ─── botSession ────────────────────────────────────────────────────
+
+/**
+ * Drop-in replacement for `@gramio/session`'s `session()` that forces
+ * the storage key to include the calling bot's id. Equivalent to
+ * passing `getSessionKey: (ctx) => bot-${id}:${senderId}` explicitly,
+ * but baked in so no consumer can forget.
  *
- * **Storage layout** with `prefixStorage(s, 'mybot:')`:
+ * Returns a plain `@gramio/session` plugin — same shape, same derives,
+ * fully interchangeable in `.extend(userSession)` chains and plugin
+ * options like `accessControl({ session: userSession, … })`.
  *
- *     s['mybot:190202471']    = { access, language, llm }   ← user 190…'s record
- *     s['mybot:ac:index']     = { pending, approved, denied }
- *
- *     s['otherbot:190202471'] = { … }                       ← same user, other bot
- *
- * No two bots can read each other's data. Forget / Export operate on
- * the prefixed keys via the same wrapper.
+ * `getSessionKey` can still be overridden for advanced cases (e.g. a
+ * per-chat session in groups); the override is wrapped so it still
+ * receives the `bot-<id>:` prefix. Don't override unless you know what
+ * you're doing — every plugin in this package expects the
+ * `bot-<id>:<userId>` shape for cross-user storage reads.
  *
  * @example
- * import { prefixStorage } from '@adriangalilea/utils/bot/kit'
  * import { redisStorage } from '@gramio/storage-redis'
+ * import { botSession } from '@adriangalilea/utils/bot/kit'
  *
- * const storage = prefixStorage(redisStorage(), 'mybot:')
+ * const storage = redisStorage()    // shared across N bots, safe
  *
- * const userSession = session({ storage, key: 'session', initial: () => ({}) })
- * const menu = botMenu({ adminContact: '@me', personalData: { storage }, ... })
- * bot.extend(accessControl({ session: userSession, storage, defaults: [] }))
+ * const userSession = botSession({
+ *   storage,
+ *   key: 'session',
+ *   initial: () => ({}),
+ * })
+ *
+ * bot.extend(userSession)
+ */
+export const botSession = <
+	Data = unknown,
+	Key extends string = "session",
+	Lazy extends boolean = false,
+>(
+	opts: SessionOptions<Data, Key, Lazy>,
+): ReturnType<typeof session<Data, Key, Lazy>> => {
+	const userKeyer = opts.getSessionKey;
+	type AnyCtx = {
+		bot: unknown;
+		senderId?: number;
+	};
+	return session<Data, Key, Lazy>({
+		...opts,
+		// The session plugin types `getSessionKey` against `ContextType<BotLike, Events>`
+		// — too narrow for our generic wrapper. We only need `bot.info.id` +
+		// `senderId`, both of which gramio guarantees on every event the session
+		// plugin processes (bot.info is populated by bot.start / bot.init before
+		// any handler fires). Structural cast at the boundary keeps the public
+		// API generic-friendly without forcing consumers to specify Event unions.
+		getSessionKey: (async (ctxRaw) => {
+			const ctx = ctxRaw as AnyCtx;
+			const prefix = `bot-${botId(ctx)}:`;
+			if (userKeyer) {
+				const inner = await (userKeyer as (c: AnyCtx) => string | Promise<string>)(
+					ctx,
+				);
+				return `${prefix}${inner}`;
+			}
+			return `${prefix}${ctx.senderId ?? ""}`;
+		}) as SessionOptions<Data, Key, Lazy>["getSessionKey"],
+	}) as ReturnType<typeof session<Data, Key, Lazy>>;
+};
+
+// ─── prefixStorage (escape hatch) ──────────────────────────────────
+
+/**
+ * Wraps any `@gramio/storage` adapter so every key gets a fixed
+ * `${prefix}` prepended.
+ *
+ * **You almost never need this.** The library's plugins are isolated
+ * by bot id automatically when you wire `botSession` (see above) —
+ * `prefixStorage` exists for edge cases:
+ *
+ *   - Sharing a Redis instance with a NON-bot system, and you want a
+ *     top-level prefix on top of the bot-id namespace.
+ *   - Migrating from an older deployment that used a custom prefix.
+ *
+ * In those cases the wrapper composes cleanly with `botSession`'s
+ * internal prefix: final keys look like `${prefix}bot-<id>:<userId>`.
  */
 export const prefixStorage = (storage: Storage, prefix: string): Storage => {
 	const k = (key: string | number | symbol): string => `${prefix}${String(key)}`;
@@ -236,3 +347,7 @@ export const prefixStorage = (storage: Storage, prefix: string): Storage => {
 		delete: (key) => storage.delete(k(key)),
 	};
 };
+
+// Re-export so the bot subpath consumers don't need to import from
+// `@gramio/session` separately when wiring custom advanced cases.
+export type { PluginType };

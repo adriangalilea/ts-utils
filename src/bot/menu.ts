@@ -80,6 +80,7 @@ import type { Storage } from "@gramio/storage";
 import { CallbackData, InlineKeyboard, Plugin } from "gramio";
 
 import { type Polyglot, say } from "../say/index.js";
+import { botStorageKey } from "./kit.js";
 
 // ─── public types ──────────────────────────────────────────────────
 
@@ -257,17 +258,16 @@ export type MenuItem =
 export type PersonalDataOptions = {
 	/**
 	 * Storage backend where each user's data lives. Must be the SAME
-	 * instance you passed to your `session(...)` plugin — that's how
-	 * /forget and /export reach the right keys.
+	 * instance you passed to your `session(...)` (or `botSession(...)`)
+	 * plugin — that's how /forget and /export reach the right keys.
+	 *
+	 * The storage key for the calling user is derived as
+	 * `bot-<botId>:<userId>` via `botStorageKey(ctx, userId)`, matching
+	 * the namespace `botSession` uses by default. No `sessionKey`
+	 * override exists because every plugin in this package shares the
+	 * same key shape by construction.
 	 */
 	storage: Storage;
-	/**
-	 * How to compute the storage key for a given user id. Defaults to
-	 * `String(userId)` — matching `@gramio/session`'s default
-	 * `getSessionKey`. Override if your session uses a custom
-	 * `getSessionKey`.
-	 */
-	sessionKey?: (userId: number) => string;
 };
 
 export type BotMenuOptions = {
@@ -308,7 +308,6 @@ const DEFAULT_COMMAND = "settings";
 const DEFAULT_DESCRIPTION = "Open settings menu";
 const DEFAULT_PRIVACY_URL = "https://telegram.org/privacy-tpa";
 const DEFAULT_HEADER: Polyglot<string> = { en: "⚙️ Settings", es: "⚙️ Ajustes" };
-const DEFAULT_SESSION_KEY = (userId: number) => String(userId);
 
 // ─── callback data schemas ─────────────────────────────────────────
 
@@ -327,7 +326,6 @@ const closeCb = new CallbackData("mCls");
 
 type ResolvedPersonalData = {
 	storage: Storage;
-	sessionKey: (userId: number) => string;
 };
 
 type ResolvedOpts = {
@@ -354,10 +352,7 @@ export class BotMenu {
 			header: opts.header ?? DEFAULT_HEADER,
 			adminContact: opts.adminContact,
 			personalData: opts.personalData
-				? {
-						storage: opts.personalData.storage,
-						sessionKey: opts.personalData.sessionKey ?? DEFAULT_SESSION_KEY,
-					}
+				? { storage: opts.personalData.storage }
 				: null,
 		};
 	}
@@ -816,7 +811,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 					});
 
 				try {
-					await personalData.storage.delete(personalData.sessionKey(userId));
+					await personalData.storage.delete(botStorageKey(ctx, userId));
 					await ctx.answer({
 						text: say({ en: "Deleted.", es: "Borrado." }, lang),
 					});
@@ -877,8 +872,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 					});
 
 				const record =
-					(await personalData.storage.get(personalData.sessionKey(userId))) ??
-					{};
+					(await personalData.storage.get(botStorageKey(ctx, userId))) ?? {};
 				const file = new File(
 					[
 						JSON.stringify(
