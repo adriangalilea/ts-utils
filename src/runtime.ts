@@ -95,6 +95,11 @@ const browserWindow: BrowserWindow | undefined = globalThis.window;
 const browserEnv = (): Record<string, string> | undefined =>
 	browserWindow?.__ENV__ ?? browserWindow?.process?.env;
 
+// Methods below repeat `const Deno = globalThis.Deno` instead of
+// caching it on the instance: TS only narrows `DenoNamespace | undefined`
+// → `DenoNamespace` through a local-const + `if` pattern. A class
+// field would still be the union at the call sites. Same runtime cost,
+// honest types.
 class RuntimeOps implements RuntimeCapabilities {
 	// Environment detection - evaluated once
 	readonly isBrowser =

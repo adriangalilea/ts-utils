@@ -804,11 +804,16 @@ export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
 		// `MenuItem.confirm` for the pattern.
 		confirm: { prompt: confirmPrompt },
 		action: async (ctx) => {
-			// The `llm` decoration comes from llmHistory's own plugin — not
-			// on MenuCtx's static shape, so we narrow here. Return the
-			// polyglot toast: the menu plugin owns the single
-			// answerCallbackQuery for this tap (calling ctx.answer here
-			// would be a double-answer → rejected → action throws).
+			// MenuCtx is a static structural type — it can't know about
+			// `llm` (decorated by llmHistory's own plugin) or `bot.api`
+			// (gramio's runtime decoration). Pushing those through
+			// generics would propagate them across the entire menu API
+			// for one consumer, so the structural narrow cast here is
+			// the pragmatic boundary: every field listed is `?:`-optional
+			// and read defensively below. Returns the polyglot toast —
+			// the menu plugin owns the single answerCallbackQuery for
+			// this tap (calling ctx.answer here would be a double-answer
+			// → rejected → action throws).
 			const c = ctx as unknown as {
 				llm?: LLMHistoryApi;
 				bot?: {

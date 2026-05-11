@@ -378,9 +378,11 @@ function getNetworkAddress(): string {
 	if (!runtime.canFileSystem()) return "localhost"; // Can't get network address without file system access
 
 	try {
-		// node:os is loaded dynamically — we run in browsers too and a
-		// static import would break tree-shaking. Type the return shape
-		// explicitly so iteration narrows without `any`.
+		// node:os is loaded with `require` so the browser bundle never
+		// pulls it in (a static `import` would force it on every consumer).
+		// `import type * as os` won't help — the value is what we need,
+		// not just the type, and require() returns `any` by default. The
+		// inline cast describes exactly the slice we touch.
 		const os = require("node:os") as {
 			networkInterfaces: () => Record<
 				string,
