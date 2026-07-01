@@ -103,6 +103,41 @@ format.percentage(0.05)  // "0.05%"
 format.percentage(123.456)  // "123%"
 ```
 
+### CLI presentation (`cli`)
+
+Terminal output: aligned tables, key/value blocks, trees, and a semantic color
+palette. Distinct from `format` (universal value formatting) — this is
+terminal-scoped. Colors come from the logger and auto-disable on non-TTY /
+`NO_COLOR`, and alignment is **ANSI-aware** (padding uses visible width), so a
+`table()` renders colored in a terminal and as plain aligned text in a pipe, log
+file, or a bot's monospace block.
+
+```typescript
+import { table, kv, tree, indent, truncate, ui } from '@adriangalilea/utils/cli'
+
+// Semantic palette — use these, not raw colors, so intent stays consistent
+ui.head('Name')   ui.accent('id')   ui.muted('note')
+ui.ok('done')     ui.warn('!')      ui.bad('err')   ui.ref('#abc123')
+
+// Aligned columns (auto width; per-column align; optional bolded header).
+// Cells may be pre-colored — widths use visible length so they still line up.
+table(
+  [['Ada', ui.accent('ada@x.com'), ui.ref('42')],
+   ['Bo',  ui.accent('bo@y.com'),  ui.ref('7')]],
+  { head: ['name', 'email', 'msgs'], align: ['l', 'l', 'r'] },
+)
+
+// Key/value block (aligned keys) — for a detail view
+kv([['name', 'Ada'], ['email', 'ada@x.com']], { indent: 2 })
+
+// Nesting
+tree('Ada', ['email: ada@x.com', 'phone: +1…'])   // labeled node + children
+indent(block, 4)                                    // indent every line
+truncate('a very long value', 10)                   // "a very lo…"
+```
+
+Run the demo: `FORCE_COLOR=1 pnpm tsx tests/cli-demo.ts`.
+
 ### Offensive Programming
 
 Fail loud, fail fast. Zero dependencies, works in Node, Deno, Bun, and browsers.
