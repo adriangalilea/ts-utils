@@ -1,6 +1,6 @@
 {
 	"name": "@adriangalilea/utils",
-	"version": "0.20.0",
+	"version": "0.21.0",
 	"description": "TypeScript utilities - logger, currency, formatter, GramIO bot plugins, and more",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -23,6 +23,10 @@
 		"./format": {
 			"types": "./dist/universal/format.d.ts",
 			"default": "./dist/universal/format.js"
+		},
+		"./cli": {
+			"types": "./dist/cli/index.d.ts",
+			"default": "./dist/cli/index.js"
 		},
 		"./currency": {
 			"types": "./dist/universal/currency/index.d.ts",
