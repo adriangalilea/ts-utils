@@ -103,7 +103,8 @@
 		"check": "biome check",
 		"fix": "biome check --write --unsafe",
 		"ci": "biome ci",
-		"prepublishOnly": "pnpm run build"
+		"prepublishOnly": "pnpm run build",
+		"test:worker-safe": "pnpm run build && tsx tests/worker-safe-test.ts"
 	},
 	"keywords": [
 		"typescript",
