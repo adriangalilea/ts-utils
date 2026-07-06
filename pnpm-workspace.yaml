@@ -1,0 +1,6 @@
+allowBuilds:
+  esbuild: true
+
+# The @gramio/contexts Threaded-Mode fork is a CONSUMER-side override (see
+# README "Threaded Mode") — the lib builds against upstream, and pnpm 11
+# supply-chain policy blocks exotic subdeps here anyway.
