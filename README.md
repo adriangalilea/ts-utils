@@ -113,7 +113,7 @@ terminal-scoped. Colors come from the logger and auto-disable on non-TTY /
 file, or a bot's monospace block.
 
 ```typescript
-import { table, kv, tree, indent, truncate, ui } from '@adriangalilea/utils/cli'
+import { table, kv, tree, indent, clip, ui } from '@adriangalilea/utils/cli'
 
 // Semantic palette — use these, not raw colors, so intent stays consistent
 ui.head('Name')   ui.accent('id')   ui.muted('note')
@@ -133,10 +133,42 @@ kv([['name', 'Ada'], ['email', 'ada@x.com']], { indent: 2 })
 // Nesting
 tree('Ada', ['email: ada@x.com', 'phone: +1…'])   // labeled node + children
 indent(block, 4)                                    // indent every line
-truncate('a very long value', 10)                   // "a very lo…"
+clip('a very long value', 10)                       // "a very lo…" (ANSI-aware — styled input stays styled)
 ```
 
 Run the demo: `FORCE_COLOR=1 pnpm tsx tests/cli-demo.ts`.
+
+### Live output (`cli`) — pinned region, spinner, progress
+
+A pinned, self-repainting region at the bottom of the terminal for progress UIs. You own the state; the region is a `render: () => string` repainted on a timer — a frame is just a string, so `table()` / `kv()` / `ui` and the widgets (`spin()`, `bar()`, `elapsed()`) compose inside it unchanged.
+
+```typescript
+import { live, spinner, spin, bar, elapsed, table, ui } from '@adriangalilea/utils/cli'
+
+// The one-liner: animated while fn runs, persists "✓ label 1.2s" when done
+await spinner('connecting to imap.gmail.com', () => adapter.connect())
+
+// The general region: declarative multi-line progress
+const region = live(() => table(accounts.map(a => [
+  a.done === a.total ? ui.ok('✓') : spin(),
+  a.alias,
+  bar(a.done, a.total, 18),
+  ui.muted(`${a.rate}/s`),
+])))
+// ...mutate your state; it repaints ~12.5fps (region.refresh() for instant)
+region.done()   // final frame persists into scrollback (or .clear() to remove)
+```
+
+What makes it hold up:
+
+- **Logging never tears the UI, with no API to learn.** While a region is active, `console.log/warn/error` — and therefore the logger — are rerouted to print *above* the region (erase → write → repaint). Keep logging from anywhere, including third-party code.
+- **Non-TTY degrades to sane output.** In a pipe / CI / log file nothing animates: `done()` prints the final frame once, `spinner()` prints just its `✓ label 1.2s` line. Same calling code. Opt-in `heartbeat: ms` prints plain snapshots so long CI runs aren't silent.
+- **Renders to stderr by default** — stdout stays clean for `--json` and pipes.
+- **Crash-safe cursor**: hidden while painting, restored on done/clear, process exit, and signals — politely (if the app has its own SIGINT handler for graceful shutdown, it stays in charge).
+- **Flicker-free**: synchronized-update escapes (`?2026`) make repaints atomic on modern terminals; lines are ANSI-aware clipped to the terminal width so the erase math never breaks.
+- One region at a time, by design (`assert`): two pinned regions can't share the bottom of one screen — compose into a single `render()`.
+
+Run the demo: `pnpm tsx tests/live-demo.ts` (and pipe it through `| cat` to see the non-TTY degradation).
 
 ### Offensive Programming
 
@@ -226,6 +258,7 @@ Every `SourcedError` carries `source`, `operation`, `status`, `context`, and the
   - Percentage and basis point utilities
   - Fiat and stablecoin detection
 - **Format**: Number and currency formatting with compact notation
+- **CLI**: ANSI-aware tables/kv/trees + semantic palette, and live output — pinned self-repainting region, spinner, progress bar, with logs flowing above and clean non-TTY degradation
 - **Offensive Programming**: assert, panic, assertNever, must, unwrap (throw `Panic`) + SourcedError for typed boundary failures
 - **File Operations**: Read, write with automatic path resolution
 - **Directory Operations**: Create, list, walk directories
@@ -321,16 +354,12 @@ pnpm add @adriangalilea/utils gramio @gramio/storage @gramio/session
 
 #### Threaded Mode — pin the `@gramio/contexts` fork
 
-Telegram added [Threaded Mode](https://telegram.org/blog/threaded-conversations) for private chats (BotFather → Bot Settings → Threaded Mode). gramio's `SendMixin` skips auto-threading there, and `CallbackQueryContext` doesn't expose `threadId` at all. Fixes [PR'd upstream](https://github.com/gramiojs/contexts/pull/4); until merged, pin the fork in **your bot project's** `package.json` (pnpm only honors overrides at the workspace root, not transitively):
+Telegram added [Threaded Mode](https://telegram.org/blog/threaded-conversations) for private chats (BotFather → Bot Settings → Threaded Mode). gramio's `SendMixin` skips auto-threading there, and `CallbackQueryContext` doesn't expose `threadId` at all. Fixes [PR'd upstream](https://github.com/gramiojs/contexts/pull/4); until merged, pin the fork in **your bot project's** workspace root (pnpm only honors overrides at the root, not transitively — and pnpm ≥11 reads them from `pnpm-workspace.yaml`, not `package.json`):
 
-```json
-{
-  "pnpm": {
-    "overrides": {
-      "@gramio/contexts": "github:adriangalilea/contexts#local-build/auto-thread-private-chat-threaded-mode"
-    }
-  }
-}
+```yaml
+# pnpm-workspace.yaml
+overrides:
+  "@gramio/contexts": "github:adriangalilea/contexts#local-build/auto-thread-private-chat-threaded-mode"
 ```
 
 Then `pnpm install`. Every `ctx.send` / `ctx.sendDocument` / `ctx.reply` / etc. — including from callback handlers — will auto-forward `message_thread_id` and stay in the thread the message came from. If you don't use Threaded Mode, skip this.
