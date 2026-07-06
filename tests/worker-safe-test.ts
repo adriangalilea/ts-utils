@@ -24,6 +24,7 @@ const DIST = resolve(import.meta.dirname, "../dist");
 // re-exports kit) are intentionally absent.
 const SAFE_ENTRIES = [
 	"bot/ctx.js",
+	"bot/keys.js",
 	"bot/access-control.js",
 	"bot/allow-list.js",
 	"bot/callbacks.js",
@@ -76,4 +77,6 @@ for (const entry of SAFE_ENTRIES) {
 	await import(resolve(DIST, entry)); // import-time side effects scream here
 }
 
-console.log(`✓ worker-safe: ${SAFE_ENTRIES.length} entries, graphs clean, imports ran`);
+console.log(
+	`✓ worker-safe: ${SAFE_ENTRIES.length} entries, graphs clean, imports ran`,
+);

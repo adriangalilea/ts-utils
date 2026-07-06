@@ -80,7 +80,7 @@ import type { Storage } from "@gramio/storage";
 import { CallbackData, InlineKeyboard, Plugin } from "gramio";
 
 import { type Polyglot, say } from "../say/index.js";
-import { botStorageKey } from "./ctx.js";
+import { botStorageKey } from "./keys.js";
 
 // ─── public types ──────────────────────────────────────────────────
 

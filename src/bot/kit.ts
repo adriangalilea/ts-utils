@@ -44,7 +44,7 @@ import type { Storage } from "@gramio/storage";
 import type { Plugin as PluginType } from "gramio";
 import { type AnyBot, Plugin } from "gramio";
 import { kev } from "../platform/kev.js";
-import { botId } from "./ctx.js";
+import { botId } from "./keys.js";
 
 // ─── gracefulStart ─────────────────────────────────────────────────
 

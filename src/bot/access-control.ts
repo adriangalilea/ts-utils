@@ -103,7 +103,7 @@ import {
 } from "gramio";
 
 import { say } from "../say/index.js";
-import { botStorageKey, botSubKey } from "./ctx.js";
+import { botStorageKey, botSubKey } from "./keys.js";
 
 const FIRST_MSG_LIMIT = 200;
 const DEFAULT_THROTTLE_MS = 6 * 60 * 60 * 1000;

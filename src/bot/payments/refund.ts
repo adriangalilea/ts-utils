@@ -32,7 +32,7 @@ import { say } from "../../say/index.js";
 import { createLogger } from "../../universal/log.js";
 import { callbackNs } from "../callbacks.js";
 import type { BotCallbackCtx } from "../ctx.js";
-import { botStorageKey } from "../ctx.js";
+import { botStorageKey } from "../keys.js";
 import { rebuildVipAndPerks, revertCreditsForCharge } from "./state.js";
 import type { PaymentsStores } from "./stores.js";
 import type {

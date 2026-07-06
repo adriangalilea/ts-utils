@@ -25,7 +25,7 @@ import { InlineKeyboard } from "gramio";
 import { say } from "../../say/index.js";
 import { createLogger } from "../../universal/log.js";
 import { callbackNs } from "../callbacks.js";
-import { botStorageKey } from "../ctx.js";
+import { botStorageKey } from "../keys.js";
 import {
 	type BotPaymentsConfig,
 	DEFAULT_PRIVACY_URL,
