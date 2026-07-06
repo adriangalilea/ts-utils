@@ -127,8 +127,8 @@ async function main(): Promise<void> {
 		1500,
 	);
 	setTimeout(() => {
-		const z = accounts[2]!;
-		if (z.state === "done") return;
+		const z = accounts[2];
+		if (!z || z.state === "done") return;
 		z.state = "cooling";
 		z.coolUntil = Date.now() + 3000;
 	}, 1500);
