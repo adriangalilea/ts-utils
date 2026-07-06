@@ -1,7 +1,8 @@
 /**
  * `cli` — terminal presentation: aligned tables, key/value blocks, trees, a
- * semantic palette. Separate from `format` (which is universal value formatting,
- * for every layer) — this is terminal-scoped output.
+ * semantic palette, and live output (pinned region, spinner, progress bar).
+ * Separate from `format` (which is universal value formatting, for every
+ * layer) — this is terminal-scoped output.
  *
  * Colors come from `universal/log` and auto-disable on non-TTY / NO_COLOR, so a
  * `table()` renders colored in a terminal and as plain aligned text in a pipe,
@@ -20,34 +21,10 @@
  * ))
  */
 
-import { bold, cyan, dim, gray, green, red, yellow } from "../universal/log.js";
+import { padEndV, padStartV, ui, width } from "./text.js";
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escapes is the point
-const ANSI_RE = /\x1b\[[0-9;]*m/g;
-
-/** Visible width of a string — ANSI escape codes stripped, counted by code point. */
-export const width = (s: string): number => [...s.replace(ANSI_RE, "")].length;
-
-/** Truncate to `n` visible chars with an ellipsis. Assumes `s` is unstyled. */
-export const truncate = (s: string, n: number): string =>
-	width(s) > n ? `${[...s].slice(0, Math.max(0, n - 1)).join("")}…` : s;
-
-const padEndV = (s: string, n: number): string =>
-	s + " ".repeat(Math.max(0, n - width(s)));
-const padStartV = (s: string, n: number): string =>
-	" ".repeat(Math.max(0, n - width(s))) + s;
-
-/** Semantic palette — use these, not raw colors, so intent stays consistent. */
-export const ui = {
-	head: (s: string) => bold(s),
-	accent: (s: string) => cyan(s),
-	muted: (s: string) => dim(s),
-	ok: (s: string) => green(s),
-	warn: (s: string) => yellow(s),
-	bad: (s: string) => red(s),
-	/** ids / refs — de-emphasized monospace-ish */
-	ref: (s: string) => gray(s),
-};
+export * from "./live.js";
+export { clip, ui, width } from "./text.js";
 
 export interface TableOpts {
 	/** Column headers (bolded). */
@@ -120,9 +97,3 @@ export function tree(
 	const lead = " ".repeat(opts.indent ?? 0);
 	return [lead + label, ...children.map((c) => `${lead}  ${c}`)].join("\n");
 }
-
-/** A small inline badge, e.g. `badge('golden', ui.ok)`. */
-export const badge = (
-	text: string,
-	style: (s: string) => string = ui.muted,
-): string => style(text);
