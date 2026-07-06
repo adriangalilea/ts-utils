@@ -875,5 +875,20 @@ export class KevOps {
 	}
 }
 
-// Create singleton instance
-export const kev = new KevOps();
+// Lazy singleton. Construction walks the filesystem (initializeSmartDefaults
+// auto-discovers project/monorepo .env files), so it must NOT run at import
+// time: merely having kev in the module graph would crash filesystem-less
+// runtimes (Cloudflare Workers) and tax every consumer that never reads an
+// env var. The Proxy defers `new KevOps()` to the first property touch.
+let kevInstance: KevOps | undefined;
+export const kev: KevOps = new Proxy({} as KevOps, {
+	get(_, prop) {
+		kevInstance ??= new KevOps();
+		const v = kevInstance[prop as keyof KevOps];
+		return typeof v === "function" ? v.bind(kevInstance) : v;
+	},
+	set(_, prop, value) {
+		kevInstance ??= new KevOps();
+		return Reflect.set(kevInstance, prop, value);
+	},
+});
