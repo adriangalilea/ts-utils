@@ -10,11 +10,11 @@
 
 import { say } from "../../say/index.js";
 import { type BotMessageCtx, narrow } from "../ctx.js";
-import type { BotPaymentsConfig, PaymentsSession } from "./types.js";
-
-const FALLBACK_LANG = "en";
-
-type SessionLike = { pay?: PaymentsSession; language?: string };
+import {
+	type BotPaymentsConfig,
+	FALLBACK_LANG,
+	type SessionLike,
+} from "./types.js";
 
 /**
  * Mandatory `/paysupport` text. ToS §6.5 requires every bot accepting
@@ -27,22 +27,33 @@ type SessionLike = { pay?: PaymentsSession; language?: string };
 export const buildPaysupportText = (
 	cfg: BotPaymentsConfig<string>,
 	lang: string,
-): string =>
-	say(
+): string => {
+	// Where in THIS bot's UI the user manages their charges — the menu
+	// command name is app-specific, so the line is configurable
+	// (`cfg.paysupportHint`). Default names the library's own menu path.
+	const hint = say(
+		cfg.paysupportHint ?? {
+			en: "Open /settings → 💎 VIP → 📜 History to see your charges.",
+			es: "Abre /settings → 💎 VIP → 📜 Historial para ver tus cargos.",
+		},
+		lang,
+	);
+	return say(
 		{
 			en:
 				`Need help with a payment?\n\n` +
-				`• Open /settings → 💎 VIP → 📜 History to see your charges and request a refund.\n` +
-				`• Or contact: ${cfg.paysupport}\n\n` +
+				`• ${hint}\n` +
+				`• For a refund or any charge issue, contact ${cfg.paysupport}.\n\n` +
 				`Refund disputes are handled by the admin within Telegram.`,
 			es:
 				`¿Necesitas ayuda con un pago?\n\n` +
-				`• Abre /settings → 💎 VIP → 📜 Historial para ver tus cargos y solicitar reembolso.\n` +
-				`• O contacta: ${cfg.paysupport}\n\n` +
+				`• ${hint}\n` +
+				`• Para un reembolso o cualquier problema con un cargo, contacta ${cfg.paysupport}.\n\n` +
 				`Las disputas las gestiona el admin dentro de Telegram.`,
 		},
 		lang,
 	);
+};
 
 /**
  * Returns the `/paysupport` command handler. Pure factory — `plugin.ts`

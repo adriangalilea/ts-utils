@@ -32,7 +32,7 @@ import { say } from "../../say/index.js";
 import { createLogger } from "../../universal/log.js";
 import { callbackNs } from "../callbacks.js";
 import type { BotCallbackCtx } from "../ctx.js";
-import { botStorageKey } from "../kit.js";
+import { botStorageKey } from "../ctx.js";
 import { rebuildVipAndPerks, revertCreditsForCharge } from "./state.js";
 import type { PaymentsStores } from "./stores.js";
 import type {
@@ -140,6 +140,10 @@ const applyRefundToUser = async (
 	const charges = (
 		await Promise.all(chargeIds.map((id) => stores.charges.get(ctx, id)))
 	).filter((c): c is ChargeRecord => c !== undefined);
+	// userCharges().list() returns newest-first, but deriveState/rebuildVipAndPerks
+	// assume oldest-first (vip is last-write-wins as it iterates). Sort ascending by receivedAt so a
+	// refund rebuild restores the newest surviving subscription, not the oldest.
+	charges.sort((a, b) => a.receivedAt - b.receivedAt);
 	rebuildVipAndPerks(session, charges);
 	full.pay = session.pay;
 	await storage.set(botStorageKey(ctx, userId), full);
@@ -193,6 +197,30 @@ const adminLangOfUser = async (
 };
 
 // ─── callback handlers ─────────────────────────────────────────────
+
+// Admin-only guard + charge lookup shared by approve/deny. Answers the
+// query and returns undefined on either failure; caller does `if (!charge) return`.
+const requireAdminCharge = async (
+	ctx: CommonCtx & { queryData: { cid: string } },
+	opts: RefundHandlersOptions,
+	aLang: string,
+): Promise<ChargeRecord | undefined> => {
+	if (!ctx.isAdmin) {
+		await ctx.answer({
+			text: say({ en: "Admin only.", es: "Solo admin." }, aLang),
+			show_alert: true,
+		});
+		return undefined;
+	}
+	const charge = await opts.stores.charges.get(ctx, ctx.queryData.cid);
+	if (!charge) {
+		await ctx.answer({
+			text: say({ en: "Charge not found.", es: "Cargo no encontrado." }, aLang),
+		});
+		return undefined;
+	}
+	return charge;
+};
 
 export type RefundHandlersOptions = {
 	stores: PaymentsStores;
@@ -297,23 +325,8 @@ export const buildRefundApproveHandler =
 	(opts: RefundHandlersOptions) =>
 	async (ctx: CommonCtx & { queryData: { cid: string } }): Promise<void> => {
 		const aLang = ctxLang(ctx);
-		if (!ctx.isAdmin) {
-			await ctx.answer({
-				text: say({ en: "Admin only.", es: "Solo admin." }, aLang),
-				show_alert: true,
-			});
-			return;
-		}
-		const charge = await opts.stores.charges.get(ctx, ctx.queryData.cid);
-		if (!charge) {
-			await ctx.answer({
-				text: say(
-					{ en: "Charge not found.", es: "Cargo no encontrado." },
-					aLang,
-				),
-			});
-			return;
-		}
+		const charge = await requireAdminCharge(ctx, opts, aLang);
+		if (!charge) return;
 		if (charge.paysupportState === "refunded") {
 			await ctx.answer({
 				text: say({ en: "Already refunded.", es: "Ya reembolsado." }, aLang),
@@ -418,23 +431,8 @@ export const buildRefundDenyHandler =
 	(opts: RefundHandlersOptions) =>
 	async (ctx: CommonCtx & { queryData: { cid: string } }): Promise<void> => {
 		const aLang = ctxLang(ctx);
-		if (!ctx.isAdmin) {
-			await ctx.answer({
-				text: say({ en: "Admin only.", es: "Solo admin." }, aLang),
-				show_alert: true,
-			});
-			return;
-		}
-		const charge = await opts.stores.charges.get(ctx, ctx.queryData.cid);
-		if (!charge) {
-			await ctx.answer({
-				text: say(
-					{ en: "Charge not found.", es: "Cargo no encontrado." },
-					aLang,
-				),
-			});
-			return;
-		}
+		const charge = await requireAdminCharge(ctx, opts, aLang);
+		if (!charge) return;
 
 		charge.paysupportState = "none";
 		await opts.stores.charges.set(ctx, charge.chargeId, charge);

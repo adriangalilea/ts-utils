@@ -22,16 +22,14 @@
 import { say } from "../../say/index.js";
 import { type BotCallbackCtx, narrow } from "../ctx.js";
 import { presentInvoice } from "./invoice.js";
-import type {
-	BotPaymentsConfig,
-	PaymentsSession,
-	ProductCatalog,
+import {
+	type BotPaymentsConfig,
+	FALLBACK_LANG,
+	type PaymentsSession,
+	type ProductCatalog,
+	type SessionLike,
 } from "./types.js";
 import { persistWaiverOnSession } from "./waiver.js";
-
-const FALLBACK_LANG = "en";
-
-type SessionLike = { pay?: PaymentsSession; language?: string };
 
 // ─── waiver consent ───────────────────────────────────────────────
 

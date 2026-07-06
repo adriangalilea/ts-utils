@@ -103,7 +103,7 @@ import {
 } from "gramio";
 
 import { say } from "../say/index.js";
-import { botStorageKey, botSubKey } from "./kit.js";
+import { botStorageKey, botSubKey } from "./ctx.js";
 
 const FIRST_MSG_LIMIT = 200;
 const DEFAULT_THROTTLE_MS = 6 * 60 * 60 * 1000;
@@ -423,6 +423,50 @@ const langOfUser = async (
 const ctxLang = (ctx: { session: SessionLike }): string =>
 	ctx.session.language ?? FALLBACK_LANG;
 
+// ─── callback guard helpers ────────────────────────────────────────
+
+type AdminAnswerCtx = {
+	isAdmin: boolean;
+	session: SessionLike;
+	answer: (params: { text: string; show_alert?: boolean }) => Promise<unknown>;
+};
+
+// Resolve the caller's lang for admins; for non-admins send the standard
+// rejection alert and return null so the caller bails. Shares one check
+// across the five admin callback handlers.
+const adminGuard = async (ctx: AdminAnswerCtx): Promise<string | null> => {
+	const aLang = ctxLang(ctx);
+	if (!ctx.isAdmin) {
+		await ctx.answer({
+			text: say({ en: "Admin only.", es: "Solo admin." }, aLang),
+			show_alert: true,
+		});
+		return null;
+	}
+	return aLang;
+};
+
+// Read the target uid and load its record; send the "Not found." answer
+// and return null when absent. Shared by the three mutating handlers.
+const loadOrNotFound = async (
+	storage: Storage,
+	ctx: BotCtx & {
+		queryData: { uid: number };
+		answer: (params: { text: string }) => Promise<unknown>;
+	},
+	aLang: string,
+): Promise<AccessRecord | null> => {
+	const uid = ctx.queryData.uid;
+	const rec = await loadAccess(storage, ctx, uid);
+	if (!rec) {
+		await ctx.answer({
+			text: say({ en: "Not found.", es: "No encontrado." }, aLang),
+		});
+		return null;
+	}
+	return rec;
+};
+
 // ─── plugin ────────────────────────────────────────────────────────
 
 export const accessControl = (opts: AccessControlOptions) => {
@@ -530,6 +574,12 @@ export const accessControl = (opts: AccessControlOptions) => {
 				// Only message-shaped events have .text/.chat for our notification.
 				if (!ctx.is("message")) return;
 
+				// Access is a private-DM concern. Drop unauthorized GROUP messages
+				// silently rather than seeding a pending request + DMing the admin —
+				// otherwise every non-approved member posting in a group the bot
+				// reads spams the admin with access requests.
+				if (ctx.chat?.type !== "private") return;
+
 				const userId = ctx.from.id;
 				const existing = ctx.session.access;
 				const now = Date.now();
@@ -612,18 +662,11 @@ export const accessControl = (opts: AccessControlOptions) => {
 			})
 			// ─── admin actions ────────────────────────────────────────
 			.callbackQuery(acApprove, async (ctx) => {
-				const aLang = ctxLang(ctx);
-				if (!ctx.isAdmin)
-					return ctx.answer({
-						text: say({ en: "Admin only.", es: "Solo admin." }, aLang),
-						show_alert: true,
-					});
+				const aLang = await adminGuard(ctx);
+				if (aLang === null) return;
 				const uid = ctx.queryData.uid;
-				const rec = await loadAccess(storage, ctx, uid);
-				if (!rec)
-					return ctx.answer({
-						text: say({ en: "Not found.", es: "No encontrado." }, aLang),
-					});
+				const rec = await loadOrNotFound(storage, ctx, aLang);
+				if (!rec) return;
 
 				const wasDenied = rec.status === "denied";
 				const wasPending = rec.status === "pending";
@@ -681,18 +724,11 @@ export const accessControl = (opts: AccessControlOptions) => {
 				opts.onApprove?.({ userId: uid, approvedBy: ctx.adminId });
 			})
 			.callbackQuery(acDeny, async (ctx) => {
-				const aLang = ctxLang(ctx);
-				if (!ctx.isAdmin)
-					return ctx.answer({
-						text: say({ en: "Admin only.", es: "Solo admin." }, aLang),
-						show_alert: true,
-					});
+				const aLang = await adminGuard(ctx);
+				if (aLang === null) return;
 				const uid = ctx.queryData.uid;
-				const rec = await loadAccess(storage, ctx, uid);
-				if (!rec)
-					return ctx.answer({
-						text: say({ en: "Not found.", es: "No encontrado." }, aLang),
-					});
+				const rec = await loadOrNotFound(storage, ctx, aLang);
+				if (!rec) return;
 
 				const wasPending = rec.status === "pending";
 				rec.status = "denied";
@@ -739,18 +775,11 @@ export const accessControl = (opts: AccessControlOptions) => {
 				opts.onDeny?.({ userId: uid, deniedBy: ctx.adminId });
 			})
 			.callbackQuery(acRevoke, async (ctx) => {
-				const aLang = ctxLang(ctx);
-				if (!ctx.isAdmin)
-					return ctx.answer({
-						text: say({ en: "Admin only.", es: "Solo admin." }, aLang),
-						show_alert: true,
-					});
+				const aLang = await adminGuard(ctx);
+				if (aLang === null) return;
 				const uid = ctx.queryData.uid;
-				const rec = await loadAccess(storage, ctx, uid);
-				if (!rec)
-					return ctx.answer({
-						text: say({ en: "Not found.", es: "No encontrado." }, aLang),
-					});
+				const rec = await loadOrNotFound(storage, ctx, aLang);
+				if (!rec) return;
 
 				rec.status = "denied";
 				rec.deniedAt = Date.now();
@@ -781,22 +810,14 @@ export const accessControl = (opts: AccessControlOptions) => {
 				await renderView(ctx, storage, defaults, "approved", aLang);
 			})
 			.callbackQuery(acView, async (ctx) => {
-				const aLang = ctxLang(ctx);
-				if (!ctx.isAdmin)
-					return ctx.answer({
-						text: say({ en: "Admin only.", es: "Solo admin." }, aLang),
-						show_alert: true,
-					});
+				const aLang = await adminGuard(ctx);
+				if (aLang === null) return;
 				await ctx.answer({});
 				await renderView(ctx, storage, defaults, ctx.queryData.v, aLang);
 			})
 			.callbackQuery(acClose, async (ctx) => {
-				const aLang = ctxLang(ctx);
-				if (!ctx.isAdmin)
-					return ctx.answer({
-						text: say({ en: "Admin only.", es: "Solo admin." }, aLang),
-						show_alert: true,
-					});
+				const aLang = await adminGuard(ctx);
+				if (aLang === null) return;
 				await ctx.answer({});
 				try {
 					await ctx.message?.delete();
@@ -828,6 +849,14 @@ export const accessControl = (opts: AccessControlOptions) => {
 
 // ─── views ─────────────────────────────────────────────────────────
 
+// Status bucket labels, defined once so the summary view and the list
+// headers can't drift apart. Resolved via say() at each call site.
+const statusLabel = {
+	approved: { en: "Approved", es: "Aprobados" },
+	pending: { en: "Pending", es: "Pendientes" },
+	denied: { en: "Denied", es: "Denegados" },
+} as const;
+
 type ViewableCtx = BotCtx & {
 	editText: (
 		text: string,
@@ -844,13 +873,9 @@ const renderView = async (
 ): Promise<void> => {
 	const idx = await loadIndex(storage, ctx);
 	const v =
-		view === "approved"
-			? await listView(storage, ctx, idx, "approved", defaults, lang)
-			: view === "pending"
-				? await listView(storage, ctx, idx, "pending", defaults, lang)
-				: view === "denied"
-					? await listView(storage, ctx, idx, "denied", defaults, lang)
-					: mainView(idx, defaults, lang);
+		view === "approved" || view === "pending" || view === "denied"
+			? await listView(storage, ctx, idx, view, defaults, lang)
+			: mainView(idx, defaults, lang);
 	try {
 		await ctx.editText(v.text, { reply_markup: v.keyboard });
 	} catch {
@@ -863,9 +888,9 @@ const mainView = (
 	defaults: ReadonlySet<number>,
 	lang: string,
 ) => {
-	const approved = say({ en: "Approved", es: "Aprobados" }, lang);
-	const pending = say({ en: "Pending", es: "Pendientes" }, lang);
-	const denied = say({ en: "Denied", es: "Denegados" }, lang);
+	const approved = say(statusLabel.approved, lang);
+	const pending = say(statusLabel.pending, lang);
+	const denied = say(statusLabel.denied, lang);
 
 	const text = [
 		say({ en: "🔐 Access Control", es: "🔐 Access Control" }, lang),
@@ -917,12 +942,7 @@ const listView = async (
 
 	const headerEmoji =
 		filter === "approved" ? "✅" : filter === "pending" ? "⏳" : "❌";
-	const headerLabel =
-		filter === "approved"
-			? say({ en: "Approved", es: "Aprobados" }, lang)
-			: filter === "pending"
-				? say({ en: "Pending", es: "Pendientes" }, lang)
-				: say({ en: "Denied", es: "Denegados" }, lang);
+	const headerLabel = say(statusLabel[filter], lang);
 
 	const back = say({ en: "⬅️ Back", es: "⬅️ Volver" }, lang);
 

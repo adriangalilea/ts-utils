@@ -33,6 +33,7 @@
  *     needs menu-state encoding in callback data.
  */
 
+import type { Polyglot } from "../../say/index.js";
 import { say } from "../../say/index.js";
 import { narrow } from "../ctx.js";
 import type { MenuCtx, MenuItem } from "../menu.js";
@@ -61,11 +62,20 @@ type WithPaySession = {
 const ctxLang = (ctx: MenuCtx): Lang =>
 	narrow<WithPaySession>(ctx).session?.language ?? FALLBACK_LANG;
 
-const ctxPay = (ctx: MenuCtx): PaymentsSession | undefined =>
-	narrow<WithPaySession>(ctx).session?.pay;
+// Treat an expired VIP as free everywhere in the menu. derive.ts does lazy expiry
+// without clearing the session cache, so `pay.vip` lingers after expiresAt; a raw read would label
+// the lapsed rung "current" and hide its renew button (visible: rung !== rank). Strip the expired
+// vip here (keeping credits/perks) so every downstream pay.vip check sees the free state.
+const ctxPay = (ctx: MenuCtx): PaymentsSession | undefined => {
+	const pay = narrow<WithPaySession>(ctx).session?.pay;
+	if (pay?.vip && pay.vip.expiresAt * 1000 <= Date.now()) {
+		return { ...pay, vip: undefined };
+	}
+	return pay;
+};
 
 const resolveName = (
-	value: { [k: string]: string } | undefined,
+	value: Polyglot<string> | undefined,
 	lang: Lang,
 ): string => {
 	if (!value) return "";
@@ -89,9 +99,7 @@ export const buildPaymentsMenuItem = (args: {
 		}
 		// Active subscription — show name + days remaining.
 		const rung = catalog.vip[pay.vip.rung - 1];
-		const name = rung
-			? resolveName(rung.name as { [k: string]: string }, lang)
-			: "VIP";
+		const name = rung ? resolveName(rung.name, lang) : "VIP";
 		const daysLeft = Math.max(
 			0,
 			Math.ceil((pay.vip.expiresAt * 1000 - Date.now()) / 86_400_000),
@@ -138,7 +146,7 @@ export const buildPaymentsMenuItem = (args: {
 			id: menuId(rung.id), // e.g. 'vip_1' — path-safe menu id
 			label: (ctx) => {
 				const lang = ctxLang(ctx);
-				const name = resolveName(rung.name as { [k: string]: string }, lang);
+				const name = resolveName(rung.name, lang);
 				const pay = ctxPay(ctx);
 				if (pay?.vip?.rung === rung.rank) {
 					return say(
@@ -186,11 +194,9 @@ export const buildPaymentsMenuItem = (args: {
 			label: (ctx) => {
 				const lang = ctxLang(ctx);
 				const unit = catalog.creditsUnit
-					? resolveName(catalog.creditsUnit as { [k: string]: string }, lang)
+					? resolveName(catalog.creditsUnit, lang)
 					: "credits";
-				const explicit = pack.name
-					? resolveName(pack.name as { [k: string]: string }, lang)
-					: undefined;
+				const explicit = pack.name ? resolveName(pack.name, lang) : undefined;
 				const body = explicit ?? `+${pack.creditsGranted} ${unit}`;
 				return `💬 ${body} — ${pack.xtr} ⭐`;
 			},
@@ -212,7 +218,7 @@ export const buildPaymentsMenuItem = (args: {
 			id: menuId(perk.id), // e.g. 'perks_voice_mode' — path-safe
 			label: (ctx) => {
 				const lang = ctxLang(ctx);
-				const name = resolveName(perk.name as { [k: string]: string }, lang);
+				const name = resolveName(perk.name, lang);
 				return `🎁 ${name} — ${perk.xtr} ⭐`;
 			},
 			visible: (ctx) => !ctxPay(ctx)?.perks?.[perk.key],

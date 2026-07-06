@@ -58,7 +58,7 @@
  */
 
 import type { session } from "@gramio/session";
-import { CallbackData, type DeriveDefinitions, Plugin } from "gramio";
+import { type DeriveDefinitions, Plugin } from "gramio";
 
 import { type Polyglot, say } from "../say/index.js";
 import type { MenuItem } from "./menu.js";
@@ -314,9 +314,7 @@ const autonym = (lang: string): string => {
 
 const defaultLabel = (lang: string) => `${flagFor(lang)} ${autonym(lang)}`;
 
-// ─── callback schema ───────────────────────────────────────────────
-
-const _setLangCb = new CallbackData("lang").string("code");
+// The picker packs its own callback data via menuItem — no schema needed here.
 
 // ─── feature factory ───────────────────────────────────────────────
 
@@ -380,9 +378,11 @@ export const language = <const Langs extends readonly string[]>(
 	const menuItem: MenuItem = {
 		id: "lang",
 		label: menuLabel,
-		submenu: canonical.map((l) => ({
+		submenu: canonical.map((l, i, arr) => ({
 			id: l,
 			label: labels[l] ?? defaultLabel(l),
+			// Pack the picker two languages per row (break after each odd index).
+			keepRow: i % 2 === 0 && i < arr.length - 1,
 			// The currently-selected language renders blue (Telegram's
 			// `primary` style); the rest stay at app default. Replaces the
 			// old `●` / `○` markers — same signal, native Telegram styling.

@@ -11,7 +11,7 @@
  *
  * ## Privacy & data submenu
  *
- * The menu always renders a single `🔒 Privacy & data` button at root
+ * The menu always renders a single `🛡️ Privacy & data` button at root
  * which navigates to a virtual submenu containing the privacy policy
  * link plus (when `personalData: { storage }` is passed):
  *
@@ -80,7 +80,7 @@ import type { Storage } from "@gramio/storage";
 import { CallbackData, InlineKeyboard, Plugin } from "gramio";
 
 import { type Polyglot, say } from "../say/index.js";
-import { botStorageKey } from "./kit.js";
+import { botStorageKey } from "./ctx.js";
 
 // ─── public types ──────────────────────────────────────────────────
 
@@ -114,10 +114,10 @@ export type MenuCtx = {
 		params?: object,
 	) => Promise<unknown>;
 	answer?: (params: object) => Promise<unknown>;
-	editText?: (
-		text: string | { toString(): string },
-		params?: object,
-	) => Promise<unknown>;
+	// gramio 0.12 narrowed ctx.editText's text param to `string | undefined`;
+	// the menu only ever passes strings, so `string` keeps the real gramio
+	// ctx assignable to MenuCtx on both 0.10 and 0.12.
+	editText?: (text: string, params?: object) => Promise<unknown>;
 };
 
 /**
@@ -222,6 +222,10 @@ export type MenuItem =
 			order?: number;
 			visible?: Predicate;
 			style?: StyleResolver;
+			/** Render on the same row as the following item (no row break after this button). */
+			keepRow?: boolean;
+			/** Render at the bottom of the root menu, below the Privacy & data button. */
+			rootExtra?: boolean;
 			/** Re-render the menu message after the action runs. */
 			refresh?: boolean;
 			/**
@@ -252,6 +256,10 @@ export type MenuItem =
 			order?: number;
 			visible?: Predicate;
 			style?: StyleResolver;
+			/** Render on the same row as the following item (no row break after this button). */
+			keepRow?: boolean;
+			/** Render at the bottom of the root menu, below the Privacy & data button. */
+			rootExtra?: boolean;
 	  }
 	| {
 			id: string;
@@ -260,6 +268,10 @@ export type MenuItem =
 			order?: number;
 			visible?: Predicate;
 			style?: StyleResolver;
+			/** Render on the same row as the following item (no row break after this button). */
+			keepRow?: boolean;
+			/** Render at the bottom of the root menu, below the Privacy & data button. */
+			rootExtra?: boolean;
 	  };
 
 export type PersonalDataOptions = {
@@ -303,12 +315,19 @@ export type BotMenuOptions = {
 	adminContact: string;
 	/**
 	 * Enables 🗑 Forget my data and 📥 Export my data buttons inside
-	 * the `🔒 Privacy & data` submenu. Pass the storage instance
+	 * the `🛡️ Privacy & data` submenu. Pass the storage instance
 	 * backing your `session()`. If omitted, the submenu still appears
 	 * but only shows the privacy policy link (use this for bots with
 	 * no per-user state beyond what Telegram's standard policy covers).
 	 */
 	personalData?: PersonalDataOptions;
+	/**
+	 * Allow the menu to open and operate in group chats. Off by default: with
+	 * `personalData` set the menu is private-only (data controls shouldn't surface
+	 * in a group). Turn on when the menu hosts a group-scoped control (e.g. a
+	 * per-group toggle) that must be reachable from inside the group.
+	 */
+	allowInGroups?: boolean;
 };
 
 const DEFAULT_COMMAND = "settings";
@@ -354,6 +373,7 @@ type ResolvedOpts = {
 	header: Label;
 	adminContact: string;
 	personalData: ResolvedPersonalData | null;
+	allowInGroups: boolean;
 };
 
 // Recursively validate that no MenuItem id contains `.` — the menu's
@@ -395,6 +415,7 @@ export class BotMenu {
 			personalData: opts.personalData
 				? { storage: opts.personalData.storage }
 				: null,
+			allowInGroups: opts.allowInGroups ?? false,
 		};
 	}
 
@@ -570,18 +591,18 @@ const renderPrivacySubmenu = (menu: BotMenu, ctx: MenuCtx): InlineKeyboard => {
 };
 
 const renderKeyboard = (
-	_menu: BotMenu,
 	items: MenuItem[],
 	ctx: MenuCtx,
 	parentPath: string[],
 ): InlineKeyboard => {
 	const kb = new InlineKeyboard();
+	const isRoot = parentPath.length === 0;
 
 	const sorted = [...items]
 		.filter((i) => (i.visible ? i.visible(ctx) : true))
 		.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-	for (const item of sorted) {
+	const addButton = (item: MenuItem) => {
 		const path = [...parentPath, item.id].join(".");
 		const label = labelOf(item.label, ctx);
 		const style = styleOf(item.style, ctx);
@@ -594,18 +615,27 @@ const renderKeyboard = (
 		} else {
 			kb.text(label, navCb.pack({ path }), opts);
 		}
-		kb.row();
+		// `keepRow` packs this button with the next one on the same row.
+		if (!item.keepRow) kb.row();
+	};
+
+	// `rootExtra` items render at the bottom (below Privacy & data), not here.
+	for (const item of sorted) {
+		if (isRoot && item.rootExtra) continue;
+		addButton(item);
 	}
 
 	const lang = ctxLang(ctx);
-	if (parentPath.length === 0) {
+	if (isRoot) {
 		// Privacy + Forget + Export live one tap away to keep the root
 		// view focused on user-defined items.
 		kb.text(
-			say({ en: "🔒 Privacy & data", es: "🔒 Privacidad y datos" }, lang),
+			say({ en: "🛡️ Privacy & data", es: "🛡️ Privacidad y datos" }, lang),
 			navCb.pack({ path: PRIVACY_PATH }),
 		);
 		kb.row();
+		// Bot-supplied bottom rows (e.g. group-scoped controls) sit below Privacy & data.
+		for (const item of sorted) if (item.rootExtra) addButton(item);
 		// Root has no Back — Close gets its own row.
 		kb.text(say({ en: "✖️ Close", es: "✖️ Cerrar" }, lang), closeCb.pack({}));
 	} else {
@@ -637,15 +667,42 @@ const renderConfirmForget = (lang: string): InlineKeyboard =>
 const buildMenuPlugin = (menu: BotMenu) => {
 	const { command, description, header, personalData, adminContact } =
 		menu._opts;
+	const privateOnlyText = (lang: string) =>
+		say(
+			{
+				en: "DM me to change settings or manage your data.",
+				es: "Escríbeme por privado para cambiar ajustes o gestionar tus datos.",
+			},
+			lang,
+		);
+	const isPrivateContext = (ctx: MenuCtx): boolean => {
+		const messageChatType = (
+			ctx.message as { chat?: { type?: string } } | undefined
+		)?.chat?.type;
+		return (ctx.chat?.type ?? messageChatType) === "private";
+	};
+	const guardPrivate = async (ctx: MenuCtx): Promise<boolean> => {
+		if (!personalData || menu._opts.allowInGroups || isPrivateContext(ctx))
+			return true;
+		const lang = ctxLang(ctx);
+		if (ctx.answer) {
+			await ctx.answer({ text: privateOnlyText(lang), show_alert: true });
+		} else if (ctx.send) {
+			await ctx.send(privateOnlyText(lang));
+		}
+		return false;
+	};
 
 	return (
 		new Plugin("@adriangalilea/utils/bot/menu")
 			.command(command, { description }, async (ctx) => {
-				const kb = renderKeyboard(menu, menu._items, ctx, []);
+				if (!(await guardPrivate(ctx))) return;
+				const kb = renderKeyboard(menu._items, ctx, []);
 				await ctx.send(labelOf(header, ctx), { reply_markup: kb });
 			})
 			// Navigate (root / submenu)
 			.callbackQuery(navCb, async (ctx) => {
+				if (!(await guardPrivate(ctx))) return;
 				const lang = ctxLang(ctx);
 				const raw = ctx.queryData.path;
 				// Virtual privacy submenu — rendered separately because its
@@ -669,7 +726,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 					return;
 				}
 				await ctx.answer({});
-				const kb = renderKeyboard(menu, items, ctx, segments);
+				const kb = renderKeyboard(items, ctx, segments);
 				try {
 					await ctx.editText(labelOf(header, ctx), { reply_markup: kb });
 				} catch {
@@ -678,6 +735,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 			})
 			// Action items + the forget pre-confirmation
 			.callbackQuery(actCb, async (ctx) => {
+				if (!(await guardPrivate(ctx))) return;
 				const lang = ctxLang(ctx);
 				const raw = ctx.queryData.path;
 				if (raw === "_forget") {
@@ -700,7 +758,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 							{ reply_markup: renderConfirmForget(lang) },
 						);
 					} catch {
-						/* ignore */
+						// message too old to edit
 					}
 					return;
 				}
@@ -738,7 +796,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 								.text(cancelLabel, navCb.pack({ path: "_root" })),
 						});
 					} catch {
-						/* message too old to edit */
+						// message too old to edit
 					}
 					return;
 				}
@@ -758,7 +816,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 					try {
 						await ctx.answer({});
 					} catch {
-						/* ignore — Telegram already closed the query */
+						// query already closed by Telegram
 					}
 					throw e;
 				}
@@ -779,7 +837,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 					const parentPath = segments.slice(0, -1);
 					const items = itemsForPath(menu._items, parentPath);
 					if (items) {
-						const kb = renderKeyboard(menu, items, ctx, parentPath);
+						const kb = renderKeyboard(items, ctx, parentPath);
 						try {
 							await ctx.editText(labelOf(header, ctx), { reply_markup: kb });
 						} catch {
@@ -792,6 +850,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 			// action with the same return-value contract as actCb, then
 			// navigate back to root so the user lands in a meaningful state.
 			.callbackQuery(actConfirmCb, async (ctx) => {
+				if (!(await guardPrivate(ctx))) return;
 				const lang = ctxLang(ctx);
 				const raw = ctx.queryData.path;
 				const segments = raw.split(".");
@@ -813,7 +872,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 					try {
 						await ctx.answer({});
 					} catch {
-						/* ignore */
+						// query already closed by Telegram
 					}
 					throw e;
 				}
@@ -829,15 +888,16 @@ const buildMenuPlugin = (menu: BotMenu) => {
 				// Always navigate back to root after a confirmed destructive
 				// action — the previous context (where the user tapped) might
 				// not make sense anymore.
-				const kb = renderKeyboard(menu, menu._items, ctx, []);
+				const kb = renderKeyboard(menu._items, ctx, []);
 				try {
 					await ctx.editText(labelOf(header, ctx), { reply_markup: kb });
 				} catch {
-					/* ignore */
+					// message too old to edit
 				}
 			})
 			// Forget — confirm path
 			.callbackQuery(forgetConfirmCb, async (ctx) => {
+				if (!(await guardPrivate(ctx))) return;
 				const lang = ctxLang(ctx);
 				if (!personalData) {
 					await ctx.answer({
@@ -868,7 +928,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 							),
 						);
 					} catch {
-						/* ignore */
+						// message too old to edit
 					}
 				} catch (e) {
 					console.error("[menu] /forget failed", e);
@@ -887,6 +947,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 				}
 			})
 			.callbackQuery(forgetCancelCb, async (ctx) => {
+				if (!(await guardPrivate(ctx))) return;
 				await ctx.answer({});
 				// Cancel lands back on the privacy submenu (where the user
 				// came from), not root — saves the re-navigation tap.
@@ -894,11 +955,12 @@ const buildMenuPlugin = (menu: BotMenu) => {
 				try {
 					await ctx.editText(labelOf(header, ctx), { reply_markup: kb });
 				} catch {
-					/* ignore */
+					// message too old to edit
 				}
 			})
 			// Export — JSON file with the user's whole session record
 			.callbackQuery(exportCb, async (ctx) => {
+				if (!(await guardPrivate(ctx))) return;
 				const lang = ctxLang(ctx);
 				if (!personalData) {
 					await ctx.answer({
@@ -950,6 +1012,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 			})
 			// Close — dismiss the settings message entirely.
 			.callbackQuery(closeCb, async (ctx) => {
+				if (!(await guardPrivate(ctx))) return;
 				await ctx.answer({});
 				try {
 					await ctx.message?.delete();

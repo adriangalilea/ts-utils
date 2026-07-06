@@ -17,8 +17,9 @@ import { chargeRecordSchema, payoutRecordSchema } from "./schemas.js";
 import type { ChargeRecord, PayoutRecord } from "./types.js";
 
 /** Cap on the per-user `pay:user:<id>:charges` index. Older charges
- *  drop off the list but remain in `pay:charge:<id>` for the gestor
- *  export (which scans charges directly, not the index). */
+ *  drop off the list but remain in `pay:charge:<id>`. The gestor
+ *  export walks this index (`exportPayoutsForUsers`), so capped users
+ *  silently drop their oldest charges from the export. */
 const USER_CHARGES_CAP = 100;
 
 export type PaymentsStores = {
@@ -27,9 +28,10 @@ export type PaymentsStores = {
 	/** `pay:idem:<chargeId>` — fulfillment idempotency sentinel. */
 	readonly idempotency: ReturnType<typeof botSentinel>;
 	/**
-	 * `pay:user:<userId>:charges` — newest-first cap of chargeIds for
-	 * `/refunds` listing + menu history (v2). Factory because the key
-	 * is per-user.
+	 * `pay:user:<userId>:charges` — newest-first capped chargeIds.
+	 * Consumed by `/refunds` listing, menu history (v2), the gestor
+	 * export (`exportPayoutsForUsers`), and `admin.listCharges`.
+	 * Factory because the key is per-user.
 	 */
 	readonly userCharges: (userId: number) => ReturnType<typeof botIndex>;
 	/** `pay:payout:<batchId>` — Fragment payout record. */

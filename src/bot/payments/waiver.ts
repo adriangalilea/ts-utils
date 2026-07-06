@@ -25,15 +25,15 @@ import { InlineKeyboard } from "gramio";
 import { say } from "../../say/index.js";
 import { createLogger } from "../../universal/log.js";
 import { callbackNs } from "../callbacks.js";
-import { botStorageKey } from "../kit.js";
+import { botStorageKey } from "../ctx.js";
 import {
 	type BotPaymentsConfig,
 	DEFAULT_PRIVACY_URL,
+	FALLBACK_LANG,
 	type PaymentsSession,
 	type WaiverRecord,
 } from "./types.js";
 
-const FALLBACK_LANG = "en";
 const log = createLogger("bot/payments");
 
 const cb = callbackNs("pay");

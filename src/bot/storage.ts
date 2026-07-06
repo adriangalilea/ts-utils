@@ -200,15 +200,15 @@ export const botIndex = (
 	opts: BotIndexOptions = {},
 ): BotIndex => {
 	const cap = opts.capacity;
+	// Single source for the stored shape (string[]) and empty-default.
+	const read = async (ctx: BotIdCtx): Promise<string[]> =>
+		((await storage.get(buildKey(ctx, prefix))) as string[] | undefined) ?? [];
 	return {
 		keyFor: (ctx) => buildKey(ctx, prefix),
-		list: async (ctx) => {
-			const key = buildKey(ctx, prefix);
-			return ((await storage.get(key)) as string[] | undefined) ?? [];
-		},
+		list: (ctx) => read(ctx),
 		prepend: async (ctx, id) => {
 			const key = buildKey(ctx, prefix);
-			const existing = ((await storage.get(key)) as string[] | undefined) ?? [];
+			const existing = await read(ctx);
 			// De-dup: remove if present, then unshift. Cap at the end.
 			const filtered = existing.filter((x) => x !== id);
 			filtered.unshift(id);
@@ -221,7 +221,7 @@ export const botIndex = (
 		},
 		remove: async (ctx, id) => {
 			const key = buildKey(ctx, prefix);
-			const existing = ((await storage.get(key)) as string[] | undefined) ?? [];
+			const existing = await read(ctx);
 			const filtered = existing.filter((x) => x !== id);
 			if (filtered.length === existing.length) return false;
 			await storage.set(key, filtered);

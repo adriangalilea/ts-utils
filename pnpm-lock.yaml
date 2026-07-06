@@ -16,7 +16,7 @@ importers:
         version: 0.8.0(marked@15.0.12)
       '@gramio/session':
         specifier: ^0.2.0
-        version: 0.2.0(gramio@0.10.0(inspectable@3.0.2)(marked@15.0.12))
+        version: 0.2.0(gramio@0.12.0(inspectable@3.0.2)(marked@15.0.12))
       '@gramio/storage':
         specifier: ^2.0.1
         version: 2.0.1
@@ -24,8 +24,8 @@ importers:
         specifier: ^24.3.0
         version: 24.3.0
       gramio:
-        specifier: ^0.10.0
-        version: 0.10.0(inspectable@3.0.2)(marked@15.0.12)
+        specifier: ^0.12.0
+        version: 0.12.0(inspectable@3.0.2)(marked@15.0.12)
       marked:
         specifier: ^15.0.11
         version: 15.0.12
@@ -257,20 +257,31 @@ packages:
   '@gramio/callback-data@0.1.0':
     resolution: {integrity: sha512-eqpR2Bod7dySDLDu8RB3xJdcrwyE3ZrhHaP+v0xOqWbgOCGY+gZp37E2E0KeXq/ko/8DLp3XeTaQD61++kiK6A==}
 
-  '@gramio/composer@0.4.1':
-    resolution: {integrity: sha512-oGW1Kj0wiAD1NpORhxDSt9/WId2GANOwYmwlI3bivf4LGEEWB1kokcDW6Ji5/s3FwcK17YjTq1wWtgk0Z/uHnQ==}
+  '@gramio/composer@0.5.0':
+    resolution: {integrity: sha512-CP8DxNzDmVl2uO/L2VtjYycLi6jrPkZvTJoN/qVtct2Ms0oUKlKFgnNidH/i2R41HUow2fU0tlcGb1LR4NPHtg==}
 
-  '@gramio/contexts@0.7.0':
-    resolution: {integrity: sha512-WN1T0kNwFRszSXS6pMKTN+QRP+vgXKj27yQ7B7V5FTTJ0gnLKQX+niMc0a/7Ga4elcM8hqpFAfkkF9qRzSiSZA==}
+  '@gramio/contexts@0.9.0':
+    resolution: {integrity: sha512-94TQN69DyREAE9TD0ayOXHRxouOlWr7JP0Fv1oFbLwyCgKBTK7+I3JAn2RZiGWDeQ8n0oTifoEqBDPLDrMgSzg==}
     peerDependencies:
-      '@gramio/types': ^10.0.0
+      '@gramio/types': ^10.1.0
       inspectable: ^3.0.1
 
-  '@gramio/files@0.5.0':
-    resolution: {integrity: sha512-kTLuBnhIQge0C2D1QkuXTP3Ir/LeIjqshA38p41y6hSz+b3fUOc/A5X+CR0Bm65x9wU0YwjLaAqrIqHiXbNjCQ==}
+  '@gramio/files@0.6.1':
+    resolution: {integrity: sha512-by1v+a3D/9e5kO0Yl7Ob92iSXMdorqLvTscb+wwA4z6YBMGmnwL8I7CqzL0yFUUI0Xzi9S7uKbPBWm7VH4GZ8w==}
 
   '@gramio/format@0.8.0':
     resolution: {integrity: sha512-u0iZm+yfAg1H2I6Jau56KacGq61La/cIh3f63PydB5PEmX/lwFjajBaUKaXovhrQQ99nB7WLulHREiE0u26ZQw==}
+    peerDependencies:
+      marked: ^15.0.11
+      node-html-parser: '>=6.0.0'
+    peerDependenciesMeta:
+      marked:
+        optional: true
+      node-html-parser:
+        optional: true
+
+  '@gramio/format@0.9.0':
+    resolution: {integrity: sha512-dU0DWlUo01wL+yL8Pi/itFfKhxvqn8WXKQ+maYsjTFSgfo3iHF96kAsrmdwszJjYSBioWcWD2DhKJB4S1k9dXA==}
     peerDependencies:
       marked: ^15.0.11
       node-html-parser: '>=6.0.0'
@@ -293,6 +304,9 @@ packages:
 
   '@gramio/types@10.0.0':
     resolution: {integrity: sha512-XU6MPRujdbd8W0fAaYQmvtBaTh2Q/EUSNf0FuvJw4Z4Te/d0WnV6KNHNeC2ZitRK3h3vcb0LVv/cIhAqn9nAPQ==}
+
+  '@gramio/types@10.1.0':
+    resolution: {integrity: sha512-vced/i5k2wbkkcOZvD3LJgv7EjPK6oJOL12u0Piag+JDDSXJt/fejPPXXG+st0vYoIQR5bd4ndrWi4Cn5PshFQ==}
 
   '@types/node@24.3.0':
     resolution: {integrity: sha512-aPTXCrfwnDLj4VvXrm+UUCQjNEvJgNA8s5F1cvwQU+3KNltTOkBm1j30uNLyqqPNe7gE3KFzImYoZEfLhp4Yow==}
@@ -319,8 +333,8 @@ packages:
   get-tsconfig@4.10.1:
     resolution: {integrity: sha512-auHyJ4AgMz7vgS8Hp3N6HXSmlMdUyhSUrfBF16w153rxtLIEOE+HGqaBppczZvnHLqQJfiHotCYpNhl0lUROFQ==}
 
-  gramio@0.10.0:
-    resolution: {integrity: sha512-WgVZAzG3S+INeBKNDm53p+tlqI0u0xVC+uL+6GcLxjoLlylR9epL6X5pUz2KJCQVtpxyS3E3sOiZbNpHaWNmXw==}
+  gramio@0.12.0:
+    resolution: {integrity: sha512-SrUGgNbur5jqe8xf5e4a1QYEX5bbIPnJV+rclcBReRwGZwUShIR0aAahe3dRRqxYIXbxFr1oShYL7q/6Nwi+BQ==}
 
   inspectable@3.0.2:
     resolution: {integrity: sha512-XHygPjNXXe1TWQLlVdCYLejUklsGGo+XWS3Cn/RlkvnhkbZqcQxoXPrSh7Via5aATYJUMWVnrD5CbW2c+BtKMA==}
@@ -470,14 +484,14 @@ snapshots:
 
   '@gramio/callback-data@0.1.0': {}
 
-  '@gramio/composer@0.4.1': {}
+  '@gramio/composer@0.5.0': {}
 
-  '@gramio/contexts@0.7.0(@gramio/types@10.0.0)(inspectable@3.0.2)':
+  '@gramio/contexts@0.9.0(@gramio/types@10.1.0)(inspectable@3.0.2)':
     dependencies:
-      '@gramio/types': 10.0.0
+      '@gramio/types': 10.1.0
       inspectable: 3.0.2
 
-  '@gramio/files@0.5.0':
+  '@gramio/files@0.6.1':
     dependencies:
       '@gramio/types': 10.0.0
 
@@ -487,18 +501,26 @@ snapshots:
     optionalDependencies:
       marked: 15.0.12
 
+  '@gramio/format@0.9.0(marked@15.0.12)':
+    dependencies:
+      '@gramio/types': 10.1.0
+    optionalDependencies:
+      marked: 15.0.12
+
   '@gramio/keyboards@1.4.0':
     dependencies:
       '@gramio/types': 10.0.0
 
-  '@gramio/session@0.2.0(gramio@0.10.0(inspectable@3.0.2)(marked@15.0.12))':
+  '@gramio/session@0.2.0(gramio@0.12.0(inspectable@3.0.2)(marked@15.0.12))':
     dependencies:
       '@gramio/storage': 2.0.1
-      gramio: 0.10.0(inspectable@3.0.2)(marked@15.0.12)
+      gramio: 0.12.0(inspectable@3.0.2)(marked@15.0.12)
 
   '@gramio/storage@2.0.1': {}
 
   '@gramio/types@10.0.0': {}
+
+  '@gramio/types@10.1.0': {}
 
   '@types/node@24.3.0':
     dependencies:
@@ -544,15 +566,15 @@ snapshots:
     dependencies:
       resolve-pkg-maps: 1.0.0
 
-  gramio@0.10.0(inspectable@3.0.2)(marked@15.0.12):
+  gramio@0.12.0(inspectable@3.0.2)(marked@15.0.12):
     dependencies:
       '@gramio/callback-data': 0.1.0
-      '@gramio/composer': 0.4.1
-      '@gramio/contexts': 0.7.0(@gramio/types@10.0.0)(inspectable@3.0.2)
-      '@gramio/files': 0.5.0
-      '@gramio/format': 0.8.0(marked@15.0.12)
+      '@gramio/composer': 0.5.0
+      '@gramio/contexts': 0.9.0(@gramio/types@10.1.0)(inspectable@3.0.2)
+      '@gramio/files': 0.6.1
+      '@gramio/format': 0.9.0(marked@15.0.12)
       '@gramio/keyboards': 1.4.0
-      '@gramio/types': 10.0.0
+      '@gramio/types': 10.1.0
       debug: 4.4.3
     transitivePeerDependencies:
       - inspectable

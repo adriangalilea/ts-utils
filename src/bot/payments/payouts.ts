@@ -136,6 +136,13 @@ export type ExportResult = {
 	charges: ChargeRecord[];
 };
 
+// Payouts whose [fromMs, toMs] window overlaps [from, to].
+const filterPayoutsInWindow = (
+	payouts: PayoutRecord[],
+	from: number,
+	to: number,
+): PayoutRecord[] => payouts.filter((p) => !(p.toMs < from || p.fromMs > to));
+
 /**
  * Build the payout-only dataset for a time window. Returns every
  * `PayoutRecord` whose `[fromMs, toMs]` overlaps the requested window.
@@ -155,9 +162,7 @@ export const exportPayouts = async (
 		);
 	}
 	const allPayouts = await listPayouts(bot, stores);
-	const payouts = allPayouts.filter(
-		(p) => !(p.toMs < input.from || p.fromMs > input.to),
-	);
+	const payouts = filterPayoutsInWindow(allPayouts, input.from, input.to);
 	return { payouts, charges: [] };
 };
 
@@ -175,9 +180,7 @@ export const exportPayoutsForUsers = async (
 ): Promise<ExportResult> => {
 	const ctx = ctxFor(bot);
 	const allPayouts = await listPayouts(bot, stores);
-	const payouts = allPayouts.filter(
-		(p) => !(p.toMs < input.from || p.fromMs > input.to),
-	);
+	const payouts = filterPayoutsInWindow(allPayouts, input.from, input.to);
 
 	const allCharges: ChargeRecord[] = [];
 	for (const userId of userIds) {

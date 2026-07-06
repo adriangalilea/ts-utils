@@ -25,14 +25,17 @@ import { menuNavCb } from "../menu.js";
 import { presentInvoice } from "./invoice.js";
 import {
 	type BotPaymentsConfig,
+	FALLBACK_LANG,
 	InsufficientCredits,
-	type PaymentsSession,
 	type ProductCatalog,
+	type SessionLike,
 } from "./types.js";
 
-const FALLBACK_LANG = "en";
-
-type SessionLike = { pay?: PaymentsSession; language?: string };
+/** Resolve a Polyglot label: requested lang, then `en` fallback, else undefined. */
+const resolveLabel = (
+	poly: Record<string, string>,
+	lang: string,
+): string | undefined => poly[lang] ?? poly[FALLBACK_LANG];
 
 type TierKey = "free" | `vip.${number}`;
 
@@ -52,8 +55,11 @@ export type CreditsApi = {
 	tryConsume: (n: number) => boolean;
 };
 
+/** Display label for a gated feature: a Polyglot pair or a plain string. */
+type FeatureLabel = { en: string; es: string } | string;
+
 export type RequireOpts = {
-	feature?: { en: string; es: string } | string;
+	feature?: FeatureLabel;
 };
 
 /**
@@ -139,10 +145,7 @@ export const buildPaymentsDerive = ({
 			const r = catalog.vip[rung - 1];
 			if (!r) return undefined;
 			const lang = c.session.language ?? FALLBACK_LANG;
-			return (
-				(r.name as Record<string, string>)[lang] ??
-				(r.name as Record<string, string>)[FALLBACK_LANG]
-			);
+			return resolveLabel(r.name as Record<string, string>, lang);
 		};
 
 		const credits: CreditsApi = {
@@ -175,9 +178,7 @@ export const buildPaymentsDerive = ({
 					? undefined
 					: typeof opts.feature === "string"
 						? opts.feature
-						: ((opts.feature as { en: string; es: string })[
-								lang as "en" | "es"
-							] ?? (opts.feature as { en: string; es: string }).en);
+						: (opts.feature[lang as "en" | "es"] ?? opts.feature.en);
 			const body =
 				featureName !== undefined
 					? say(

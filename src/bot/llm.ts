@@ -219,20 +219,24 @@ export class MarkdownStreamer {
 
 	private chatId: number;
 	private threadId?: number;
-	// Match gramio's `bot.api` shape structurally. `text` accepts string or any
-	// `Formattable` (from `@gramio/format`) — both stringify safely. We don't
-	// import gramio's full Bot type to keep the streamer testable in isolation.
+	// Match gramio's `bot.api` shape structurally (we don't import gramio's
+	// full Bot type to keep the streamer testable in isolation). `text` is
+	// `string` to mirror gramio's declared API param types — a wider param
+	// here would make the real bot.api unassignable. Formattable payloads
+	// go through the same `as unknown as` bridge the reasoning path uses
+	// (gramio's api proxy converts FormattableString to text+entities at
+	// runtime; its declarations just don't say so).
 	private bot: {
 		api: {
 			sendMessage: (p: {
 				chat_id: number;
 				message_thread_id?: number;
-				text: string | { toString(): string };
+				text: string;
 			}) => Promise<{ message_id: number }>;
 			editMessageText: (p: {
 				chat_id: number;
 				message_id: number;
-				text: string | { toString(): string };
+				text: string;
 			}) => Promise<unknown>;
 		};
 	};
@@ -356,7 +360,16 @@ export class MarkdownStreamer {
 			const payload = this.opts.markdown
 				? markdownToFormattable(snapshot)
 				: snapshot;
-			await this.bot.api.editMessageText({
+			type EditParams = {
+				chat_id: number;
+				message_id: number;
+				text: string | FormattableString;
+			};
+			await (
+				this.bot.api.editMessageText as unknown as (
+					p: EditParams,
+				) => Promise<unknown>
+			)({
 				chat_id: this.chatId,
 				message_id: this.currentMessageId,
 				text: payload,

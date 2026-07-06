@@ -120,7 +120,7 @@
 		"@gramio/session": "^0.2.0",
 		"@gramio/storage": "^2.0.1",
 		"@types/node": "^24.3.0",
-		"gramio": "^0.10.0",
+		"gramio": "^0.12.0",
 		"marked": "^15.0.11",
 		"tsx": "^4.20.4",
 		"typescript": "^5.9.2",

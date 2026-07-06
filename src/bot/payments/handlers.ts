@@ -94,6 +94,17 @@ type SuccessfulPayment = MessageCtx["eventPayment"]["payload"];
 const ctxLang = (ctx: { session?: { language?: string } }): string =>
 	ctx.session?.language ?? FALLBACK_LANG;
 
+// Single-sourced product discriminator. Order (vip, credits, perk-default)
+// is load-bearing: it mirrors the prefix checks both builders rely on.
+const kindOf = (
+	product: VipRungResolved | CreditsPackResolved | PerkResolved,
+): "vip" | "credits" | "perk" =>
+	product.id.startsWith("vip.")
+		? "vip"
+		: product.id.startsWith("credits.")
+			? "credits"
+			: "perk";
+
 // ─── pre_checkout_query handler ────────────────────────────────────
 
 /**
@@ -198,22 +209,25 @@ const buildChargeRecord = (
 		payoutBatchId: null,
 		creditsGranted: 0,
 	};
-	if (product.id.startsWith("vip.")) {
-		const v = product as VipRungResolved;
-		return {
-			...base,
-			vipRung: v.rank,
-			subscriptionExpiresAt: payment.subscription_expiration_date,
-			creditsGranted: v.creditsGranted,
-		};
+	switch (kindOf(product)) {
+		case "vip": {
+			const v = product as VipRungResolved;
+			return {
+				...base,
+				vipRung: v.rank,
+				subscriptionExpiresAt: payment.subscription_expiration_date,
+				creditsGranted: v.creditsGranted,
+			};
+		}
+		case "credits": {
+			const c = product as CreditsPackResolved;
+			return { ...base, creditsGranted: c.creditsGranted };
+		}
+		default: {
+			const p = product as PerkResolved;
+			return { ...base, perkKey: p.key };
+		}
 	}
-	if (product.id.startsWith("credits.")) {
-		const c = product as CreditsPackResolved;
-		return { ...base, creditsGranted: c.creditsGranted };
-	}
-	// perk
-	const p = product as PerkResolved;
-	return { ...base, perkKey: p.key };
 };
 
 export type SuccessfulPaymentHandlerOptions = {
@@ -411,42 +425,46 @@ const buildSuccessMessage = (
 	cfg: BotPaymentsConfig<string>,
 	lang: string,
 ): string => {
-	if (product.id.startsWith("vip.")) {
-		const v = product as VipRungResolved;
-		const name =
-			(v.name as Record<string, string>)[lang] ??
-			(v.name as Record<string, string>)[FALLBACK_LANG] ??
-			"VIP";
-		return say(
-			{
-				en: `✅ Welcome to ${name}! Active for 30 days.`,
-				es: `✅ ¡Bienvenido a ${name}! Activo durante 30 días.`,
-			},
-			lang,
-		);
+	switch (kindOf(product)) {
+		case "vip": {
+			const v = product as VipRungResolved;
+			const name =
+				(v.name as Record<string, string>)[lang] ??
+				(v.name as Record<string, string>)[FALLBACK_LANG] ??
+				"VIP";
+			return say(
+				{
+					en: `✅ Welcome to ${name}! Active for 30 days.`,
+					es: `✅ ¡Bienvenido a ${name}! Activo durante 30 días.`,
+				},
+				lang,
+			);
+		}
+		case "credits": {
+			const c = product as CreditsPackResolved;
+			const unit =
+				(cfg.credits?.unit as Record<string, string> | undefined)?.[lang] ??
+				"credits";
+			return say(
+				{
+					en: `✅ +${c.creditsGranted} ${unit} added to your balance.`,
+					es: `✅ +${c.creditsGranted} ${unit} añadidos a tu saldo.`,
+				},
+				lang,
+			);
+		}
+		default: {
+			const p = product as PerkResolved;
+			const name =
+				(p.name as Record<string, string>)[lang] ??
+				(p.name as Record<string, string>)[FALLBACK_LANG] ??
+				p.key;
+			return say(
+				{ en: `✅ Unlocked: ${name}.`, es: `✅ Desbloqueado: ${name}.` },
+				lang,
+			);
+		}
 	}
-	if (product.id.startsWith("credits.")) {
-		const c = product as CreditsPackResolved;
-		const unit =
-			(cfg.credits?.unit as Record<string, string> | undefined)?.[lang] ??
-			"credits";
-		return say(
-			{
-				en: `✅ +${c.creditsGranted} ${unit} added to your balance.`,
-				es: `✅ +${c.creditsGranted} ${unit} añadidos a tu saldo.`,
-			},
-			lang,
-		);
-	}
-	const p = product as PerkResolved;
-	const name =
-		(p.name as Record<string, string>)[lang] ??
-		(p.name as Record<string, string>)[FALLBACK_LANG] ??
-		p.key;
-	return say(
-		{ en: `✅ Unlocked: ${name}.`, es: `✅ Desbloqueado: ${name}.` },
-		lang,
-	);
 };
 
 // ─── re-export SourcedError for catch sites ───────────────────────

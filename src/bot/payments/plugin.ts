@@ -59,15 +59,14 @@ import type {
 	BotPaymentsConfig,
 	ChargeRecord,
 	FulfillmentEvent,
-	PaymentsSession,
 	ProductKey,
+	SessionLike,
 	TierKey,
 } from "./types.js";
 import { waiverCancelCb, waiverConsentCb } from "./waiver.js";
 
 // ─── session reference ─────────────────────────────────────────────
 
-type SessionLike = { pay?: PaymentsSession; language?: string };
 type PaySessionPluginRef = ReturnType<typeof session<SessionLike, "session">>;
 
 // ─── ctx.payments surface (public, generic-narrowed) ──────────────

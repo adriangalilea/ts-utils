@@ -73,6 +73,10 @@ type SendInvoiceParams = {
 
 // ─── small helpers ─────────────────────────────────────────────────
 
+// Single-source the Telegram length cap so each call site can't drift.
+const cap = (s: string, max: number): string =>
+	s.length > max ? s.slice(0, max) : s;
+
 const ctxLang = (ctx: InvoiceCtx): string =>
 	ctx.session?.language ?? FALLBACK_LANG;
 
@@ -102,7 +106,7 @@ const resolveLabel = (
 	const v = value[lang] ?? value[FALLBACK_LANG] ?? Object.values(value)[0];
 	if (typeof v !== "string") return undefined;
 	const trimmed = v.trim();
-	return trimmed.length > maxLen ? trimmed.slice(0, maxLen) : trimmed;
+	return cap(trimmed, maxLen);
 };
 
 // ─── title / description per product kind ──────────────────────────
@@ -127,7 +131,7 @@ const titleFor = (
 			"credits";
 		// "100 credits" / "100 mensajes" — fits in 32 chars for reasonable values.
 		const base = `${p.creditsGranted} ${unit}`;
-		return base.length > TITLE_MAX ? base.slice(0, TITLE_MAX) : base;
+		return cap(base, TITLE_MAX);
 	}
 	// perk
 	return (
@@ -156,13 +160,9 @@ const descriptionFor = (
 			const tailEs = `. Incluye ${v.creditsGranted} ${unit} al mes.`;
 			const tail = say({ en: tailEn, es: tailEs }, lang);
 			const full = base + tail;
-			return full.length > DESCRIPTION_MAX
-				? full.slice(0, DESCRIPTION_MAX)
-				: full;
+			return cap(full, DESCRIPTION_MAX);
 		}
-		return base.length > DESCRIPTION_MAX
-			? base.slice(0, DESCRIPTION_MAX)
-			: base;
+		return cap(base, DESCRIPTION_MAX);
 	}
 	if (product.id.startsWith("credits.")) {
 		const p = product as CreditsPackResolved;
@@ -176,9 +176,7 @@ const descriptionFor = (
 			},
 			lang,
 		);
-		return base.length > DESCRIPTION_MAX
-			? base.slice(0, DESCRIPTION_MAX)
-			: base;
+		return cap(base, DESCRIPTION_MAX);
 	}
 	// perk
 	const p = product as PerkResolved;
@@ -190,7 +188,7 @@ const descriptionFor = (
 		},
 		lang,
 	);
-	return base.length > DESCRIPTION_MAX ? base.slice(0, DESCRIPTION_MAX) : base;
+	return cap(base, DESCRIPTION_MAX);
 };
 
 // ─── core send ─────────────────────────────────────────────────────

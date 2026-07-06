@@ -145,6 +145,10 @@ export type WaiverConfig<L extends string = string> = {
  */
 export type BotPaymentsConfig<L extends string = string> = {
 	readonly paysupport: string;
+	/** Where in THIS bot's UI the user manages charges (the `/paysupport`
+	 *  bullet line). Menu command names are app-specific; the default
+	 *  names the library's own `/settings → 💎 VIP → 📜 History` path. */
+	readonly paysupportHint?: Polyglot<L>;
 	readonly legal: LegalConfig;
 	readonly waiver: WaiverConfig<L>;
 	readonly vip?: ReadonlyArray<VipRung<L>>;
@@ -297,6 +301,16 @@ export type PaymentsSession = {
 	vip?: VipState;
 	perks?: Record<string, PerkState>;
 };
+
+/**
+ * Structural narrow of the shared session record the payment handlers
+ * read: just the `pay` slice plus the recipient's locale. Single-sourced
+ * here so derive/callbacks/commands/plugin agree on the shape.
+ */
+export type SessionLike = { pay?: PaymentsSession; language?: string };
+
+/** Locale used when the recipient's language is unset or unresolved. */
+export const FALLBACK_LANG = "en";
 
 // ─── ledger records (authoritative) ────────────────────────────────
 
