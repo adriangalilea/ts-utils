@@ -54,10 +54,11 @@ export function table(rows: string[][], opts: TableOpts = {}): string {
 	const line = (r: string[]): string => {
 		const cells = Array.from({ length: cols }, (_, c) => {
 			const cell = r[c] ?? "";
+			const colWidth = w[c] ?? 0;
 			const isLast = c === cols - 1;
 			const right = opts.align?.[c] === "r";
-			if (right) return padStartV(cell, w[c]!);
-			return isLast ? cell : padEndV(cell, w[c]!);
+			if (right) return padStartV(cell, colWidth);
+			return isLast ? cell : padEndV(cell, colWidth);
 		});
 		return lead + cells.join(gap).replace(/\s+$/, "");
 	};
