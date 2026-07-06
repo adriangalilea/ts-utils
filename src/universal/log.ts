@@ -3,7 +3,6 @@
  * Provides colored output with Unicode symbols for different log levels
  *
  * Known limitations:
- * - Global level is frozen at import time (const). No runtime setLevel().
  * - createLogger() is just a prefix wrapper, not a real scoped instance.
  *   No per-scope level control (can't silence 'bor' but keep 'bdns' verbose).
  * - No withTag/child pattern — consumer can't control library log levels.
