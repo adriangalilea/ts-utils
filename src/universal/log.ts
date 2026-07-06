@@ -361,45 +361,9 @@ export function logAppStartup(options: {
 	bootstrap(bold(purple(`▶ ${name} ${version}`)));
 	bootstrap(`- Local:        http://${host}:${port}`);
 
-	if (host !== "localhost") {
-		bootstrap(`- Network:      http://${getNetworkAddress()}:${port}`);
-	}
-
 	if (environment) {
 		bootstrap(`- Environment:  ${environment}`);
 	}
 
 	info("");
-}
-
-// Helper to get network address
-function getNetworkAddress(): string {
-	if (!runtime.canFileSystem()) return "localhost"; // Can't get network address without file system access
-
-	try {
-		// node:os is loaded with `require` so the browser bundle never
-		// pulls it in (a static `import` would force it on every consumer).
-		// `import type * as os` won't help — the value is what we need,
-		// not just the type, and require() returns `any` by default. The
-		// inline cast describes exactly the slice we touch.
-		const os = require("node:os") as {
-			networkInterfaces: () => Record<
-				string,
-				| Array<{ family: string; internal: boolean; address: string }>
-				| undefined
-			>;
-		};
-		for (const list of Object.values(os.networkInterfaces())) {
-			if (!list) continue;
-			for (const iface of list) {
-				if (iface.family === "IPv4" && !iface.internal) {
-					return iface.address;
-				}
-			}
-		}
-	} catch {
-		// If os module is not available, fallback
-	}
-
-	return "localhost";
 }
