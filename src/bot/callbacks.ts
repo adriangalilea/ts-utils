@@ -57,6 +57,26 @@ type FieldType = "string" | "number" | "string?" | "number?";
 
 type FieldDef = Readonly<Record<string, FieldType>>;
 
+// The typed schema a FieldDef declares, so `cb.data(...)` returns a
+// CallbackData whose .pack / ctx.queryData are field-typed exactly like
+// gramio's chained builder (`new CallbackData(n).number("uid")`) — the
+// namespace must not cost the types.
+type RequiredFieldKeys<F extends FieldDef> = {
+	[K in keyof F]: F[K] extends "string" | "number" ? K : never;
+}[keyof F];
+type FieldBase<T extends FieldType> = T extends `string${string}`
+	? string
+	: number;
+type SchemaOf<F extends FieldDef> = {
+	[K in RequiredFieldKeys<F> & string]: FieldBase<F[K]>;
+} & {
+	[K in Exclude<keyof F, RequiredFieldKeys<F>> & string]?: FieldBase<F[K]>;
+};
+type TypedCallbackData<F extends FieldDef> = CallbackData<
+	SchemaOf<F>,
+	SchemaOf<F>
+>;
+
 type Registered = {
 	fullName: string;
 	fields: FieldDef;
@@ -105,7 +125,7 @@ export type CallbackNamespace = {
 	 * HMR / dual-import). A second registration with different fields
 	 * panics — that's a programming error, not a runtime issue.
 	 */
-	data: <F extends FieldDef>(name: string, fields: F) => CallbackData;
+	data: <F extends FieldDef>(name: string, fields: F) => TypedCallbackData<F>;
 };
 
 /**
@@ -125,7 +145,10 @@ export const callbackNs = (prefix: string): CallbackNamespace => {
 	}
 	return {
 		prefix,
-		data: <F extends FieldDef>(name: string, fields: F): CallbackData => {
+		data: <F extends FieldDef>(
+			name: string,
+			fields: F,
+		): TypedCallbackData<F> => {
 			if (!/^[a-zA-Z][a-zA-Z0-9_:]*$/.test(name)) {
 				panic(
 					`bot/callbacks: callback name "${name}" must match /^[a-zA-Z][a-zA-Z0-9_:]*$/`,
@@ -141,11 +164,14 @@ export const callbackNs = (prefix: string): CallbackNamespace => {
 							`re-registration tried ${JSON.stringify(fields)}.`,
 					);
 				}
-				return existing.cb;
+				// fieldsEqual just proved the stored schema IS F's schema.
+				return existing.cb as TypedCallbackData<F>;
 			}
 			const cb = buildCallbackData(fullName, fields);
 			registry.set(fullName, { fullName, fields, cb });
-			return cb;
+			// buildCallbackData accumulates exactly F's fields at runtime; the
+			// erased builder type is re-asserted here, once, at the boundary.
+			return cb as TypedCallbackData<F>;
 		},
 	};
 };
