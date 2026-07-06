@@ -298,6 +298,42 @@ export function formatBasisPoints(bps: number): string {
 	return `${bps} bps`;
 }
 
+// ── money formatting ───────────────────────────────────────────────
+// Lives HERE, not in universal/format: formatting money needs the symbol +
+// optimal-decimals knowledge (and, transitively, the crypto dataset), and the
+// pure format module must stay free of that weight.
+
+/** $1234.56 with optimal decimals; sign before the $. */
+export function usd(value: number): string {
+	const decimals = getOptimalDecimals(value, "USD");
+	const formatted = Math.abs(value).toFixed(decimals);
+	return value < 0 ? `-$${formatted}` : `$${formatted}`;
+}
+
+/** Bitcoin with optimal decimals: 0.00001234 ₿ */
+export function btc(value: number): string {
+	return `${value.toFixed(getOptimalDecimals(value, "BTC"))} ₿`;
+}
+
+/** Ethereum with optimal decimals: 0.123 Ξ */
+export function eth(value: number): string {
+	return `${value.toFixed(getOptimalDecimals(value, "ETH"))} Ξ`;
+}
+
+/**
+ * Format a value in any currency: symbol before for fiat/stablecoins
+ * (`$12.34`), after for crypto (`0.5 ₿`), optimal decimals either way.
+ */
+export function money(value: number, currencyCode: string): string {
+	const decimals = getOptimalDecimals(value, currencyCode);
+	const symbol = getSymbol(currencyCode);
+	const formatted = Math.abs(value).toFixed(decimals);
+	if (isFiat(currencyCode) || isStablecoin(currencyCode)) {
+		return value < 0 ? `-${symbol}${formatted}` : `${symbol}${formatted}`;
+	}
+	return value < 0 ? `-${formatted} ${symbol}` : `${formatted} ${symbol}`;
+}
+
 export const currency = {
 	getSymbol,
 	getOptimalDecimals,
@@ -313,5 +349,9 @@ export const currency = {
 	basisPointsToPercent,
 	percentToBasisPoints,
 	formatBasisPoints,
+	usd,
+	btc,
+	eth,
+	money,
 	symbols: CurrencySymbols,
 };

@@ -1,96 +1,37 @@
-import {
-	getOptimalDecimals,
-	getSymbol,
-	isFiat,
-	isStablecoin,
-} from "./currency/index.js";
-
 /**
- * Format utilities for numbers and currencies
+ * Pure number formatting. No currency coupling — money formatting (usd, btc,
+ * money(value, code), …) lives in ./currency, which owns the symbol/decimals
+ * knowledge and its 133KB crypto-symbol dataset. Keeping this module pure is
+ * what lets a browser bundle import `compact` without shipping that dataset.
+ *
+ * Named exports only (no namespace object): a namespace keeps every function
+ * — and its imports — alive in the bundle; named imports tree-shake.
  */
-class FormatOps {
-	/**
-	 * Format a number with specified decimal places
-	 */
-	number(value: number, decimals: number): string {
-		return value.toFixed(decimals);
-	}
 
-	/**
-	 * Format a value as USD with optimal decimals
-	 */
-	usd(value: number): string {
-		const decimals = getOptimalDecimals(value, "USD");
-		const formatted = Math.abs(value).toFixed(decimals);
-		return value < 0 ? `-$${formatted}` : `$${formatted}`;
-	}
-
-	/**
-	 * Format a value as Bitcoin with optimal decimals
-	 */
-	btc(value: number): string {
-		const decimals = getOptimalDecimals(value, "BTC");
-		return `${value.toFixed(decimals)} ₿`;
-	}
-
-	/**
-	 * Format a value as Ethereum with optimal decimals
-	 */
-	eth(value: number): string {
-		const decimals = getOptimalDecimals(value, "ETH");
-		return `${value.toFixed(decimals)} Ξ`;
-	}
-
-	/**
-	 * Auto format a value with the appropriate currency symbol and decimals
-	 */
-	auto(value: number, currencyCode: string): string {
-		const decimals = getOptimalDecimals(value, currencyCode);
-		const symbol = getSymbol(currencyCode);
-		const formatted = Math.abs(value).toFixed(decimals);
-
-		// Put symbol before for fiat/stablecoins, after for crypto
-		if (isFiat(currencyCode) || isStablecoin(currencyCode)) {
-			return value < 0 ? `-${symbol}${formatted}` : `${symbol}${formatted}`;
-		} else {
-			return value < 0 ? `-${formatted} ${symbol}` : `${formatted} ${symbol}`;
-		}
-	}
-
-	/**
-	 * Format a percentage with smart decimal places
-	 */
-	percentage(value: number): string {
-		let decimals = 1;
-		if (Math.abs(value) < 0.1) {
-			decimals = 2;
-		} else if (Math.abs(value) >= 100) {
-			decimals = 0;
-		}
-		return `${value.toFixed(decimals)}%`;
-	}
-
-	/**
-	 * Format a value with thousands separators
-	 */
-	withCommas(value: number, decimals?: number): string {
-		const fixed =
-			decimals !== undefined ? value.toFixed(decimals) : value.toString();
-		const parts = fixed.split(".");
-		parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-		return parts.join(".");
-	}
-
-	/**
-	 * Format a value in compact notation (1.2K, 3.4M, etc)
-	 */
-	compact(value: number): string {
-		const formatter = new Intl.NumberFormat("en", {
-			notation: "compact",
-			maximumFractionDigits: 1,
-		});
-		return formatter.format(value);
-	}
+/** Compact notation: 1.2K, 3.4M, … (Intl, en). */
+export function compact(value: number): string {
+	return new Intl.NumberFormat("en", {
+		notation: "compact",
+		maximumFractionDigits: 1,
+	}).format(value);
 }
 
-export const format = new FormatOps();
+/** Percentage with smart decimals: 2 below 0.1, 0 at ≥100, else 1. */
+export function percentage(value: number): string {
+	let decimals = 1;
+	if (Math.abs(value) < 0.1) {
+		decimals = 2;
+	} else if (Math.abs(value) >= 100) {
+		decimals = 0;
+	}
+	return `${value.toFixed(decimals)}%`;
+}
+
+/** Thousands separators: 1,234,567.89 (optionally fixed decimals). */
+export function withCommas(value: number, decimals?: number): string {
+	const fixed =
+		decimals !== undefined ? value.toFixed(decimals) : value.toString();
+	const parts = fixed.split(".");
+	parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+	return parts.join(".");
+}

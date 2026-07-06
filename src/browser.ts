@@ -3,7 +3,7 @@
  * These utilities do not depend on Node.js APIs and can run in the browser.
  *
  * Usage in Next.js client components:
- * import { log, format, currency } from '@adriangalilea/utils/browser'
+ * import { log, compact, currency } from '@adriangalilea/utils/browser'
  */
 
 // Offensive programming - adapted for browser (throws instead of process.exit)

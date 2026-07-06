@@ -170,5 +170,6 @@
 	"bugs": {
 		"url": "https://github.com/adriangalilea/ts-utils/issues"
 	},
-	"homepage": "https://github.com/adriangalilea/ts-utils#readme"
+	"homepage": "https://github.com/adriangalilea/ts-utils#readme",
+	"sideEffects": false
 }

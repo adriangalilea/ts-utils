@@ -1,4 +1,10 @@
-import { currency, format, log } from "../src/index.js";
+import {
+	compact,
+	currency,
+	log,
+	percentage,
+	withCommas,
+} from "../src/index.js";
 
 console.log("\n=== Logger Examples ===\n");
 
@@ -74,13 +80,13 @@ console.log(
 
 // Format examples
 console.log("\nFormat Examples:");
-console.log("USD:", format.usd(1234.56));
-console.log("BTC:", format.btc(0.00001234));
-console.log("ETH:", format.eth(0.123));
-console.log("Auto USD:", format.auto(1234.56, "USD"));
-console.log("Percentage:", format.percentage(12.5));
-console.log("With commas:", format.withCommas(1234567.89, 2));
-console.log("Compact:", format.compact(1234567));
+console.log("USD:", currency.usd(1234.56));
+console.log("BTC:", currency.btc(0.00001234));
+console.log("ETH:", currency.eth(0.123));
+console.log("Money USD:", currency.money(1234.56, "USD"));
+console.log("Percentage:", percentage(12.5));
+console.log("With commas:", withCommas(1234567.89, 2));
+console.log("Compact:", compact(1234567));
 
 // Percentage calculations
 console.log("\nPercentage Calculations:");

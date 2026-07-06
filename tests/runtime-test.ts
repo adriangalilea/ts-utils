@@ -3,8 +3,8 @@
  */
 
 import {
+	currency,
 	file,
-	format,
 	kev,
 	log,
 	ProcessExitError,
@@ -33,8 +33,8 @@ console.log("\n=== Universal Utilities (work everywhere) ===\n");
 
 // These work in any environment
 log.success("Log works everywhere");
-console.log("Format USD:", format.usd(1234.56));
-console.log("Format BTC:", format.btc(0.001));
+console.log("Format USD:", currency.usd(1234.56));
+console.log("Format BTC:", currency.btc(0.001));
 
 console.log("\n=== Platform-Specific Utilities ===\n");
 

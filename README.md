@@ -77,30 +77,26 @@ currency.formatBasisPoints(50)  // "50 bps"
 
 ### Format
 
-Number and currency formatting utilities:
+Pure number formatting — named exports, tree-shakeable, zero currency baggage
+(money formatting lives in the currency module, which owns the symbol/decimals
+knowledge and its crypto-symbol dataset):
 
 ```typescript
-import { format } from '@adriangalilea/utils/format'
+import { compact, percentage, withCommas } from '@adriangalilea/utils/format'
 
-// Number formatting
-format.number(1234.567, 2)  // "1234.57"
-format.withCommas(1234567)  // "1,234,567"
-format.withCommas(1234.567, 2)  // "1,234.57"
+withCommas(1234567)     // "1,234,567"
+withCommas(1234.567, 2) // "1,234.57"
+compact(1234567)        // "1.2M"
+compact(1234)           // "1.2K"
+percentage(12.3456)     // "12.3%"
+percentage(0.05)        // "0.05%"
+percentage(123.456)     // "123%"
 
-// Compact notation
-format.compact(1234567)  // "1.2M"
-format.compact(1234)  // "1.2K"
-
-// Currency formatting
-format.usd(1234.56)  // "$1,234.56"
-format.btc(0.00123456)  // "0.001235 ₿"
-format.eth(1.23456789)  // "1.234568 Ξ"
-format.auto(100, 'EUR')  // "€100.00"
-
-// Percentages
-format.percentage(12.3456)  // "12.3%"
-format.percentage(0.05)  // "0.05%"
-format.percentage(123.456)  // "123%"
+// Money — from currency, not format:
+import { usd, btc, money } from '@adriangalilea/utils/currency'
+usd(1234.56)        // "$1234.56"
+btc(0.00001234)     // "0.00001234 ₿"
+money(100, 'EUR')   // "€100.00"
 ```
 
 ### CLI presentation (`cli`)
