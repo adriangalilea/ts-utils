@@ -236,14 +236,20 @@ export const spin = (): string =>
 	cyan(SPIN_FRAMES[Math.floor(Date.now() / 80) % SPIN_FRAMES.length] as string);
 
 /**
- * Progress bar, `width` cells. `done > total` clamps to full — live counters
- * drift (e.g. a server-count proxy that overcounts) and that's the caller's
- * data, not a bug here.
+ * Progress bar, `width` cells; `style` colors the filled part (default green —
+ * pass e.g. `ui.warn` for a throttled/cooling state). `done > total` clamps to
+ * full — live counters drift (e.g. a server-count proxy that overcounts) and
+ * that's the caller's data, not a bug here.
  */
-export function bar(done: number, total: number, width = 24): string {
+export function bar(
+	done: number,
+	total: number,
+	width = 24,
+	style: (s: string) => string = green,
+): string {
 	assert(done >= 0 && total >= 0, "bar: negative counts", done, total);
 	const fill = Math.round(Math.min(1, total === 0 ? 1 : done / total) * width);
-	return green("█".repeat(fill)) + dim("░".repeat(width - fill));
+	return style("█".repeat(fill)) + dim("░".repeat(width - fill));
 }
 
 /** Compact elapsed time since a `Date.now()` timestamp: 0.4s · 12s · 1m05s · 1h02m. */
@@ -260,21 +266,36 @@ export function elapsed(since: number): string {
 /**
  * The one-liner: animate `label` with a spinner + elapsed time while `fn`
  * runs, persist `✓ label 1.2s` on success, `⨯ label 1.2s message` on failure
- * (and rethrow). Non-TTY prints just the final line.
+ * (and rethrow). `fn` receives a setter for relabeling mid-flight:
+ * `spinner('connecting 0/4', async (set) => { …; set('connecting 2/4') })`.
+ *
+ * Non-TTY prints just the final line. Started while a live region is active
+ * (a helper deep in a call stack, under a dashboard), it degrades the same
+ * way — the final line lands ABOVE the region via the console routing. Only
+ * a second live() region screams; a nested spinner is legitimate composition.
  */
 export async function spinner<T>(
 	label: string,
-	fn: () => Promise<T>,
+	fn: (set: (label: string) => void) => Promise<T>,
 ): Promise<T> {
 	const start = Date.now();
-	const l = live(() => `${spin()} ${label} ${dim(elapsed(start))}`);
+	let current = label;
+	const set = (l: string): void => {
+		current = l;
+	};
+	const l =
+		active === null
+			? live(() => `${spin()} ${current} ${dim(elapsed(start))}`)
+			: null;
+	const persist = (line: string): void =>
+		l ? l.done(line) : console.log(line);
 	try {
-		const v = await fn();
-		l.done(`${green("✓")} ${label} ${dim(elapsed(start))}`);
+		const v = await fn(set);
+		persist(`${green("✓")} ${current} ${dim(elapsed(start))}`);
 		return v;
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e);
-		l.done(`${red("⨯")} ${label} ${dim(elapsed(start))} ${red(msg)}`);
+		persist(`${red("⨯")} ${current} ${dim(elapsed(start))} ${red(msg)}`);
 		throw e;
 	}
 }

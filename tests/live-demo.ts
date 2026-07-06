@@ -82,14 +82,21 @@ function row(a: Account): string[] {
 						`cooling ${Math.ceil((a.coolUntil - Date.now()) / 1000)}s (throttled)`,
 					)
 				: `${ui.ref(`${Math.floor(a.done)}/${a.total}`)}  ${ui.muted(`${a.rate.toFixed(1)}/s`)}`;
-	return [icon, a.alias, bar(a.done, a.total, 18), detail];
+	// a cooling account's bar goes amber — style hook on the filled part
+	const fill = a.state === "cooling" ? ui.warn : undefined;
+	return [icon, a.alias, bar(a.done, a.total, 18, fill), detail];
 }
 
 const start = Date.now();
 
 async function main(): Promise<void> {
-	// Phase 1 — the one-liner. TTY: animated; pipe: just the final ✓ line.
-	await spinner("connecting 4 accounts", () => sleep(1200));
+	// Phase 1 — the one-liner, relabeled mid-flight. TTY: animated; pipe: final ✓ line only.
+	await spinner("connecting 0/4 accounts", async (set) => {
+		for (let i = 1; i <= 4; i++) {
+			await sleep(300);
+			set(`connecting ${i}/4 accounts`);
+		}
+	});
 	log.info("main/all: +12 new · 73,202 synced");
 	log.info("adrigd92/all: +31 new · 111,056 synced");
 

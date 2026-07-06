@@ -159,14 +159,33 @@ const region = live(() => table(accounts.map(a => [
 region.done()   // final frame persists into scrollback (or .clear() to remove)
 ```
 
+Patterns:
+
+```typescript
+// Relabel a spinner mid-flight — fn receives a setter
+await spinner('connecting 0/4', async (set) => {
+  for (const [i, a] of accounts.entries()) { await a.connect(); set(`connecting ${i + 1}/4`) }
+})
+
+// Streaming table — rows appear as they arrive, columns re-align retroactively
+const rows: string[][] = []
+const region = live(() => table(rows, { head: ['day', 'author', 'title'] }))
+for await (const e of feed) { rows.push(renderRow(e)); region.refresh() }
+region.done()   // full aligned table persists (a pipe gets exactly this, once)
+
+// State-dependent bar color — style hook on the filled part
+bar(done, total, 18, ui.warn)   // amber: throttled/cooling
+```
+
 What makes it hold up:
 
-- **Logging never tears the UI, with no API to learn.** While a region is active, `console.log/warn/error` — and therefore the logger — are rerouted to print *above* the region (erase → write → repaint). Keep logging from anywhere, including third-party code.
+- **Logging never tears the UI, with no API to learn.** While a region is active, `console.log/warn/error` — and therefore the logger — are rerouted to print *above* the region (erase → write → repaint). Keep logging from anywhere, including third-party code. Boundary: only `console.*` is patched — a library writing raw to `process.stdout.write` bypasses the routing and can tear.
 - **Non-TTY degrades to sane output.** In a pipe / CI / log file nothing animates: `done()` prints the final frame once, `spinner()` prints just its `✓ label 1.2s` line. Same calling code. Opt-in `heartbeat: ms` prints plain snapshots so long CI runs aren't silent.
 - **Renders to stderr by default** — stdout stays clean for `--json` and pipes.
 - **Crash-safe cursor**: hidden while painting, restored on done/clear, process exit, and signals — politely (if the app has its own SIGINT handler for graceful shutdown, it stays in charge).
 - **Flicker-free**: synchronized-update escapes (`?2026`) make repaints atomic on modern terminals; lines are ANSI-aware clipped to the terminal width so the erase math never breaks.
-- One region at a time, by design (`assert`): two pinned regions can't share the bottom of one screen — compose into a single `render()`.
+- **Measurement is grapheme-aware**: a ZWJ emoji / flag counts as one visible unit in `width()`/`clip()`/`table()` alignment. East-Asian double-width (CJK) is a known TODO — those columns can drift a cell.
+- One **region** at a time, by design (`assert`): two pinned regions can't share the bottom of one screen — compose into a single `render()`. A `spinner()` started *under* an active region is legitimate composition and degrades gracefully: its final line prints above the region.
 
 Run the demo: `pnpm tsx tests/live-demo.ts` (and pipe it through `| cat` to see the non-TTY degradation).
 

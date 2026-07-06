@@ -10,14 +10,23 @@ import { bold, cyan, dim, gray, green, red, yellow } from "../universal/log.js";
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escapes is the point
 export const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
-/** Visible width of a string — ANSI escape codes stripped, counted by code point. */
-export const width = (s: string): number => [...s.replace(ANSI_RE, "")].length;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: split on ANSI escapes, keeping them
+const ANSI_SPLIT_RE = /(\x1b\[[0-9;]*m)/;
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: tokenizes into ANSI escapes + code points
-const TOKEN_RE = /\x1b\[[0-9;]*m|./gsu;
+// Grapheme clusters, not code points: what the terminal renders as ONE symbol
+// (ZWJ emoji 👨‍👩‍👧, flags 🇪🇸, skin tones) is several code points — counting
+// pieces breaks alignment.
+// TODO: East-Asian width — CJK and wide emoji occupy TWO terminal cells but
+// count as one here, so CJK-heavy columns can drift a cell; needs a wcwidth
+// range table.
+const GRAPHEMES = new Intl.Segmenter();
+
+/** Visible width of a string — ANSI escapes stripped, counted by grapheme cluster. */
+export const width = (s: string): number =>
+	[...GRAPHEMES.segment(s.replace(ANSI_RE, ""))].length;
 
 /**
- * Truncate to `n` visible chars (ellipsis at the cut), ANSI-aware: escape
+ * Truncate to `n` visible graphemes (ellipsis at the cut), ANSI-aware: escape
  * sequences pass through so styling survives, and open styles are closed
  * with a final reset. Plain strings work too — this is THE truncate.
  */
@@ -26,19 +35,25 @@ export function clip(s: string, n: number): string {
 	let out = "";
 	let vis = 0;
 	let styled = false;
-	for (const t of s.match(TOKEN_RE) ?? []) {
-		if (t.startsWith("\x1b")) {
-			out += t;
+	for (const part of s.split(ANSI_SPLIT_RE)) {
+		if (part === "") continue;
+		if (part.startsWith("\x1b")) {
+			out += part;
 			styled = true;
-		} else if (vis < n - 1) {
-			out += t;
-			vis++;
-		} else if (vis === n - 1) {
-			out += "…";
-			vis++;
+			continue;
+		}
+		for (const g of GRAPHEMES.segment(part)) {
+			if (vis < n - 1) {
+				out += g.segment;
+				vis++;
+			} else if (vis === n - 1) {
+				out += "…";
+				vis++;
+			}
 		}
 	}
-	return styled ? `${out}\x1b[0m` : out;
+	// close any open style, without doubling a reset the input already ends on
+	return styled && !out.endsWith("\x1b[0m") ? `${out}\x1b[0m` : out;
 }
 
 export const padEndV = (s: string, n: number): string =>
