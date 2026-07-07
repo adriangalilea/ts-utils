@@ -14,7 +14,7 @@
  *   import { allowList } from '@adriangalilea/utils/bot/allow-list'
  *
  *   bot
- *     .extend(allowList({ ids: [190202471], usernames: ['mrwagecuck'] }))
+ *     .extend(allowList({ ids: [123456789], usernames: ['mrwagecuck'] }))
  *     .on('message', (ctx) => { if (!ctx.allowed) return; ... })
  */
 import { Plugin } from "gramio";

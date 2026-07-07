@@ -11,11 +11,6 @@
  *     `@<bot> shutting down.`) when `KEV.TELEGRAM_ADMIN_ID` is set —
  *     pass `notifyAdmin: false` to disable.
  *
- *   `adminContext({ adminId? })` — reads admin Telegram id from KEV
- *     (`TELEGRAM_ADMIN_ID`) with optional hardcoded fallback. Decorates
- *     every context with `ctx.adminId` (number) and `ctx.isAdmin`
- *     (boolean). Throws at startup if neither source provides an id.
- *
  *   `botSession` / `prefixStorage` — re-exported from `bot/session` so
  *     Node consumers keep one import; the implementation is worker-safe
  *     and lives there.
@@ -25,20 +20,22 @@
  * @example
  * import { Bot } from 'gramio'
  * import { redisStorage } from '@gramio/storage-redis'
- * import { adminContext, gracefulStart, botSession } from '@adriangalilea/utils/bot/kit'
+ * import { gracefulStart, botSession } from '@adriangalilea/utils/bot/kit'
+ * import { adminContext } from '@adriangalilea/utils/bot/admin'
+ * import { kev } from '@adriangalilea/utils/platform/kev'
  *
  * const storage = redisStorage()                          // share across bots, safe
  * const userSession = botSession({ storage, initial: () => ({}) })
  *
  * const bot = new Bot(process.env.BOT_TOKEN!)
- *   .extend(adminContext({ adminId: 190202471 }))         // KEV wins, 190… is fallback
+ *   .extend(adminContext(kev.int('TELEGRAM_ADMIN_ID', 123456789)))  // env, id fallback
  *   .extend(userSession)
  *   .command('whoami', (ctx) => ctx.send(`admin? ${ctx.isAdmin}`))
  *
  * await gracefulStart(bot, { onShutdown: () => db.end() })
  */
 import type { Plugin as PluginType } from "gramio";
-import { type AnyBot, Plugin } from "gramio";
+import type { AnyBot } from "gramio";
 import { kev } from "../platform/kev.js";
 import { notifyAdmins } from "./notify.js";
 
@@ -150,35 +147,8 @@ export const gracefulStart = async (
 	await bot.start();
 };
 
-// ─── adminContext ──────────────────────────────────────────────────
-
-export type AdminContextOptions = {
-	/** Hardcoded fallback used when `KEV.TELEGRAM_ADMIN_ID` is unset. */
-	adminId?: number;
-};
-
-export const adminContext = (opts: AdminContextOptions = {}) => {
-	// KEV resolves: process.env → .env (project + monorepo, auto-discovered) → fallback.
-	// Cached after first read. `kev.int` panics on non-int strings, so a malformed
-	// env var screams immediately rather than producing NaN downstream.
-	const adminId = kev.int("TELEGRAM_ADMIN_ID", opts.adminId ?? 0);
-
-	if (!adminId) {
-		throw new Error(
-			"adminContext: TELEGRAM_ADMIN_ID not set and no adminId fallback. " +
-				"Get your Telegram id from @UserIDentifyBot.",
-		);
-	}
-
-	return new Plugin("@adriangalilea/utils/bot/admin")
-		.decorate({ adminId })
-		.derive((ctx) => ({
-			// `senderId` is provided by gramio's SenderMixin. It's `undefined` on
-			// service-style events without an actor; the strict equality below
-			// gives `false` in that case, which is the right answer.
-			isAdmin: "senderId" in ctx && ctx.senderId === adminId,
-		}));
-};
+// `adminContext` moved to the Worker-safe `bot/admin` subpath (it reads no env, so it never
+// belonged in this Node-only corner). Import it from `@adriangalilea/utils/bot/admin`.
 
 // Re-export so the bot subpath consumers don't need to import from
 // `@gramio/session` separately when wiring custom advanced cases.

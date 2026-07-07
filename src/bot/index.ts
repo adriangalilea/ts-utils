@@ -13,6 +13,7 @@
  */
 
 export * from "./access-control.js";
+export * from "./admin.js";
 export * from "./callbacks.js";
 export * from "./coalesce.js";
 export * from "./ctx.js";

@@ -73,7 +73,7 @@ const menu = botMenu({
 })
 
 const bot = new Bot(process.env.BOT_TOKEN!)
-  .extend(adminContext({ adminId: 190202471 }))
+  .extend(adminContext(123456789))
   .extend(userSession)                                                      // SESSION FIRST
   .extend(accessControl({ session: userSession, storage, defaults: [] }))
   .extend(coalesceLongMessages())
@@ -382,7 +382,7 @@ re-imported, …), they all write the same user's record to the same key
 and the last writer wins:
 
 ```
-redis['190202471'] = { access, language, llm }   ← whichever bot wrote LAST
+redis['123456789'] = { access, language, llm }   ← whichever bot wrote LAST
 ```
 
 Symptom: `/settings → 📥 Export` on bot A returns the data bot B last wrote.
@@ -406,10 +406,10 @@ whole keyspace stays disjoint without any user-side wrapping.
 Resulting Redis layout for two bots sharing one instance:
 
 ```
-bot-7000000001:190202471   = { access, language, llm }   ← bot A, user 190…
+bot-7000000001:123456789   = { access, language, llm }   ← bot A, user 123…
 bot-7000000001:ac:index    = { pending, approved, denied }
 
-bot-8000000002:190202471   = { ... }                     ← same human, bot B
+bot-8000000002:123456789   = { ... }                     ← same human, bot B
 bot-8000000002:ac:index    = { ... }
 ```
 

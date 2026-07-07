@@ -84,7 +84,7 @@
  * const userSession = session({ storage, key: 'session', initial: () => ({}) })
  *
  * const bot = new Bot(process.env.BOT_TOKEN!)
- *   .extend(adminContext({ adminId: 190202471 }))
+ *   .extend(adminContext(123456789))
  *   .extend(userSession)
  *   .extend(accessControl({ session: userSession, storage, defaults: [1158734055] }))
  *   .command('start', (ctx) => ctx.send(`source=${ctx.access.source ?? 'denied'}`))
@@ -502,7 +502,10 @@ export const accessControl = (opts: AccessControlOptions) => {
 				}
 				const senderId = ctx.from.id;
 
-				if (senderId === ctx.adminId) {
+				// ANY admin passes (ctx.isAdmin is the multi-admin gate; ctx.adminId is only the
+				// primary approve/deny target). A secondary admin must not fall through to the
+				// pending-request path just because they aren't the primary.
+				if (ctx.isAdmin) {
 					return {
 						access: { allowed: true, source: "admin" } satisfies AccessInfo,
 					};

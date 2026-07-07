@@ -4,7 +4,7 @@
  * `node:*` module and no `platform/` module (kev walks the filesystem)
  * anywhere in their static import graph, and no import-time side effects
  * that assume an OS. `bot/kit` is the deliberate exception — it owns the
- * Node-only pieces (gracefulStart signals, kev-backed adminContext) and
+ * Node-only pieces (gracefulStart's process-signal wiring, kev env reads) and
  * is excluded from the safe set on purpose.
  *
  * Two layers:
@@ -26,6 +26,7 @@ const SAFE_ENTRIES = [
 	"bot/ctx.js",
 	"bot/keys.js",
 	"bot/access-control.js",
+	"bot/admin.js",
 	"bot/allow-list.js",
 	"bot/callbacks.js",
 	"bot/coalesce.js",

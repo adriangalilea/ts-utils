@@ -86,7 +86,7 @@ const menu = botMenu({
 })
 
 const bot = new Bot(process.env.BOT_TOKEN!)
-  .extend(adminContext({ adminId: 190202471 }))
+  .extend(adminContext(123456789))
   .extend(userSession)
   .extend(lang.plugin)
   .extend(payments.plugin)
