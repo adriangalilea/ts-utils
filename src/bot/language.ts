@@ -12,9 +12,13 @@
  * ## What this plugin owns
  *
  *   - Validates the supported BCP-47 language tags via `Intl.getCanonicalLocales`
- *   - Resolves `ctx.lang` on every event (override → Telegram hint → default)
- *   - Persists the user's chosen language as `ctx.session.language`
- *   - Provides a `menuItem` for a `botMenu`'s language picker
+ *   - Resolves `ctx.lang` AND `ctx.say` on every event (stored pick → Telegram
+ *     hint → default), all READ-TIME: the hint is never persisted, so a user who
+ *     switches their Telegram client language moves with it until they pick
+ *   - Persists a language as `ctx.session.language` ONLY on an explicit pick
+ *     (the menuItem action) — consumers must not auto-write inferred values
+ *   - Provides a `menuItem` for a `botMenu`'s language picker (highlight shows
+ *     the EFFECTIVE language, hint included)
  *
  * ## What this plugin does NOT own
  *
@@ -85,6 +89,18 @@ export const isLangCode = (s: unknown): s is LangCode => {
 	} catch {
 		return false;
 	}
+};
+
+/**
+ * Primary subtag of a Telegram client language hint (`"pt-BR"` → `"pt"`),
+ * or undefined when absent/unusable. The shared normalizer behind every
+ * read-time hint fallback (`ctx.lang`, `ctx.say`, menu chrome): the hint is
+ * resolved live per event and NEVER persisted — only an explicit user pick
+ * writes `session.language`.
+ */
+export const langHintOf = (code: string | undefined): string | undefined => {
+	const primary = code?.toLowerCase().split("-")[0] ?? "";
+	return /^[a-z]{2,3}$/.test(primary) ? primary : undefined;
 };
 
 export type LanguageScopeStrategy = "user" | "chat";
@@ -195,6 +211,9 @@ const buildSayer = <L extends string>(
 	ctx: unknown,
 	canonicalSet: ReadonlySet<string>,
 	defaultLang: L,
+	/** Scope-resolved Telegram hint, precomputed by the derive (it can't change
+	 *  mid-handler); the read-time fallback between the stored pick and the default. */
+	hintLang?: L,
 ): Sayer<L> => {
 	type CtxLike = {
 		session?: { language?: string };
@@ -206,7 +225,8 @@ const buildSayer = <L extends string>(
 
 	const currentLang = (): L => {
 		const stored = c.session?.language;
-		return stored && canonicalSet.has(stored) ? (stored as L) : defaultLang;
+		if (stored && canonicalSet.has(stored)) return stored as L;
+		return hintLang ?? defaultLang;
 	};
 
 	const resolve = <V extends Polyglot<L>>(value: V): string => {
@@ -367,6 +387,23 @@ export const language = <const Langs extends readonly string[]>(
 		return undefined;
 	};
 
+	// The user's EFFECTIVE language for chrome that renders outside the derive
+	// (the picker highlight): stored pick → Telegram hint (full tag, then primary
+	// subtag) → default. Read-time, mirrors the derive's chain.
+	const effectiveLang = (ctx: unknown): Lang => {
+		const c = ctx as {
+			session?: { language?: string };
+			from?: { languageCode?: string };
+		};
+		const stored = c.session?.language;
+		if (stored && canonicalSet.has(stored)) return stored as Lang;
+		return (
+			matchSupported(c.from?.languageCode) ??
+			matchSupported(langHintOf(c.from?.languageCode)) ??
+			defaultLanguage
+		);
+	};
+
 	const plugin = buildLanguagePlugin<Lang>({
 		sessionPlugin: opts.session,
 		canonicalSet,
@@ -383,19 +420,15 @@ export const language = <const Langs extends readonly string[]>(
 			label: labels[l] ?? defaultLabel(l),
 			// Pack the picker two languages per row (break after each odd index).
 			keepRow: i % 2 === 0 && i < arr.length - 1,
-			// The currently-selected language renders blue (Telegram's
-			// `primary` style); the rest stay at app default. Replaces the
-			// old `●` / `○` markers — same signal, native Telegram styling.
+			// The user's EFFECTIVE language renders blue (Telegram's `primary`
+			// style); the rest stay at app default. Replaces the old `●` / `○`
+			// markers — same signal, native Telegram styling.
 			//
-			// Reads `ctx.session.language` (the live store), NOT `ctx.lang`
-			// (the event-start snapshot from the language derive — would
-			// be stale within the same callback after the sibling action
-			// mutated the session).
-			style: (ctx) =>
-				(ctx as unknown as { session?: { language?: string } }).session
-					?.language === l
-					? "primary"
-					: undefined,
+			// Resolves stored → hint → default LIVE (not `ctx.lang`, the
+			// event-start snapshot — stale within the same callback after the
+			// sibling action mutated the session), so the highlight tracks
+			// reality even before any explicit pick exists.
+			style: (ctx) => (effectiveLang(ctx) === l ? "primary" : undefined),
 			// Re-render the submenu in place after the tap so the colour
 			// moves to the newly-selected language without the user having
 			// to re-open the menu.
@@ -448,33 +481,36 @@ const buildLanguagePlugin = <Lang extends string>(args: {
 			// (ctx.session: SessionLike) flow into our handlers below.
 			.extend(sessionPlugin)
 			.derive(["message", "callback_query"], (ctx) => {
+				// The Telegram hint, scope-resolved ONCE per event (it can't change
+				// mid-handler): honored only in user-scoped resolution — in groups it
+				// would flicker per-speaker. Full tag first ("pt-BR"), then its
+				// primary subtag ("pt"). Never persisted: the read-time middle rung
+				// between a stored explicit pick and the configured default.
+				const chatType = ctx.is("message")
+					? ctx.chat.type
+					: (ctx.message?.chat.type ?? "private");
+				const strategy = resolveScope(scopeOpt, chatType);
+				const hintLang =
+					strategy === "user"
+						? (matchSupported(ctx.from.languageCode) ??
+							matchSupported(langHintOf(ctx.from.languageCode)))
+						: undefined;
+
 				// Snapshot resolved at event start. Stays static through the
 				// handler — see the JSDoc on `LanguageDerives.lang` below for
 				// the staleness gotcha and why `ctx.say` is the live escape.
-				const resolveLang = (): Lang => {
-					// 1) stored override
-					const stored = ctx.session.language;
-					if (stored && canonicalSet.has(stored)) return stored as Lang;
-
-					// 2) Telegram hint — only when in user-scoped resolution
-					const chatType = ctx.is("message")
-						? ctx.chat.type
-						: (ctx.message?.chat.type ?? "private");
-					const strategy = resolveScope(scopeOpt, chatType);
-					if (strategy === "user") {
-						const hint = matchSupported(ctx.from.languageCode);
-						if (hint) return hint;
-					}
-
-					// 3) configured default
-					return defaultLanguage;
-				};
+				const stored = ctx.session.language;
+				const lang: Lang =
+					stored && canonicalSet.has(stored)
+						? (stored as Lang)
+						: (hintLang ?? defaultLanguage);
 
 				return {
-					lang: resolveLang(),
+					lang,
 					// LIVE: re-resolves ctx.session.language on every call so
-					// post-mutation reads inside a handler get the new value.
-					say: buildSayer<Lang>(ctx, canonicalSet, defaultLanguage),
+					// post-mutation reads inside a handler get the new value;
+					// falls to the hint, then the default, when nothing is stored.
+					say: buildSayer<Lang>(ctx, canonicalSet, defaultLanguage, hintLang),
 				};
 			})
 	);

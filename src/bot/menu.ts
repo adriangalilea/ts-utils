@@ -81,6 +81,7 @@ import { CallbackData, InlineKeyboard, Plugin } from "gramio";
 
 import { type Polyglot, say } from "../say/index.js";
 import { botStorageKey } from "./keys.js";
+import { langHintOf } from "./language.js";
 
 // ─── public types ──────────────────────────────────────────────────
 
@@ -100,7 +101,7 @@ import { botStorageKey } from "./keys.js";
  */
 export type MenuCtx = {
 	bot: unknown;
-	from?: { id: number };
+	from?: { id: number; languageCode?: string };
 	chat?: { id: number; type: string };
 	session?: { language?: string };
 	threadId?: number;
@@ -172,8 +173,11 @@ export type ButtonStyle = "primary" | "success" | "danger";
 type StyleResolver = ButtonStyle | ((ctx: MenuCtx) => ButtonStyle | undefined);
 
 const FALLBACK_LANG = "en";
+// Chrome language, read-time: the stored explicit pick, else the Telegram
+// hint's primary subtag (never persisted), else English. `say()` falls back
+// per-polyglot when a catalog lacks the resolved language.
 const ctxLang = (ctx: MenuCtx): string =>
-	ctx.session?.language ?? FALLBACK_LANG;
+	ctx.session?.language ?? langHintOf(ctx.from?.languageCode) ?? FALLBACK_LANG;
 
 const styleOf = (
 	s: StyleResolver | undefined,
