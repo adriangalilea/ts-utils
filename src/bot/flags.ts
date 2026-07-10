@@ -114,15 +114,17 @@ export type Flags<Spec extends Record<string, FlagSpec>> = {
 	overrides: (ctx: unknown) => Promise<Record<string, unknown>>;
 	/**
 	 * Resolve a flag by RUNTIME key — same resolution as the typed accessor,
-	 * loosely typed. For generic admin surfaces iterating `describe()`; call
-	 * sites use `await flags.<key>(ctx)`.
+	 * loosely typed (unknown key panics). For generic admin surfaces iterating
+	 * `describe()`; call sites use `await flags.<key>(ctx)`.
 	 */
-	get: (ctx: unknown, key: keyof Spec & string) => Promise<unknown>;
+	get: (ctx: unknown, key: string) => Promise<unknown>;
 	/**
 	 * Write a live override (scalar or tier map, kind-checked), or `null`
-	 * to clear it back to the code default. Panics without a `write` backend.
+	 * to clear it back to the code default. Runtime key (unknown panics), so
+	 * generic panels can write what `describe()` lists. Panics without a
+	 * `write` backend.
 	 */
-	set: (ctx: unknown, key: keyof Spec & string, value: unknown) => Promise<void>;
+	set: (ctx: unknown, key: string, value: unknown) => Promise<void>;
 };
 
 // ─── internals ───────────────────────────────────────────────────────
