@@ -56,6 +56,11 @@ type Lang = { language_code?: string };
 export type ProfileBot = {
 	info?: { username?: string; supports_inline_queries?: boolean };
 	api: {
+		/** Optional in the type: needs gramio with Bot API 10.1+ types (declaring `photo` on an
+		 *  older client logs an error instead of silently doing nothing). */
+		setMyProfilePhoto?: (p: {
+			photo: { type: "static"; photo: Blob };
+		}) => Promise<unknown>;
 		getMyName: (p: Lang) => Promise<{ name?: string }>;
 		setMyName: (p: { name: string } & Lang) => Promise<unknown>;
 		getMyDescription: (p: Lang) => Promise<{ description?: string }>;
@@ -81,6 +86,24 @@ export interface BotProfileOptions {
 	about?: Localized<string>;
 	/** Public command list per language (admin commands stay out — they're behavior, not menu). */
 	commands?: Localized<ReadonlyArray<BotCommandEntry>>;
+	/**
+	 * Profile photo as CODE (`setMyProfilePhoto`, Bot API 10.1+): commit the art, declare it
+	 * here, and a fresh token (or a garbage BotFather upload) heals on the next boot. Telegram
+	 * re-encodes uploads, so bytes can't be diffed against the current photo — `version` IS the
+	 * identity: it's persisted via `applied` after a successful set, and the sync re-uploads
+	 * only when the declared version differs from the stored one. Bump it when the art changes.
+	 */
+	photo?: {
+		/** JPEG bytes, square, ≥512px (Workers: bundle the asset via a wrangler `Data` rule). */
+		data: ArrayBuffer | Uint8Array;
+		/** The art's identity ("ghost-v1") — bump to force a re-upload. */
+		version: string;
+		/** Where the applied-version marker persists (the bot's own config record). */
+		applied: {
+			get: () => Promise<string | undefined>;
+			set: (version: string) => Promise<void>;
+		};
+	};
 	/**
 	 * BotFather-only capabilities this bot's features assume. Checked against `getMe` on every
 	 * sync; a mismatch WARNS the admins (it can't be fixed over the API, only surfaced).
@@ -187,6 +210,26 @@ export async function syncBotProfile(
 			await bot.api.setMyCommands({ commands: [...list], ...langParam(lang) });
 			log.info(`commands synced${lang ? ` (${lang})` : ""} (${list.length})`);
 		});
+	}
+	const photo = opts.photo;
+	if (photo) {
+		jobs.push(
+			(async () => {
+				const setPhoto = bot.api.setMyProfilePhoto;
+				if (!setPhoto) {
+					log.error("photo declared but the client lacks setMyProfilePhoto (Bot API 10.1+)");
+					return;
+				}
+				if ((await photo.applied.get()) === photo.version) return;
+				const blob = new Blob(
+					[photo.data instanceof Uint8Array ? photo.data : new Uint8Array(photo.data)],
+					{ type: "image/jpeg" },
+				);
+				await setPhoto({ photo: { type: "static", photo: blob } });
+				await photo.applied.set(photo.version);
+				log.info(`profile photo synced (${photo.version})`);
+			})(),
+		);
 	}
 
 	try {
