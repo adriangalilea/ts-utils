@@ -22,6 +22,14 @@ export type {
 	PaymentsCtx,
 } from "./plugin.js";
 export { botPayments } from "./plugin.js";
+
+/**
+ * Telegram's developer payout per Star (via Fragment), in USD. THE display-time
+ * conversion constant for Stars revenue: store XTR (the truth), convert only when
+ * showing dollars — retail prices (~$0.02/⭐) overstate what you actually receive.
+ * One home so every dashboard/bot agrees; update here when Telegram moves the rate.
+ */
+export const XTR_USD_PAYOUT = 0.013;
 export type {
 	AtLeastKey,
 	BotPaymentsConfig,
