@@ -507,7 +507,7 @@ Field summary:
 - `action` returns `void | string | Polyglot<string>`; the menu plugin sends a single `answerCallbackQuery` with that text. **Never call `ctx.answer(...)` from inside an action** — Telegram rejects the second answer, the action throws, and `refresh` never runs.
 - `confirm: { prompt }` adds a one-step confirmation overlay before the action runs. Cancel returns to root. Use this for destructive actions instead of `ctx.answer({ show_alert: true })` — Telegram's alert UI doesn't compose with refresh / toast.
 
-**Live state inside resolvers**: `label` / `style` resolvers fire AFTER the action mutated the session. Read mutable state from `ctx.session.<field>` directly. `ctx.lang` from `bot/language` is a snapshot at event start and goes stale within the same callback; `ctx.say(...)` IS live and safe to use anywhere.
+**Live state inside resolvers**: `label` / `style` / `header` / `visible` resolvers fire AFTER the action mutated the session, and they may be **async** — read your database (or `ctx.session.<field>`) directly at render time; never cache render strings into the session to satisfy a signature. `ctx.lang` from `bot/language` is a snapshot at event start and goes stale within the same callback; `ctx.say(...)` IS live and safe to use anywhere.
 
 See `src/bot/CLAUDE.md` for storage layout, design decisions, and gotchas.
 

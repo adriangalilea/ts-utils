@@ -130,12 +130,17 @@ export type MenuCtx = {
  *   label: { en: 'Settings', es: 'Ajustes' }
  *   label: (ctx) => `Hi ${ctx.from?.firstName}`
  *   label: (ctx) => ({ en: `Hi ${name}`, es: `Hola ${name}` })
+ *   label: async (ctx) => `📊 ${await store.readCount(ctx)} left`
+ *
+ * Resolvers may be ASYNC (labels, headers, styles, visibility): the menu
+ * awaits them at render time, so state can come straight from a database —
+ * never cache render strings into the session to satisfy a sync signature.
  */
 type Label =
 	| string
 	| Polyglot<string>
-	| ((ctx: MenuCtx) => string | Polyglot<string>);
-type Predicate = (ctx: MenuCtx) => boolean;
+	| ((ctx: MenuCtx) => string | Polyglot<string> | Promise<string | Polyglot<string>>);
+type Predicate = (ctx: MenuCtx) => boolean | Promise<boolean>;
 
 /**
  * What a menu action's return value means:
@@ -170,7 +175,9 @@ type Action = (ctx: MenuCtx) => Promise<ActionResult> | ActionResult;
  */
 export type ButtonStyle = "primary" | "success" | "danger";
 
-type StyleResolver = ButtonStyle | ((ctx: MenuCtx) => ButtonStyle | undefined);
+type StyleResolver =
+	| ButtonStyle
+	| ((ctx: MenuCtx) => ButtonStyle | undefined | Promise<ButtonStyle | undefined>);
 
 const FALLBACK_LANG = "en";
 // Chrome language, read-time: the stored explicit pick, else the Telegram
@@ -179,10 +186,10 @@ const FALLBACK_LANG = "en";
 const ctxLang = (ctx: MenuCtx): string =>
 	ctx.session?.language ?? langHintOf(ctx.from?.languageCode) ?? FALLBACK_LANG;
 
-const styleOf = (
+const styleOf = async (
 	s: StyleResolver | undefined,
 	ctx: MenuCtx,
-): ButtonStyle | undefined => {
+): Promise<ButtonStyle | undefined> => {
 	if (s === undefined) return undefined;
 	if (typeof s === "function") return s(ctx);
 	return s;
@@ -291,6 +298,15 @@ export type PersonalDataOptions = {
 	 * same key shape by construction.
 	 */
 	storage: Storage;
+	/**
+	 * Forget must actually forget. The storage delete above only wipes the
+	 * SESSION record — if your bot keeps per-user state anywhere else
+	 * (message logs, metrics tables, credit rows), wipe it HERE. Runs after
+	 * the session delete, inside the same try: a failing onForget reports
+	 * "Failed" + your admin contact to the user instead of lying about a
+	 * partial erasure.
+	 */
+	onForget?: (ctx: MenuCtx, userId: number) => void | Promise<void>;
 };
 
 export type BotMenuOptions = {
@@ -307,7 +323,9 @@ export type BotMenuOptions = {
 	 */
 	privacy?: string;
 	/**
-	 * Header text rendered above the keyboard.
+	 * Header text rendered above the keyboard. May be an ASYNC resolver —
+	 * read your database here instead of caching render strings in the
+	 * session. Rendered with `parseMode` when set.
 	 */
 	header?: Label;
 	/**
@@ -325,6 +343,13 @@ export type BotMenuOptions = {
 	 * no per-user state beyond what Telegram's standard policy covers).
 	 */
 	personalData?: PersonalDataOptions;
+	/**
+	 * Parse mode for the HEADER text (`"HTML"` or `"MarkdownV2"`). Off by
+	 * default (plain text). With it set, your header owns escaping — user
+	 * content interpolated into an HTML header must be entity-escaped by you.
+	 * Button labels are never parsed (Telegram renders them plain).
+	 */
+	parseMode?: "HTML" | "MarkdownV2";
 	/**
 	 * Allow the menu to open and operate in group chats. Off by default: with
 	 * `personalData` set the menu is private-only (data controls shouldn't surface
@@ -368,6 +393,7 @@ const closeCb = new CallbackData("mCls");
 
 type ResolvedPersonalData = {
 	storage: Storage;
+	onForget: ((ctx: MenuCtx, userId: number) => void | Promise<void>) | null;
 };
 
 type ResolvedOpts = {
@@ -378,7 +404,15 @@ type ResolvedOpts = {
 	adminContact: string;
 	personalData: ResolvedPersonalData | null;
 	allowInGroups: boolean;
+	parseMode: "HTML" | "MarkdownV2" | null;
 };
+
+// send/editText params for a header render: the keyboard plus the menu's
+// parse mode (headers only — chrome strings and toasts stay plain).
+const headerParams = (menu: BotMenu, kb: InlineKeyboard): object => ({
+	reply_markup: kb,
+	...(menu._opts.parseMode ? { parse_mode: menu._opts.parseMode } : {}),
+});
 
 // Recursively validate that no MenuItem id contains `.` — the menu's
 // callback paths are dot-joined, so a dot in an id collides with the
@@ -417,9 +451,13 @@ export class BotMenu {
 			header: opts.header ?? DEFAULT_HEADER,
 			adminContact: opts.adminContact,
 			personalData: opts.personalData
-				? { storage: opts.personalData.storage }
+				? {
+						storage: opts.personalData.storage,
+						onForget: opts.personalData.onForget ?? null,
+					}
 				: null,
 			allowInGroups: opts.allowInGroups ?? false,
+			parseMode: opts.parseMode ?? null,
 		};
 	}
 
@@ -448,7 +486,7 @@ export type ToggleMenuItemOptions = {
 	 * ctx.session?.someField ?? false`. Storage-agnostic — return
 	 * `false` by default so the toggle starts in the OFF state.
 	 */
-	read: (ctx: MenuCtx) => boolean;
+	read: (ctx: MenuCtx) => boolean | Promise<boolean>;
 	/**
 	 * Persists the new value. Typically `(ctx, v) => {
 	 * (ctx.session as any).someField = v }`. The menu plugin does NOT
@@ -508,16 +546,16 @@ export const toggleMenuItem = (opts: ToggleMenuItemOptions): MenuItem => ({
 	visible: opts.visible,
 	// ON state is the active state → 'primary' (blue, Telegram's
 	// "selected" colour). OFF state stays unstyled (app default).
-	style: (ctx) => (opts.read(ctx) ? "primary" : undefined),
+	style: async (ctx) => ((await opts.read(ctx)) ? "primary" : undefined),
 	// Re-render the menu after the tap so the user sees the colour /
 	// label flip immediately, without having to re-open /settings.
 	refresh: true,
-	label: (ctx) => {
-		const l = opts.read(ctx) ? opts.label.on : opts.label.off;
-		return typeof l === "function" ? l(ctx) : l;
+	label: async (ctx) => {
+		const l = (await opts.read(ctx)) ? opts.label.on : opts.label.off;
+		return typeof l === "function" ? await l(ctx) : l;
 	},
 	action: async (ctx) => {
-		const wasOn = opts.read(ctx);
+		const wasOn = await opts.read(ctx);
 		const willBeOn = !wasOn;
 		await opts.write(ctx, willBeOn);
 
@@ -525,15 +563,15 @@ export const toggleMenuItem = (opts: ToggleMenuItemOptions): MenuItem => ({
 		// answerCallbackQuery — don't call ctx.answer directly here.
 		const t = willBeOn ? opts.toast?.on : opts.toast?.off;
 		if (t === undefined) return;
-		const resolved = typeof t === "function" ? t(ctx) : t;
+		const resolved = typeof t === "function" ? await t(ctx) : t;
 		return resolved;
 	},
 });
 
 // ─── internal: rendering + plugin ──────────────────────────────────
 
-const labelOf = (l: Label, ctx: MenuCtx): string => {
-	const resolved = typeof l === "function" ? l(ctx) : l;
+const labelOf = async (l: Label, ctx: MenuCtx): Promise<string> => {
+	const resolved = typeof l === "function" ? await l(ctx) : l;
 	if (typeof resolved === "string") return resolved;
 	return say(resolved, ctxLang(ctx));
 };
@@ -594,22 +632,26 @@ const renderPrivacySubmenu = (menu: BotMenu, ctx: MenuCtx): InlineKeyboard => {
 	return kb;
 };
 
-const renderKeyboard = (
+const renderKeyboard = async (
 	items: MenuItem[],
 	ctx: MenuCtx,
 	parentPath: string[],
-): InlineKeyboard => {
+): Promise<InlineKeyboard> => {
 	const kb = new InlineKeyboard();
 	const isRoot = parentPath.length === 0;
 
-	const sorted = [...items]
-		.filter((i) => (i.visible ? i.visible(ctx) : true))
+	// Visibility resolves concurrently (it may be async); order stays stable.
+	const visibility = await Promise.all(
+		items.map((i) => (i.visible ? i.visible(ctx) : true)),
+	);
+	const sorted = items
+		.filter((_, idx) => visibility[idx])
 		.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-	const addButton = (item: MenuItem) => {
+	const addButton = async (item: MenuItem) => {
 		const path = [...parentPath, item.id].join(".");
-		const label = labelOf(item.label, ctx);
-		const style = styleOf(item.style, ctx);
+		const label = await labelOf(item.label, ctx);
+		const style = await styleOf(item.style, ctx);
 		const opts = style ? { style } : undefined;
 
 		if ("action" in item) {
@@ -626,7 +668,7 @@ const renderKeyboard = (
 	// `rootExtra` items render at the bottom (below Privacy & data), not here.
 	for (const item of sorted) {
 		if (isRoot && item.rootExtra) continue;
-		addButton(item);
+		await addButton(item);
 	}
 
 	const lang = ctxLang(ctx);
@@ -639,7 +681,7 @@ const renderKeyboard = (
 		);
 		kb.row();
 		// Bot-supplied bottom rows (e.g. group-scoped controls) sit below Privacy & data.
-		for (const item of sorted) if (item.rootExtra) addButton(item);
+		for (const item of sorted) if (item.rootExtra) await addButton(item);
 		// Root has no Back — Close gets its own row.
 		kb.text(say({ en: "✖️ Close", es: "✖️ Cerrar" }, lang), closeCb.pack({}));
 	} else {
@@ -701,8 +743,8 @@ const buildMenuPlugin = (menu: BotMenu) => {
 		new Plugin("@adriangalilea/utils/bot/menu")
 			.command(command, { description }, async (ctx) => {
 				if (!(await guardPrivate(ctx))) return;
-				const kb = renderKeyboard(menu._items, ctx, []);
-				await ctx.send(labelOf(header, ctx), { reply_markup: kb });
+				const kb = await renderKeyboard(menu._items, ctx, []);
+				await ctx.send(await labelOf(header, ctx), headerParams(menu, kb));
 			})
 			// Navigate (root / submenu)
 			.callbackQuery(navCb, async (ctx) => {
@@ -715,7 +757,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 					await ctx.answer({});
 					const kb = renderPrivacySubmenu(menu, ctx);
 					try {
-						await ctx.editText(labelOf(header, ctx), { reply_markup: kb });
+						await ctx.editText(await labelOf(header, ctx), headerParams(menu, kb));
 					} catch {
 						// message too old to edit
 					}
@@ -730,9 +772,9 @@ const buildMenuPlugin = (menu: BotMenu) => {
 					return;
 				}
 				await ctx.answer({});
-				const kb = renderKeyboard(items, ctx, segments);
+				const kb = await renderKeyboard(items, ctx, segments);
 				try {
-					await ctx.editText(labelOf(header, ctx), { reply_markup: kb });
+					await ctx.editText(await labelOf(header, ctx), headerParams(menu, kb));
 				} catch {
 					// message too old to edit
 				}
@@ -783,12 +825,12 @@ const buildMenuPlugin = (menu: BotMenu) => {
 				// action. The real action runs on actConfirmCb (Confirm tap).
 				if (item.confirm) {
 					await ctx.answer({});
-					const promptText = labelOf(item.confirm.prompt, ctx);
+					const promptText = await labelOf(item.confirm.prompt, ctx);
 					const confirmLabel = item.confirm.confirmLabel
-						? labelOf(item.confirm.confirmLabel, ctx)
+						? await labelOf(item.confirm.confirmLabel, ctx)
 						: say({ en: "✅ Confirm", es: "✅ Confirmar" }, lang);
 					const cancelLabel = item.confirm.cancelLabel
-						? labelOf(item.confirm.cancelLabel, ctx)
+						? await labelOf(item.confirm.cancelLabel, ctx)
 						: say({ en: "⬅️ Cancel", es: "⬅️ Cancelar" }, lang);
 					try {
 						await ctx.editText(promptText, {
@@ -841,9 +883,9 @@ const buildMenuPlugin = (menu: BotMenu) => {
 					const parentPath = segments.slice(0, -1);
 					const items = itemsForPath(menu._items, parentPath);
 					if (items) {
-						const kb = renderKeyboard(items, ctx, parentPath);
+						const kb = await renderKeyboard(items, ctx, parentPath);
 						try {
-							await ctx.editText(labelOf(header, ctx), { reply_markup: kb });
+							await ctx.editText(await labelOf(header, ctx), headerParams(menu, kb));
 						} catch {
 							// message too old to edit
 						}
@@ -892,9 +934,9 @@ const buildMenuPlugin = (menu: BotMenu) => {
 				// Always navigate back to root after a confirmed destructive
 				// action — the previous context (where the user tapped) might
 				// not make sense anymore.
-				const kb = renderKeyboard(menu._items, ctx, []);
+				const kb = await renderKeyboard(menu._items, ctx, []);
 				try {
-					await ctx.editText(labelOf(header, ctx), { reply_markup: kb });
+					await ctx.editText(await labelOf(header, ctx), headerParams(menu, kb));
 				} catch {
 					// message too old to edit
 				}
@@ -918,6 +960,10 @@ const buildMenuPlugin = (menu: BotMenu) => {
 
 				try {
 					await personalData.storage.delete(botStorageKey(ctx, userId));
+					// The consumer's own tables (message logs, metrics, …) — a
+					// failure lands in the catch below and the user is told the
+					// truth instead of a partial erasure reading as success.
+					await personalData.onForget?.(ctx, userId);
 					await ctx.answer({
 						text: say({ en: "Deleted.", es: "Borrado." }, lang),
 					});
@@ -957,7 +1003,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 				// came from), not root — saves the re-navigation tap.
 				const kb = renderPrivacySubmenu(menu, ctx);
 				try {
-					await ctx.editText(labelOf(header, ctx), { reply_markup: kb });
+					await ctx.editText(await labelOf(header, ctx), headerParams(menu, kb));
 				} catch {
 					// message too old to edit
 				}
