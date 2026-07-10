@@ -84,6 +84,10 @@
 			"types": "./dist/bot/storage.d.ts",
 			"default": "./dist/bot/storage.js"
 		},
+		"./bot/storage-d1": {
+			"types": "./dist/bot/storage-d1.d.ts",
+			"default": "./dist/bot/storage-d1.js"
+		},
 		"./bot/ctx": {
 			"types": "./dist/bot/ctx.d.ts",
 			"default": "./dist/bot/ctx.js"
@@ -103,6 +107,10 @@
 		"./bot/notify": {
 			"types": "./dist/bot/notify.d.ts",
 			"default": "./dist/bot/notify.js"
+		},
+		"./bot/worker": {
+			"types": "./dist/bot/worker.d.ts",
+			"default": "./dist/bot/worker.js"
 		}
 	},
 	"files": [
