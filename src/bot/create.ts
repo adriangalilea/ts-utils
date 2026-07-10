@@ -51,7 +51,9 @@ const log = createLogger("bot");
 
 type EnvLike = Record<string, unknown>;
 
-export type CreateBotOptions = {
+export type CreateBotOptions<
+	S extends Record<string, unknown> = Record<string, unknown>,
+> = {
 	/** Display name for startup logs. Default: the bot's username once known. */
 	name?: string;
 	/**
@@ -61,12 +63,16 @@ export type CreateBotOptions = {
 	 */
 	token?: string | ((env: EnvLike) => string | undefined);
 	/**
-	 * Session storage OVERRIDE. Default resolution (the lifecycle story):
-	 * workerd → the `DB` D1 binding; Node → `BOT_PERSIST` (a path = sqlite via
-	 * `@gramio/storage-sqlite`, `redis://…` = `@gramio/storage-redis`), else
-	 * in-memory (ephemeral, announced at startup).
+	 * Session storage OVERRIDE — an instance, or `(env) => Storage` when the
+	 * choice depends on the environment (e.g. a D1 binding NOT named `DB`).
+	 * Default resolution (the lifecycle story): workerd → the `DB` D1 binding;
+	 * Node → `BOT_PERSIST` (a path = sqlite via `@gramio/storage-sqlite`,
+	 * `redis://…` = `@gramio/storage-redis`), else in-memory (ephemeral,
+	 * announced at startup).
 	 */
-	storage?: Storage;
+	storage?: Storage | ((env: EnvLike) => Storage | Promise<Storage>);
+	/** Initial session record for a new user. Types `S` through to `handlers`' session accessor. */
+	initial?: () => S;
 	/** Admin user ids (static or a LIVE resolver) — enables access/payments admin flows + lifecycle DMs. */
 	admins?: Admins;
 	/** UI language feature (`ctx.lang`/`ctx.say`, read-time stored→hint→default). */
@@ -86,17 +92,25 @@ export type CreateBotOptions = {
 	access?: Omit<AccessControlOptions, "session" | "storage">;
 	/** Telegram Stars monetization (requires `admins` — the refund approver). */
 	payments?: Omit<BotPaymentsConfig<string>, "session" | "storage">;
-	/** Your commands/handlers — runs LAST, after every feature is wired. */
-	handlers?: (bot: Bot) => void;
+	/**
+	 * Your commands/handlers — runs LAST, after every feature is wired.
+	 * `session(ctx)` is the TYPED accessor for your `S` fields (gramio derive
+	 * types don't flow into generic handlers; this beats casting per call site).
+	 */
+	handlers?: (bot: Bot, api: { session: (ctx: unknown) => S }) => void;
 	/** Extra options forwarded to `bot/worker` in the Worker cap (routes, statusExtra, mode…). */
 	worker?: (env: EnvLike) => Partial<BotWorkerRuntime>;
 };
 
-export type BotApp = {
+export type BotApp<
+	S extends Record<string, unknown> = Record<string, unknown>,
+> = {
 	/** Build (memoized) — exposed for tests and custom runtimes. */
 	build(
 		env?: EnvLike,
 	): Promise<{ bot: Bot; storage: Storage; flush?: () => Promise<void> }>;
+	/** Typed accessor for your session fields (`S`), usable anywhere a ctx exists. */
+	session(ctx: unknown): S;
 	/** Long-poll (Node/Bun/Deno). The ideation loop AND a legitimate prod mode on your own hardware. */
 	poll(): Promise<void>;
 	/** True when this module is the process entrypoint (`tsx bot.ts`). Always false on workerd. */
@@ -125,7 +139,9 @@ const idsOf = (v: number | readonly number[]): number[] =>
 		(n) => Number.isFinite(n) && n > 0,
 	);
 
-export function createBot(opts: CreateBotOptions = {}): BotApp {
+export function createBot<
+	S extends Record<string, unknown> = Record<string, unknown>,
+>(opts: CreateBotOptions<S> = {}): BotApp<S> {
 	let built: Promise<{
 		bot: Bot;
 		storage: Storage;
@@ -149,7 +165,15 @@ export function createBot(opts: CreateBotOptions = {}): BotApp {
 		kind: string;
 		flush?: () => Promise<void>;
 	}> => {
-		if (opts.storage) return { storage: opts.storage, kind: "custom" };
+		if (opts.storage) {
+			if (typeof opts.storage === "function") {
+				return {
+					storage: await opts.storage(env),
+					kind: "custom (env-resolved)",
+				};
+			}
+			return { storage: opts.storage, kind: "custom" };
+		}
 		const db = env.DB as D1Like | undefined;
 		if (db && typeof db === "object" && "prepare" in db) {
 			const storage = d1Storage({ db });
@@ -198,7 +222,13 @@ export function createBot(opts: CreateBotOptions = {}): BotApp {
 			log.info(`session: ${kind}`);
 
 			// ONE session, threaded everywhere — the composer's whole job.
-			const session = botSession({ storage, initial: () => ({}) });
+			const session = botSession({
+				storage,
+				initial: (opts.initial ?? (() => ({}))) as () => Record<
+					string,
+					unknown
+				>,
+			});
 			bot.extend(session);
 
 			const lang = opts.language
@@ -242,10 +272,40 @@ export function createBot(opts: CreateBotOptions = {}): BotApp {
 				);
 			}
 
-			opts.handlers?.(bot);
+			opts.handlers?.(bot, { session: sessionOf });
+
+			// Narrate the composition — automation you can watch is not magic.
+			const features = [
+				opts.language ? `language(${opts.language.supported.join(",")})` : null,
+				opts.menu ? `menu(/${opts.menu.command ?? "settings"})` : null,
+				opts.admins ? "admins" : null,
+				opts.access ? "access" : null,
+				opts.payments
+					? `payments(${[
+							opts.payments.vip?.length
+								? `vip×${opts.payments.vip.length}`
+								: null,
+							opts.payments.credits ? "credits" : null,
+							opts.payments.perks ? "perks" : null,
+						]
+							.filter(Boolean)
+							.join("+")})`
+					: null,
+			].filter(Boolean);
+			if (features.length > 0) log.info(`features: ${features.join(" · ")}`);
+
 			return { bot, storage, flush };
 		})();
 		return built;
+	};
+
+	// The typed session accessor: gramio derive types don't flow into generic
+	// handlers, so this ONE cast (behind a name) replaces a cast per call site.
+	const sessionOf = (ctx: unknown): S => {
+		const s = (ctx as { session?: S }).session;
+		if (!s)
+			throw new Error("createBot: no session on this ctx (service update?)");
+		return s;
 	};
 
 	const adminIds = (): (() => Promise<readonly number[]>) | undefined => {
@@ -271,6 +331,7 @@ export function createBot(opts: CreateBotOptions = {}): BotApp {
 
 	return {
 		build,
+		session: sessionOf,
 		async poll() {
 			const { bot } = await build();
 			await bot.start();

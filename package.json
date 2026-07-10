@@ -1,6 +1,6 @@
 {
 	"name": "@adriangalilea/utils",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"description": "TypeScript utilities - logger, currency, formatter, GramIO bot plugins, and more",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -136,7 +136,8 @@
 		"fix": "biome check --write --unsafe",
 		"ci": "biome ci",
 		"prepublishOnly": "pnpm run build",
-		"test:worker-safe": "pnpm run build && tsx tests/worker-safe-test.ts"
+		"test:worker-safe": "pnpm run build && tsx tests/worker-safe-test.ts",
+		"demo:bot": "tsx tests/create-demo.ts"
 	},
 	"keywords": [
 		"typescript",
