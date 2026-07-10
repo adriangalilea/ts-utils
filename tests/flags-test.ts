@@ -150,6 +150,11 @@ await ok("set on the same ctx invalidates its cached read", async () => {
 	await flags.set(ctx, "richText", null);
 });
 
+await ok("get() resolves by runtime key, panics on unknown", async () => {
+	assert.equal(await flags.get(ctxVip(2), "maxInputChars"), 250_000);
+	assert.throws(() => void flags.get(ctxFree(), "nope" as never));
+});
+
 await ok("reserved names panic at construction", () => {
 	assert.throws(() =>
 		defineFlags({ describe: { kind: "bool", label: "x", default: true } }, backend),

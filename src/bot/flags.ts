@@ -113,6 +113,12 @@ export type Flags<Spec extends Record<string, FlagSpec>> = {
 	/** Raw stored overrides (only keys that are actually overridden). */
 	overrides: (ctx: unknown) => Promise<Record<string, unknown>>;
 	/**
+	 * Resolve a flag by RUNTIME key — same resolution as the typed accessor,
+	 * loosely typed. For generic admin surfaces iterating `describe()`; call
+	 * sites use `await flags.<key>(ctx)`.
+	 */
+	get: (ctx: unknown, key: keyof Spec & string) => Promise<unknown>;
+	/**
 	 * Write a live override (scalar or tier map, kind-checked), or `null`
 	 * to clear it back to the code default. Panics without a `write` backend.
 	 */
@@ -121,7 +127,7 @@ export type Flags<Spec extends Record<string, FlagSpec>> = {
 
 // ─── internals ───────────────────────────────────────────────────────
 
-const RESERVED = new Set(["describe", "overrides", "set"]);
+const RESERVED = new Set(["describe", "overrides", "get", "set"]);
 
 /** Scalars are never objects, so `free` presence is the whole test. */
 const isTierMap = (v: unknown): v is TierMap<unknown> =>
@@ -215,6 +221,10 @@ export function defineFlags<Spec extends Record<string, FlagSpec>>(
 					.filter((k) => stored[k] !== undefined && stored[k] !== null)
 					.map((k) => [k, stored[k]]),
 			);
+		},
+		get: (ctx: unknown, key: string): Promise<unknown> => {
+			if (!spec[key]) panic(`flags: unknown flag "${key}"`);
+			return resolve(ctx, key);
 		},
 		set: async (ctx: unknown, key: string, value: unknown): Promise<void> => {
 			const s = spec[key] ?? panic(`flags: unknown flag "${key}"`);
