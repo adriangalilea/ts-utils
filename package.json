@@ -1,6 +1,6 @@
 {
 	"name": "@adriangalilea/utils",
-	"version": "1.4.2",
+	"version": "1.5.0",
 	"description": "TypeScript utilities - logger, currency, formatter, GramIO bot plugins, and more",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -123,6 +123,10 @@
 		"./bot/profile": {
 			"types": "./dist/bot/profile.d.ts",
 			"default": "./dist/bot/profile.js"
+		},
+		"./bot/flags": {
+			"types": "./dist/bot/flags.d.ts",
+			"default": "./dist/bot/flags.js"
 		}
 	},
 	"files": [
@@ -146,7 +150,8 @@
 		"prepublishOnly": "pnpm run build",
 		"test:worker-safe": "pnpm run build && tsx tests/worker-safe-test.ts",
 		"demo:bot": "tsx tests/create-demo.ts",
-		"test:tg-html": "tsx tests/tg-html-test.ts"
+		"test:tg-html": "tsx tests/tg-html-test.ts",
+		"test:flags": "tsx tests/flags-test.ts"
 	},
 	"keywords": [
 		"typescript",
