@@ -205,9 +205,12 @@ const buildPlugin = (args: {
 			// Declare the shared session as a dep so types flow + runtime
 			// dedup ensures the session derive runs once per update.
 			.extend(sessionPlugin)
-			// ctx.payments builder — see derive.ts
+			// ctx.payments builder — see derive.ts. Inline events included:
+			// an inline summary must read the SAME ctx.payments as a DM one —
+			// consumers forking session.pay reads because the derive skipped
+			// inline updates is exactly the confusion this prevents.
 			.derive(
-				["message", "callback_query"],
+				["message", "callback_query", "inline_query", "chosen_inline_result"],
 				paymentsDerive as unknown as (ctx: unknown) => GlobalDerives,
 			)
 			// pre_checkout_query — synchronous gate, 10s deadline

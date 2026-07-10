@@ -16,7 +16,7 @@
  *   - `ctx.payments.invoice(key)`  — purchase entry (waiver-gated)
  *
  * Returned shape is a function so `plugin.ts` can drop it directly
- * into `.derive(["message", "callback_query"], buildPaymentsDerive({...}))`.
+ * into `.derive(["message", "callback_query", "inline_query", "chosen_inline_result"], buildPaymentsDerive({...}))`.
  */
 
 import { say } from "../../say/index.js";

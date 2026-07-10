@@ -480,15 +480,23 @@ const buildLanguagePlugin = <Lang extends string>(args: {
 			// session derive runs exactly once per update — but the types
 			// (ctx.session: SessionLike) flow into our handlers below.
 			.extend(sessionPlugin)
-			.derive(["message", "callback_query"], (ctx) => {
+			.derive(
+			// Inline events included: ctx.lang/ctx.say must exist wherever the
+			// user speaks to the bot, or consumers fork their own resolvers.
+			["message", "callback_query", "inline_query", "chosen_inline_result"],
+			(ctx) => {
 				// The Telegram hint, scope-resolved ONCE per event (it can't change
 				// mid-handler): honored only in user-scoped resolution — in groups it
 				// would flicker per-speaker. Full tag first ("pt-BR"), then its
 				// primary subtag ("pt"). Never persisted: the read-time middle rung
 				// between a stored explicit pick and the configured default.
+				// Inline events carry no chat — they resolve as "private" (user-scoped),
+				// which is what an inline interaction is. Structural read: `message`
+				// only exists on callback ctxs in the widened event union.
 				const chatType = ctx.is("message")
 					? ctx.chat.type
-					: (ctx.message?.chat.type ?? "private");
+					: ((ctx as { message?: { chat: { type: string } } }).message?.chat
+							.type ?? "private");
 				const strategy = resolveScope(scopeOpt, chatType);
 				const hintLang =
 					strategy === "user"
