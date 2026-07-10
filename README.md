@@ -350,7 +350,7 @@ const notify = (msg: Polyglot<'en' | 'es'>, lang: 'en' | 'es') =>
   transport.send(say(msg, lang))
 ```
 
-In a bot, `bot/language` adds `ctx.say` — a callable namespace bound to `ctx.lang`:
+In a bot, `bot/language` adds `ctx.lang` + `ctx.say`. Both resolve stored explicit pick → Telegram client hint → configured default, at READ time — the hint is never persisted, and `session.language` is written only by an explicit pick (the plugin's menuItem action):
 
 ```typescript
 ctx.say({ en: 'Continue', es: 'Continuar' })       // → string
