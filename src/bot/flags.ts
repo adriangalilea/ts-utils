@@ -131,8 +131,9 @@ export type Flags<Spec extends Record<string, FlagSpec>> = {
 
 const RESERVED = new Set(["describe", "overrides", "get", "set"]);
 
-/** Scalars are never objects, so `free` presence is the whole test. */
-const isTierMap = (v: unknown): v is TierMap<unknown> =>
+/** Scalars are never objects, so `free` presence is the whole test. Exported so
+ *  external panels can render a tier map as per-tier inputs. */
+export const isTierMap = (v: unknown): v is TierMap<unknown> =>
 	typeof v === "object" && v !== null && "free" in v;
 
 /** `ctx.payments.tier()` when bot/payments is wired; `free` otherwise. */
@@ -162,8 +163,13 @@ const resolveTiered = <T>(value: T | TierMap<T>, tier: string): T => {
 const kindOk = (kind: FlagKind, v: unknown): boolean =>
 	kind === "bool" ? typeof v === "boolean" : typeof v === kind;
 
-/** A scalar of the right kind, or a tier map whose every value is. */
-const valueOk = (kind: FlagKind, v: unknown): boolean => {
+/**
+ * A scalar of the right kind, or a tier map whose every value is. THE write
+ * rule — `flags.set` enforces it, and it's exported so any external writer
+ * (a web console patching the same config record directly) validates with
+ * the SAME function instead of restating it.
+ */
+export const flagValueOk = (kind: FlagKind, v: unknown): boolean => {
 	if (isTierMap(v)) return Object.values(v).every((t) => kindOk(kind, t));
 	return kindOk(kind, v);
 };
@@ -176,7 +182,7 @@ export function defineFlags<Spec extends Record<string, FlagSpec>>(
 ): Flags<Spec> {
 	for (const [key, s] of Object.entries(spec)) {
 		if (RESERVED.has(key)) panic(`flags: "${key}" is a reserved name`);
-		if (!valueOk(s.kind, s.default))
+		if (!flagValueOk(s.kind, s.default))
 			panic(`flags: "${key}" default doesn't match kind "${s.kind}":`, s.default);
 	}
 
@@ -196,7 +202,7 @@ export function defineFlags<Spec extends Record<string, FlagSpec>>(
 		const s = spec[key];
 		const stored = (await configFor(ctx))[key];
 		const declared = stored !== undefined && stored !== null ? stored : s.default;
-		if (!valueOk(s.kind, declared))
+		if (!flagValueOk(s.kind, declared))
 			throw new SourcedError({
 				source: "flags",
 				operation: "resolve",
@@ -231,7 +237,7 @@ export function defineFlags<Spec extends Record<string, FlagSpec>>(
 		set: async (ctx: unknown, key: string, value: unknown): Promise<void> => {
 			const s = spec[key] ?? panic(`flags: unknown flag "${key}"`);
 			if (!backend.write) panic("flags: set() needs a write backend");
-			if (value !== null && !valueOk(s.kind, value))
+			if (value !== null && !flagValueOk(s.kind, value))
 				throw new SourcedError({
 					source: "flags",
 					operation: "set",

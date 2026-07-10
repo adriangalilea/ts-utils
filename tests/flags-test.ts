@@ -2,7 +2,7 @@
 // tier-ladder lookup, kind screaming, set/clear round-trips, per-ctx read
 // coalescing. Run: pnpm test:flags
 import assert from "node:assert/strict";
-import { defineFlags } from "../src/bot/flags.js";
+import { defineFlags, flagValueOk, isTierMap } from "../src/bot/flags.js";
 import { SourcedError } from "../src/offensive.js";
 
 let pass = 0;
@@ -153,6 +153,15 @@ await ok("set on the same ctx invalidates its cached read", async () => {
 await ok("get() resolves by runtime key, panics on unknown", async () => {
 	assert.equal(await flags.get(ctxVip(2), "maxInputChars"), 250_000);
 	assert.throws(() => void flags.get(ctxFree(), "nope" as never));
+});
+
+await ok("flagValueOk is the exported write rule external writers share", () => {
+	assert.equal(flagValueOk("number", 5), true);
+	assert.equal(flagValueOk("number", { free: 5, "vip.2": 9 }), true);
+	assert.equal(flagValueOk("number", { free: 5, vip: "nope" }), false);
+	assert.equal(flagValueOk("bool", "true"), false);
+	assert.equal(isTierMap({ free: 1 }), true);
+	assert.equal(isTierMap(1), false);
 });
 
 await ok("reserved names panic at construction", () => {
