@@ -359,6 +359,17 @@ await ctx.say.edit({ en: 'Done', es: 'Listo' })    // → ctx.editText (callback
 await ctx.say.answer({ en: 'OK', es: 'OK' })       // → ctx.answer (callback only)
 ```
 
+### Telegram HTML (`tg-html`)
+
+Transform arbitrary (LLM-emitted) HTML into Telegram-compatible `parse_mode=HTML` with opinionated, consistent spacing. Telegram's HTML subset has no headings, lists, or block layout — send it `<h1>`/`<ul>` and the API rejects the whole message. `transform()` accepts the HTML a model naturally writes and renders the structure typographically: `h1` → bold+underline + blank line, `h2…h6` → bold + blank line, `ul/li` → `• ` bullets, blocks get blank lines, blockquotes keep their internal line breaks, allowed tags pass through with attributes filtered, unknown tags drop their markup (content kept), and stray `<`/`>` escape instead of vanishing. Zero dependencies, no DOM, Worker-safe. Successor of the standalone `tghtml` package (jsr, archived).
+
+```typescript
+import { transform } from '@adriangalilea/utils/tg-html'
+
+transform('<h1>Title</h1><ul><li>Point one</li><li>Point two</li></ul>')
+// '<b><u>Title</u></b>\n\n• Point one\n• Point two'
+```
+
 ### Telegram bot plugins (GramIO)
 
 Plugins for personal Telegram bots built on [GramIO](https://gramio.dev). Each plugin lives at its own subpath; peer deps (`gramio`, `@gramio/storage`, `@gramio/session`, `@gramio/format`, `marked`) are **all optional** — install only what you import.

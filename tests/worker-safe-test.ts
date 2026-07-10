@@ -41,6 +41,7 @@ const SAFE_ENTRIES = [
 	"bot/create.js",
 	"bot/payments/index.js",
 	"say/index.js",
+	"tg-html/index.js",
 	"offensive.js",
 	"universal/log.js",
 	"browser.js",
