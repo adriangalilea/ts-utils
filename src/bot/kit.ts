@@ -2,8 +2,8 @@
  * Foundational helpers for NODE bots — the library's deliberately
  * Node-only corner (process signals, KEV env resolution). Worker bots
  * use the worker-safe subpaths instead: `bot/session` (namespaced
- * sessions) and `bot/notify` (admin DMs) hold the pieces that used to
- * live here but never needed an OS.
+ * sessions) and `bot/notify` (admin DMs) hold the pieces that never
+ * needed an OS.
  *
  *   `gracefulStart(bot, opts?)` — wires SIGINT/SIGTERM to bot.stop(),
  *     runs an optional shutdown hook, force-kills if it hangs. DMs the

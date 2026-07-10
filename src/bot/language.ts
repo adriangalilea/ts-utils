@@ -421,8 +421,7 @@ export const language = <const Langs extends readonly string[]>(
 			// Pack the picker two languages per row (break after each odd index).
 			keepRow: i % 2 === 0 && i < arr.length - 1,
 			// The user's EFFECTIVE language renders blue (Telegram's `primary`
-			// style); the rest stay at app default. Replaces the old `●` / `○`
-			// markers — same signal, native Telegram styling.
+			// style); the rest stay at app default.
 			//
 			// Resolves stored → hint → default LIVE (not `ctx.lang`, the
 			// event-start snapshot — stale within the same callback after the

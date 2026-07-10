@@ -1,10 +1,10 @@
 /**
  * `createBot` — one bot file from ideation to production.
  *
- * The composer owns the WIRING that used to be documented foot-guns: it
- * constructs the storage + session pair ONCE and threads it into every
- * feature (menu, language, access, payments), so "must be the SAME instance
- * you passed to session()" is unrepresentable instead of a doc warning.
+ * The composer makes the wiring foot-guns unrepresentable: it constructs
+ * the storage + session pair ONCE and threads it into every feature (menu,
+ * language, access, payments), so "must be the SAME instance you passed to
+ * session()" is structural instead of a doc warning.
  *
  * The same file runs in every stage — storage and transport are environment
  * decisions, never code shape:
