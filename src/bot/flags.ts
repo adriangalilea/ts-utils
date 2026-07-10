@@ -75,6 +75,18 @@ export type FlagSpec<K extends FlagKind = FlagKind> = {
 	help?: string;
 	/** Code default — a scalar, or a tier map for per-tier values. */
 	default: KindValue[K] | TierMap<KindValue[K]>;
+	/** Number flags: inclusive write-time bounds. Many writers touch a flag (bot admin
+	 *  taps, web consoles, fat fingers) — bounds make an insane value unwritable at the
+	 *  shared rule ({@link flagValueError}) instead of trusting every panel separately. */
+	min?: number;
+	max?: number;
+	/**
+	 * String flags: the closed set of allowed values — the flag becomes an ENUM. Panels
+	 * render a picker instead of free text, and in-bot admin menus can ROTATE through the
+	 * values on tap (off → admins → all → off …). The audience-gating convention lives in
+	 * {@link audienceAllows}.
+	 */
+	choices?: readonly string[];
 };
 
 /** What `describe()` returns per flag — JSON-safe, for panels/consoles. */
@@ -86,6 +98,9 @@ export type FlagDescriptor = {
 	default: unknown;
 	/** Whether the DECLARED default is per-tier (panels offer tier inputs). */
 	tiered: boolean;
+	min?: number;
+	max?: number;
+	choices?: readonly string[];
 };
 
 export type FlagsBackend = {
@@ -164,14 +179,56 @@ const kindOk = (kind: FlagKind, v: unknown): boolean =>
 	kind === "bool" ? typeof v === "boolean" : typeof v === kind;
 
 /**
- * A scalar of the right kind, or a tier map whose every value is. THE write
- * rule — `flags.set` enforces it, and it's exported so any external writer
- * (a web console patching the same config record directly) validates with
- * the SAME function instead of restating it.
+ * A scalar of the right kind, or a tier map whose every value is. THE shape half
+ * of the write rule; see {@link flagValueError} for the full rule with constraints.
  */
 export const flagValueOk = (kind: FlagKind, v: unknown): boolean => {
 	if (isTierMap(v)) return Object.values(v).every((t) => kindOk(kind, t));
 	return kindOk(kind, v);
+};
+
+/** The constraint surface {@link flagValueError} checks — a FlagDescriptor satisfies it. */
+export type FlagConstraints = {
+	kind: FlagKind;
+	min?: number;
+	max?: number;
+	choices?: readonly string[];
+};
+
+/**
+ * THE write rule, complete: shape (kind, tier maps) plus constraints (bounds, choices).
+ * Returns null when the value is writable, else a human-readable reason. `flags.set`
+ * enforces it, and it's exported so any external writer (a web console patching the
+ * same config record directly, an in-bot input prompt) validates with the SAME function
+ * instead of restating it. Constraints apply at WRITE time only — reads keep shape-checking
+ * so tightening a bound later never bricks an already-stored value.
+ */
+export const flagValueError = (spec: FlagConstraints, v: unknown): string | null => {
+	if (!flagValueOk(spec.kind, v)) return `not a ${spec.kind} (or a tier map of them)`;
+	const scalars = isTierMap(v) ? Object.values(v) : [v];
+	for (const s of scalars) {
+		if (spec.kind === "number") {
+			const n = s as number;
+			if (!Number.isFinite(n)) return "not a finite number";
+			if (spec.min !== undefined && n < spec.min) return `below the minimum (${spec.min})`;
+			if (spec.max !== undefined && n > spec.max) return `above the maximum (${spec.max})`;
+		}
+		if (spec.choices && !spec.choices.includes(s as string)) {
+			return `must be one of: ${spec.choices.join(" · ")}`;
+		}
+	}
+	return null;
+};
+
+/**
+ * The audience-gating convention for a `choices: ["off", "admins", "all"]` flag:
+ * a staged rollout an in-bot menu rotates through on tap. `off` gates everyone,
+ * `admins` opens it to operators/testers, `all` ships it.
+ */
+export const audienceAllows = (value: string, opts: { admin: boolean }): boolean => {
+	if (value === "all") return true;
+	if (value === "admins") return opts.admin;
+	return false;
 };
 
 // ─── the factory ─────────────────────────────────────────────────────
@@ -182,8 +239,8 @@ export function defineFlags<Spec extends Record<string, FlagSpec>>(
 ): Flags<Spec> {
 	for (const [key, s] of Object.entries(spec)) {
 		if (RESERVED.has(key)) panic(`flags: "${key}" is a reserved name`);
-		if (!flagValueOk(s.kind, s.default))
-			panic(`flags: "${key}" default doesn't match kind "${s.kind}":`, s.default);
+		const reason = flagValueError(s, s.default);
+		if (reason !== null) panic(`flags: "${key}" default rejected: ${reason}`, s.default);
 	}
 
 	// One config read per update: multiple flag reads on the same ctx share
@@ -221,6 +278,9 @@ export function defineFlags<Spec extends Record<string, FlagSpec>>(
 				...(s.help !== undefined ? { help: s.help } : {}),
 				default: s.default,
 				tiered: isTierMap(s.default),
+				...(s.min !== undefined ? { min: s.min } : {}),
+				...(s.max !== undefined ? { max: s.max } : {}),
+				...(s.choices !== undefined ? { choices: s.choices } : {}),
 			})),
 		overrides: async (ctx: unknown): Promise<Record<string, unknown>> => {
 			const stored = await configFor(ctx);
@@ -237,11 +297,12 @@ export function defineFlags<Spec extends Record<string, FlagSpec>>(
 		set: async (ctx: unknown, key: string, value: unknown): Promise<void> => {
 			const s = spec[key] ?? panic(`flags: unknown flag "${key}"`);
 			if (!backend.write) panic("flags: set() needs a write backend");
-			if (value !== null && !flagValueOk(s.kind, value))
+			const reason = value === null ? null : flagValueError(s, value);
+			if (reason !== null)
 				throw new SourcedError({
 					source: "flags",
 					operation: "set",
-					message: `value for "${key}" doesn't match kind "${s.kind}"`,
+					message: `value for "${key}" rejected: ${reason}`,
 					context: { key, value },
 				});
 			await backend.write(ctx, { [key]: value });
