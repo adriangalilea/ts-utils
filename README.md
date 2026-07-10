@@ -367,6 +367,47 @@ Plugins for personal Telegram bots built on [GramIO](https://gramio.dev). Each p
 pnpm add @adriangalilea/utils gramio @gramio/storage @gramio/session
 ```
 
+#### One bot file, ideation → production (`bot/create`)
+
+`createBot` is the composer: it constructs the storage + session pair ONCE and threads it into every feature, so "must be the SAME instance you passed to session()" is unrepresentable instead of a doc warning. The same file runs in every stage — **storage and transport are environment decisions, never code shape**:
+
+| stage | run | session | transport |
+|---|---|---|---|
+| ideation | `BOT_TOKEN=… tsx bot.ts` | memory (ephemeral, announced) | long-poll |
+| experiment | `BOT_PERSIST=./bot.sqlite tsx bot.ts` | sqlite | long-poll |
+| prod · your own hardware | systemd/launchd unit running the same command | sqlite / `BOT_PERSIST=redis://…` | long-poll (a legitimate prod mode: dials out, no inbound port/TLS) |
+| prod · Cloudflare Worker | `wrangler deploy` (D1 binding `DB`) | D1 (`bot/storage-d1`) | webhook (`bot/worker`) |
+| prod · Node/Bun server | webhook behind your HTTP server | sqlite/redis | fetch-shaped handler |
+
+```typescript
+import { createBot } from '@adriangalilea/utils/bot/create'
+
+const app = createBot({
+  admins: 190202471,
+  language: { supported: ['en', 'es'] as const, default: 'en' },
+  menu: {
+    adminContact: '@you',
+    header: async (ctx) => `⚙️ hi ${ctx.from?.firstName}`,   // async — read your db here
+    items: [/* … */],
+    personalData: { onForget: async (ctx, userId) => {/* wipe YOUR tables */} },
+  },
+  handlers: (bot) => bot.command('start', (ctx) => ctx.say({ en: 'hi', es: 'hola' })),
+})
+
+export default app                       // Worker: webhook + /setup + /pause + deploy DMs
+if (app.isMain(import.meta)) app.poll()  // Node: `tsx bot.ts` long-polls
+```
+
+Cloudflare is one adapter, not the architecture: `bot/worker` and `bot/storage-d1` are the workerd cap (~each 100 lines, both optional); `bot/kit`'s `gracefulStart` is the Node twin (signals + start/stop DMs) and stays the one deliberately Node-only corner. The worker-safe tripwire (`pnpm test:worker-safe`) guarantees the core never grows a Node dependency.
+
+#### Design rules the bot plugins hold to (each learned the hard way)
+
+- **Resolution is read-time.** Language resolves stored pick → live Telegram hint → default on every surface (`ctx.lang`, `ctx.say`, menu chrome, picker highlight). Inferred values are NEVER persisted — a user who switches their client language moves with it until they pick.
+- **Only explicit user signals are stored.** The session holds picks, consent, state the user created — never derived values, never render caches. If a sync signature ever tempts you to cache a rendered string into the session, the signature is the bug (menu resolvers are async for exactly this reason).
+- **Derives cover every event the user can speak through** — message, callback, AND inline. A feature that skips inline forces consumers to fork shadow helpers that read the session directly; those forks then read as design.
+- **Forget actually forgets.** `personalData.onForget` runs inside the same try as the session delete: your message logs/metrics/credit rows get wiped too, or the user is told it failed — never a partial erasure reading as success.
+- **The composer owns instance wiring.** Features still compose manually (below) when you need full control, but every "same instance" contract has one home.
+
 #### Threaded Mode — pin the `@gramio/contexts` fork
 
 Telegram added [Threaded Mode](https://telegram.org/blog/threaded-conversations) for private chats (BotFather → Bot Settings → Threaded Mode). gramio's `SendMixin` skips auto-threading there, and `CallbackQueryContext` doesn't expose `threadId` at all. Fixes [PR'd upstream](https://github.com/gramiojs/contexts/pull/4); until merged, pin the fork in **your bot project's** workspace root (pnpm only honors overrides at the root, not transitively — and pnpm ≥11 reads them from `pnpm-workspace.yaml`, not `package.json`):
@@ -392,8 +433,11 @@ Then `pnpm install`. Every `ctx.send` / `ctx.sendDocument` / `ctx.reply` / etc. 
 | `@adriangalilea/utils/bot/allow-list` | Static allow-list by **id and/or @username** — stateless, no session/storage. `allowList({ ids?, usernames? })` is a plugin that decorates `ctx.allowed` (boolean); gate in your handlers (`if (!ctx.allowed) return`). `makeAllowList(...)` is the pure framework-free predicate. The light counterpart to `access-control` (which adds an approve/deny flow + revocable store, needing session+storage). Username caveat: a `@username` is optional and mutable, and the Bot API can't resolve username→id ahead of time — prefer `ids` when known, `usernames` is the pragmatic fallback. |
 | `@adriangalilea/utils/bot/coalesce` | Joins client-split inbound messages back into one. When a user pastes >4096 chars, Telegram clients fragment it into separate `message` updates with no marker. Middleware detects the burst and emits one combined event. |
 | `@adriangalilea/utils/bot/llm` | The full LLM-chatbot pipeline in one module. **Input:** `streamChat(response)` parses OpenAI-compatible SSE (OpenAI, vllm, mlx-lm, llama.cpp, Together, Groq, …) into a typed `AsyncGenerator<{type: 'content' \| 'reasoning', text}>`. **Output:** `ctx.startStream()` (low-level: debounced markdown to Telegram, 4000-char split, exposes `wasPartial` after `.end()`). `ctx.startChatStream(response)` (high-level: consumes the stream, renders reasoning as a Telegram `expandable_blockquote` entity + content as streamed markdown — both go through `markdownToFormattable` with graceful degradation — returns `{ content, reasoning }`). **History:** `llmHistory({...})` returns `.plugin` (decorates `ctx.llm` with `.add() / .get() / .clear() / .all() / .clearAll()`, per-(user, thread) OpenAI `ChatMessage` shape, persisted in the shared session record so the menu's 🗑 Forget wipes it automatically) AND `.menuItem` (drop-in "🗑 Delete this thread" for `botMenu` — wipes the LLM history AND calls `deleteForumTopic` so the Telegram thread + all its messages disappear from the chat; falls back to Redis-only clear when no `threadId` is present). |
-| `@adriangalilea/utils/bot/menu` | `botMenu({ command, description, items, privacy?, personalData?, adminContact })` — `/settings` command + InlineKeyboard router. Root view always renders a `🛡️ Privacy & data` submenu button that wraps the privacy policy link plus (if `personalData: { storage }`) 🗑 Forget + 📥 Export buttons. Items take `keepRow` (render on the same row as the next item — e.g. a two-per-row language picker) and `rootExtra` (render at the bottom of the root menu, below Privacy & data). `toggleMenuItem({ id, read, write, label: { off, on }, toast? })` — convenience factory for boolean-toggle items with dynamic label + optional toast, storage-agnostic via `read`/`write` closures. |
+| `@adriangalilea/utils/bot/menu` | `botMenu({ command, description, items, privacy?, personalData?, adminContact })` — `/settings` command + InlineKeyboard router. Root view always renders a `🛡️ Privacy & data` submenu button that wraps the privacy policy link plus (if `personalData: { storage }`) 🗑 Forget + 📥 Export buttons. Items take `keepRow` (render on the same row as the next item — e.g. a two-per-row language picker) and `rootExtra` (render at the bottom of the root menu, below Privacy & data). `label` / `header` / `style` / `visible` resolvers may be **async** (read your db at render time — never cache render strings in the session); `parseMode: 'HTML'` renders the header formatted (you own escaping); `personalData.onForget(ctx, userId)` wipes YOUR tables inside the same try as the session delete, so Forget either forgets everything or reports failure. `toggleMenuItem({ id, read, write, label: { off, on }, toast? })` — convenience factory for boolean-toggle items with dynamic label + optional toast, storage-agnostic via `read`/`write` closures. |
 | `@adriangalilea/utils/bot/payments` | `botPayments({ session, storage, paysupport, paysupportHint?, legal, waiver, vip?, credits?, perks? })` — Telegram Stars monetization in one drop-in plugin. **Three axes, all optional:** `vip` (positional tier ladder — single rung in v1 is just `vip: [{...}]`, ladder is `vip: [{...}, {...}]`; ids are `vip.1`, `vip.2`, …), `credits` (consumable balance + top-up packs `credits.1`, `credits.2`, …), `perks` (orthogonal one-shot unlocks `perks.<key>`). **Surface:** `ctx.payments.atLeast('vip')` / `atLeast('vip.2')` (typed rank check), `ctx.payments.tier()` / `.tier.level()` / `.tier.label()`, `ctx.payments.credits.{balance, consume, tryConsume}` (throws `InsufficientCredits`), `ctx.payments.has(perkId)`, `await ctx.payments.require('vip', { feature? })` (gate that sends a localized upgrade prompt deep-linked to `/settings → 💎 VIP`), `await ctx.payments.invoice(productKey)` (threads Art. 103(m) TRLGDCU consent inline before `sendInvoice`). **Owns:** waiver consent flow (versioned text → forces re-consent on bump, snapshotted on every charge for audit), `/paysupport` slash command (Telegram ToS §6.5; `paysupportHint` overrides the where-to-manage-charges line when your menu isn't `/settings`), idempotent `successful_payment` fulfillment via `pay:idempotency:{chargeId}` sentinel, lazy subscription expiry (no cron needed), tier upgrade auto-cancel of the lower rung's renewal, and admin-DM refund approval (mirror of `accessControl`'s [✅ Aprobar][❌ Denegar] pattern). **Returns:** `{ plugin, menuItem, payouts, onFulfilled }` — `menuItem` is the drop-in `💎 VIP` entry for `botMenu`; `payouts.{record, list, export, exportForUsers}` is the Fragment payout ledger (you receive TON, log the EUR conversion, export time-windowed CSV/JSON for your gestor); `onFulfilled(productKey \| '*', handler)` registers fire-and-forget hooks. **Stars-only by design** — Telegram ToS §6.2 forbids third-party payment providers for digital goods. Crypto Pay deferred (MiCA risk); Stripe-outside-Telegram is a future v2 channel. Full compliance memo (Spanish-autónomo seller-of-record analysis, Verifactu vs Crea y Crece, MiCA, Art. 103(m) waiver text, GDPR retention) in `src/bot/payments/CLAUDE.md`. |
+| `@adriangalilea/utils/bot/create` | `createBot({ token?, storage?, admins?, language?, menu?, access?, payments?, handlers?, worker? })` — the composer (see "One bot file, ideation → production" above). Returns `{ build, poll, isMain, fetch }`: `poll()` long-polls, `export default app` is a complete Worker. Owns storage+session wiring; resolves storage per environment (D1 binding → `bot/storage-d1`; `BOT_PERSIST` path → sqlite, `redis://` → redis, lazily-imported optional peers; else announced-ephemeral memory). |
+| `@adriangalilea/utils/bot/worker` | `botWorkerFetch(resolve)` — the Cloudflare Worker cap: secret-checked webhook (ack fast, work + storage flush ride `ctx.waitUntil`, errors DM admins throttled), `POST /setup` (webhook registration with handler-derived `allowed_updates` + a commit-narrating 🚀 deploy DM from the request body), `POST /deploy-started` (the 🛳 "what is shipping" DM — curl it from your deploy script on the still-live version, body `{sha, author, message, etaSeconds?}`), operator-authed `/pause` `/resume` `/webhook-status` (+ `statusExtra`), and a `routes` escape hatch tried before the built-ins. Structural bot type — no workers-types dependency. |
+| `@adriangalilea/utils/bot/storage-d1` | `d1Storage({ db, table? })` — `@gramio/storage` adapter over a D1 `session` table (schema in the module doc). `flush()` matters: the session plugin writes un-awaited and workerd freezes the isolate the instant `fetch()` returns — hand `flush` to `bot/worker` (automatic via `createBot`) so writes survive. |
 
 Standard wiring:
 
