@@ -111,6 +111,10 @@
 		"./bot/worker": {
 			"types": "./dist/bot/worker.d.ts",
 			"default": "./dist/bot/worker.js"
+		},
+		"./bot/create": {
+			"types": "./dist/bot/create.d.ts",
+			"default": "./dist/bot/create.js"
 		}
 	},
 	"files": [
