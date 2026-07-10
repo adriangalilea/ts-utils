@@ -119,6 +119,7 @@ await gracefulStart(bot)
 | `await ctx.payments.invoice(productKey)` | Direct purchase. Threads waiver consent inline. |
 | `payments.menuItem` | Drop-in for `botMenu`. Adaptive label/style/submenu. |
 | `payments.onFulfilled(productKey, handler)` | Fire-and-forget hook after a charge is applied. Sync handler signature; plugin always answers. |
+| `payments.onRefunded(productKey, handler)` | The fulfillment mirror: fires after an admin-approved refund succeeds, with a `RefundEvent` (productKey/userId/chargeId/xtr/refundedAt) — so a revenue ledger reverses the row it wrote. `'*'` catch-all works here too. |
 | `payments.payouts.record({ ton, eurAtReceipt, batchId? })` | Manual Fragment payout entry. |
 | `payments.payouts.export({ from, to })` | CSV/JSON for the gestor — joins charges by `receivedAt` window. |
 
