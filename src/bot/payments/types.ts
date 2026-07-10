@@ -396,6 +396,19 @@ export type FulfillmentEvent = {
 	readonly receivedAt: number;
 };
 
+/**
+ * Emitted (fire-and-forget, like `onFulfilled`) when an admin approves
+ * a refund and Telegram's `refundStarPayment` succeeds. The mirror of
+ * `FulfillmentEvent`, so a revenue ledger can reverse the row it wrote.
+ */
+export type RefundEvent = {
+	readonly productKey: string;
+	readonly userId: number;
+	readonly chargeId: string;
+	readonly xtr: number;
+	readonly refundedAt: number;
+};
+
 // ─── error sentinel ────────────────────────────────────────────────
 
 /**

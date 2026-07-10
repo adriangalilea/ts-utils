@@ -38,6 +38,7 @@ export type {
 	PerkState,
 	PerksConfig,
 	ProductKey,
+	RefundEvent,
 	SubscriptionPeriod,
 	TierKey,
 	VipRung,

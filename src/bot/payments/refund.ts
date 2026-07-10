@@ -39,6 +39,7 @@ import type {
 	BotPaymentsConfig,
 	ChargeRecord,
 	PaymentsSession,
+	RefundEvent,
 } from "./types.js";
 
 const FALLBACK_LANG = "en";
@@ -232,6 +233,15 @@ export type RefundHandlersOptions = {
 	 */
 	storage: Storage;
 	cfg: BotPaymentsConfig<string>;
+	/**
+	 * `onRefunded` registrations, keyed by productKey (plus the `"*"`
+	 * catch-all). Fired fire-and-forget after an approved refund — the
+	 * mirror of `onFulfilled`.
+	 */
+	onRefunded: ReadonlyMap<
+		string,
+		ReadonlyArray<(event: RefundEvent, ctx: unknown) => void>
+	>;
 };
 
 /**
@@ -386,6 +396,28 @@ export const buildRefundApproveHandler =
 			charge.userId,
 			charge,
 		);
+
+		// Fire onRefunded hooks (fire-and-forget, mirror of onFulfilled)
+		const refundEvent: RefundEvent = {
+			productKey: charge.productKey,
+			userId: charge.userId,
+			chargeId: charge.chargeId,
+			xtr: charge.xtr,
+			refundedAt: charge.refundedAt,
+		};
+		const fireBucket = (key: string) => {
+			const arr = opts.onRefunded.get(key);
+			if (!arr) return;
+			for (const fn of arr) {
+				try {
+					fn(refundEvent, ctx);
+				} catch (e) {
+					log.error(`onRefunded handler for "${key}" threw: ${e}`);
+				}
+			}
+		};
+		fireBucket(charge.productKey);
+		fireBucket("*");
 
 		// User notification
 		const userFull = await loadFullRecord(opts.storage, ctx, charge.userId);

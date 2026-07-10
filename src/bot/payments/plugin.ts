@@ -60,6 +60,7 @@ import type {
 	ChargeRecord,
 	FulfillmentEvent,
 	ProductKey,
+	RefundEvent,
 	SessionLike,
 	TierKey,
 } from "./types.js";
@@ -134,6 +135,10 @@ export type BotPaymentsResult<Cfg extends BotPaymentsConfig<string>> = {
 		productKey: ProductKey<Cfg> | "*",
 		handler: (event: FulfillmentEvent, ctx: unknown) => void,
 	) => void;
+	onRefunded: (
+		productKey: ProductKey<Cfg> | "*",
+		handler: (event: RefundEvent, ctx: unknown) => void,
+	) => void;
 };
 
 // ─── factory options ───────────────────────────────────────────────
@@ -160,8 +165,17 @@ const buildPlugin = (args: {
 		string,
 		Array<(event: FulfillmentEvent, ctx: unknown) => void>
 	>;
+	onRefundedMap: Map<string, Array<(event: RefundEvent, ctx: unknown) => void>>;
 }) => {
-	const { cfg, catalog, sessionPlugin, storage, stores, onFulfilledMap } = args;
+	const {
+		cfg,
+		catalog,
+		sessionPlugin,
+		storage,
+		stores,
+		onFulfilledMap,
+		onRefundedMap,
+	} = args;
 
 	// derive: ctx.payments
 	type GlobalDerives = { payments: PaymentsCtx<BotPaymentsConfig<string>> };
@@ -179,17 +193,19 @@ const buildPlugin = (args: {
 		>,
 	});
 	const preCheckoutHandler = buildPreCheckoutHandler(catalog);
-	const refundApproveHandler = buildRefundApproveHandler({
+	// Shared by the three refund handlers; only approve fires onRefunded.
+	const refundOpts = {
 		stores,
 		storage,
 		cfg,
-	});
-	const refundDenyHandler = buildRefundDenyHandler({ stores, storage, cfg });
-	const refundRequestHandler = buildRefundRequestHandler({
-		stores,
-		storage,
-		cfg,
-	});
+		onRefunded: onRefundedMap as ReadonlyMap<
+			string,
+			ReadonlyArray<(event: RefundEvent, ctx: unknown) => void>
+		>,
+	};
+	const refundApproveHandler = buildRefundApproveHandler(refundOpts);
+	const refundDenyHandler = buildRefundDenyHandler(refundOpts);
+	const refundRequestHandler = buildRefundRequestHandler(refundOpts);
 	const waiverConsentHandler = buildWaiverConsentHandler({ cfg, catalog });
 	const waiverCancelHandler = buildWaiverCancelHandler();
 	const refundCloseHandler = buildRefundCloseHandler();
@@ -272,6 +288,10 @@ export const botPayments = <const Cfg extends BotPaymentsConfig<string>>(
 		string,
 		Array<(event: FulfillmentEvent, ctx: unknown) => void>
 	>();
+	const onRefundedMap = new Map<
+		string,
+		Array<(event: RefundEvent, ctx: unknown) => void>
+	>();
 
 	const plugin = buildPlugin({
 		cfg,
@@ -280,6 +300,7 @@ export const botPayments = <const Cfg extends BotPaymentsConfig<string>>(
 		storage,
 		stores,
 		onFulfilledMap,
+		onRefundedMap,
 	});
 
 	const menuItem = buildPaymentsMenuItem({ cfg, catalog });
@@ -310,5 +331,20 @@ export const botPayments = <const Cfg extends BotPaymentsConfig<string>>(
 		onFulfilledMap.set(productKey, arr);
 	};
 
-	return { plugin, menuItem, payouts, admin, onFulfilled };
+	const onRefunded: BotPaymentsResult<Cfg>["onRefunded"] = (
+		productKey,
+		handler,
+	) => {
+		if (typeof productKey !== "string" || productKey.length === 0) {
+			panic("bot/payments: onRefunded productKey must be a non-empty string");
+		}
+		if (typeof handler !== "function") {
+			panic("bot/payments: onRefunded handler must be a function");
+		}
+		const arr = onRefundedMap.get(productKey) ?? [];
+		arr.push(handler);
+		onRefundedMap.set(productKey, arr);
+	};
+
+	return { plugin, menuItem, payouts, admin, onFulfilled, onRefunded };
 };
