@@ -34,8 +34,7 @@
  *
  * await gracefulStart(bot, { onShutdown: () => db.end() })
  */
-import type { Plugin as PluginType } from "gramio";
-import type { AnyBot } from "gramio";
+import type { AnyBot, Plugin as PluginType } from "gramio";
 import { kev } from "../platform/kev.js";
 import { notifyAdmins } from "./notify.js";
 

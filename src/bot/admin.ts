@@ -40,7 +40,9 @@ export type Admins =
 
 /** Coerce any source value to a clean, positive-integer id array (junk writes screamed out). */
 const toIds = (v: number | readonly number[]): number[] =>
-	(typeof v === "number" ? [v] : v).filter((n) => typeof n === "number" && Number.isFinite(n) && n > 0);
+	(typeof v === "number" ? [v] : v).filter(
+		(n) => typeof n === "number" && Number.isFinite(n) && n > 0,
+	);
 
 export const adminContext = (admins: Admins) => {
 	// Normalize every source shape to ONE async resolver. A static source resolves the array once;
@@ -57,7 +59,8 @@ export const adminContext = (admins: Admins) => {
 		const ids = await resolve();
 		// `senderId` is provided by gramio's SenderMixin; `undefined` on actor-less service events,
 		// which correctly yields `isAdmin: false`.
-		const senderId = "senderId" in ctx ? (ctx as { senderId?: number }).senderId : undefined;
+		const senderId =
+			"senderId" in ctx ? (ctx as { senderId?: number }).senderId : undefined;
 		return {
 			adminId: ids[0] ?? 0,
 			isAdmin: typeof senderId === "number" && ids.includes(senderId),
