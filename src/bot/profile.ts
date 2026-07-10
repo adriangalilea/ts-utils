@@ -49,20 +49,25 @@ export interface BotCommandEntry {
 /** Per-language values; the FIRST key doubles as the unlocalized default. */
 export type Localized<T> = Record<string, T>;
 
-/** The structural bot surface the sync needs (satisfied by a gramio Bot). */
+/** The structural bot surface the sync needs (satisfied by a gramio Bot). Param shapes are
+ *  EXACT (never bare `object`): a looser param type would make real client methods — which
+ *  require specific fields — unassignable (function-parameter contravariance). */
+type Lang = { language_code?: string };
 export type ProfileBot = {
 	info?: { username?: string; supports_inline_queries?: boolean };
 	api: {
-		getMyName: (p: object) => Promise<{ name?: string }>;
-		setMyName: (p: object) => Promise<unknown>;
-		getMyDescription: (p: object) => Promise<{ description?: string }>;
-		setMyDescription: (p: object) => Promise<unknown>;
-		getMyShortDescription: (
-			p: object,
-		) => Promise<{ short_description?: string }>;
-		setMyShortDescription: (p: object) => Promise<unknown>;
-		getMyCommands: (p: object) => Promise<ReadonlyArray<BotCommandEntry>>;
-		setMyCommands: (p: object) => Promise<unknown>;
+		getMyName: (p: Lang) => Promise<{ name?: string }>;
+		setMyName: (p: { name: string } & Lang) => Promise<unknown>;
+		getMyDescription: (p: Lang) => Promise<{ description?: string }>;
+		setMyDescription: (p: { description: string } & Lang) => Promise<unknown>;
+		getMyShortDescription: (p: Lang) => Promise<{ short_description?: string }>;
+		setMyShortDescription: (
+			p: { short_description: string } & Lang,
+		) => Promise<unknown>;
+		getMyCommands: (p: Lang) => Promise<ReadonlyArray<BotCommandEntry>>;
+		setMyCommands: (
+			p: { commands: BotCommandEntry[] } & Lang,
+		) => Promise<unknown>;
 		sendMessage: (p: { chat_id: number; text: string }) => Promise<unknown>;
 	};
 };
