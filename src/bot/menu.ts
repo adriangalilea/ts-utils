@@ -139,7 +139,9 @@ export type MenuCtx = {
 type Label =
 	| string
 	| Polyglot<string>
-	| ((ctx: MenuCtx) => string | Polyglot<string> | Promise<string | Polyglot<string>>);
+	| ((
+			ctx: MenuCtx,
+	  ) => string | Polyglot<string> | Promise<string | Polyglot<string>>);
 type Predicate = (ctx: MenuCtx) => boolean | Promise<boolean>;
 
 /**
@@ -177,7 +179,9 @@ export type ButtonStyle = "primary" | "success" | "danger";
 
 type StyleResolver =
 	| ButtonStyle
-	| ((ctx: MenuCtx) => ButtonStyle | undefined | Promise<ButtonStyle | undefined>);
+	| ((
+			ctx: MenuCtx,
+	  ) => ButtonStyle | undefined | Promise<ButtonStyle | undefined>);
 
 const FALLBACK_LANG = "en";
 // Chrome language, read-time: the stored explicit pick, else the Telegram
@@ -757,7 +761,10 @@ const buildMenuPlugin = (menu: BotMenu) => {
 					await ctx.answer({});
 					const kb = renderPrivacySubmenu(menu, ctx);
 					try {
-						await ctx.editText(await labelOf(header, ctx), headerParams(menu, kb));
+						await ctx.editText(
+							await labelOf(header, ctx),
+							headerParams(menu, kb),
+						);
 					} catch {
 						// message too old to edit
 					}
@@ -774,7 +781,10 @@ const buildMenuPlugin = (menu: BotMenu) => {
 				await ctx.answer({});
 				const kb = await renderKeyboard(items, ctx, segments);
 				try {
-					await ctx.editText(await labelOf(header, ctx), headerParams(menu, kb));
+					await ctx.editText(
+						await labelOf(header, ctx),
+						headerParams(menu, kb),
+					);
 				} catch {
 					// message too old to edit
 				}
@@ -885,7 +895,10 @@ const buildMenuPlugin = (menu: BotMenu) => {
 					if (items) {
 						const kb = await renderKeyboard(items, ctx, parentPath);
 						try {
-							await ctx.editText(await labelOf(header, ctx), headerParams(menu, kb));
+							await ctx.editText(
+								await labelOf(header, ctx),
+								headerParams(menu, kb),
+							);
 						} catch {
 							// message too old to edit
 						}
@@ -936,7 +949,10 @@ const buildMenuPlugin = (menu: BotMenu) => {
 				// not make sense anymore.
 				const kb = await renderKeyboard(menu._items, ctx, []);
 				try {
-					await ctx.editText(await labelOf(header, ctx), headerParams(menu, kb));
+					await ctx.editText(
+						await labelOf(header, ctx),
+						headerParams(menu, kb),
+					);
 				} catch {
 					// message too old to edit
 				}
@@ -1003,7 +1019,10 @@ const buildMenuPlugin = (menu: BotMenu) => {
 				// came from), not root — saves the re-navigation tap.
 				const kb = renderPrivacySubmenu(menu, ctx);
 				try {
-					await ctx.editText(await labelOf(header, ctx), headerParams(menu, kb));
+					await ctx.editText(
+						await labelOf(header, ctx),
+						headerParams(menu, kb),
+					);
 				} catch {
 					// message too old to edit
 				}

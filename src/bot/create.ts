@@ -28,14 +28,20 @@
  * graph entirely (wrap `app.poll` with `gracefulStart` yourself if you want
  * signal-handled start/stop DMs on a server).
  */
+
+import { inMemoryStorage, type Storage } from "@gramio/storage";
 import { Bot } from "gramio";
-import { type Storage, inMemoryStorage } from "@gramio/storage";
-import { createLogger } from "../universal/log.js";
 import { runtime } from "../runtime.js";
-import { type Admins, adminContext } from "./admin.js";
+import { createLogger } from "../universal/log.js";
 import { type AccessControlOptions, accessControl } from "./access-control.js";
+import { type Admins, adminContext } from "./admin.js";
 import { type LanguageOptions, language } from "./language.js";
-import { type BotMenuOptions, type MenuItem, type PersonalDataOptions, botMenu } from "./menu.js";
+import {
+	type BotMenuOptions,
+	botMenu,
+	type MenuItem,
+	type PersonalDataOptions,
+} from "./menu.js";
 import { type BotPaymentsConfig, botPayments } from "./payments/index.js";
 import { botSession } from "./session.js";
 import { type D1Like, d1Storage } from "./storage-d1.js";
@@ -88,13 +94,19 @@ export type CreateBotOptions = {
 
 export type BotApp = {
 	/** Build (memoized) — exposed for tests and custom runtimes. */
-	build(env?: EnvLike): Promise<{ bot: Bot; storage: Storage; flush?: () => Promise<void> }>;
+	build(
+		env?: EnvLike,
+	): Promise<{ bot: Bot; storage: Storage; flush?: () => Promise<void> }>;
 	/** Long-poll (Node/Bun/Deno). The ideation loop AND a legitimate prod mode on your own hardware. */
 	poll(): Promise<void>;
 	/** True when this module is the process entrypoint (`tsx bot.ts`). Always false on workerd. */
 	isMain(meta: ImportMeta): boolean;
 	/** The Worker fetch handler — `export default app` is a complete workerd bot. */
-	fetch(request: Request, env: EnvLike, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<Response>;
+	fetch(
+		request: Request,
+		env: EnvLike,
+		ctx: { waitUntil(p: Promise<unknown>): void },
+	): Promise<Response>;
 };
 
 // Optional Node-only peers, loaded lazily on the poll path. The specifier goes
@@ -109,19 +121,34 @@ async function importPeer(name: string, why: string): Promise<unknown> {
 }
 
 const idsOf = (v: number | readonly number[]): number[] =>
-	(typeof v === "number" ? [v] : [...v]).filter((n) => Number.isFinite(n) && n > 0);
+	(typeof v === "number" ? [v] : [...v]).filter(
+		(n) => Number.isFinite(n) && n > 0,
+	);
 
 export function createBot(opts: CreateBotOptions = {}): BotApp {
-	let built: Promise<{ bot: Bot; storage: Storage; flush?: () => Promise<void> }> | null = null;
+	let built: Promise<{
+		bot: Bot;
+		storage: Storage;
+		flush?: () => Promise<void>;
+	}> | null = null;
 
 	const resolveToken = (env: EnvLike): string => {
 		const token =
-			typeof opts.token === "string" ? opts.token : (opts.token?.(env) ?? (env.BOT_TOKEN as string | undefined));
-		if (!token) throw new Error("createBot: no token — set BOT_TOKEN or pass `token`");
+			typeof opts.token === "string"
+				? opts.token
+				: (opts.token?.(env) ?? (env.BOT_TOKEN as string | undefined));
+		if (!token)
+			throw new Error("createBot: no token — set BOT_TOKEN or pass `token`");
 		return token;
 	};
 
-	const resolveStorage = async (env: EnvLike): Promise<{ storage: Storage; kind: string; flush?: () => Promise<void> }> => {
+	const resolveStorage = async (
+		env: EnvLike,
+	): Promise<{
+		storage: Storage;
+		kind: string;
+		flush?: () => Promise<void>;
+	}> => {
 		if (opts.storage) return { storage: opts.storage, kind: "custom" };
 		const db = env.DB as D1Like | undefined;
 		if (db && typeof db === "object" && "prepare" in db) {
@@ -130,21 +157,37 @@ export function createBot(opts: CreateBotOptions = {}): BotApp {
 		}
 		const persist = env.BOT_PERSIST as string | undefined;
 		if (persist?.startsWith("redis://") || persist?.startsWith("rediss://")) {
-			const mod = await importPeer("@gramio/storage-redis", "BOT_PERSIST=redis://…");
-			const factory = (mod as { redisStorage?: (url: string) => Storage }).redisStorage;
-			if (!factory) throw new Error("createBot: @gramio/storage-redis has no redisStorage export");
+			const mod = await importPeer(
+				"@gramio/storage-redis",
+				"BOT_PERSIST=redis://…",
+			);
+			const factory = (mod as { redisStorage?: (url: string) => Storage })
+				.redisStorage;
+			if (!factory)
+				throw new Error(
+					"createBot: @gramio/storage-redis has no redisStorage export",
+				);
 			return { storage: factory(persist), kind: "redis" };
 		}
 		if (persist) {
-			const mod = (await importPeer("@gramio/storage-sqlite", "a BOT_PERSIST path")) as {
+			const mod = (await importPeer(
+				"@gramio/storage-sqlite",
+				"a BOT_PERSIST path",
+			)) as {
 				sqliteStorage?: (path: string) => Storage;
 				default?: (path: string) => Storage;
 			};
 			const factory = mod.sqliteStorage ?? mod.default;
-			if (!factory) throw new Error("createBot: @gramio/storage-sqlite has no storage export");
+			if (!factory)
+				throw new Error(
+					"createBot: @gramio/storage-sqlite has no storage export",
+				);
 			return { storage: factory(persist), kind: `sqlite ${persist}` };
 		}
-		return { storage: inMemoryStorage(), kind: "memory (ephemeral — set BOT_PERSIST to keep state)" };
+		return {
+			storage: inMemoryStorage(),
+			kind: "memory (ephemeral — set BOT_PERSIST to keep state)",
+		};
 	};
 
 	const build = (env?: EnvLike) => {
@@ -158,18 +201,26 @@ export function createBot(opts: CreateBotOptions = {}): BotApp {
 			const session = botSession({ storage, initial: () => ({}) });
 			bot.extend(session);
 
-			const lang = opts.language ? language({ ...opts.language, session }) : null;
+			const lang = opts.language
+				? language({ ...opts.language, session })
+				: null;
 			if (lang) bot.extend(lang.plugin);
 
 			if (opts.admins) bot.extend(adminContext(opts.admins));
 			if (opts.access) {
-				if (!opts.admins) throw new Error("createBot: `access` needs `admins` (the approver)");
+				if (!opts.admins)
+					throw new Error("createBot: `access` needs `admins` (the approver)");
 				bot.extend(accessControl({ ...opts.access, session, storage }));
 			}
 
-			const payments = opts.payments ? botPayments({ ...opts.payments, session, storage } as never) : null;
+			const payments = opts.payments
+				? botPayments({ ...opts.payments, session, storage } as never)
+				: null;
 			if (payments) {
-				if (!opts.admins) throw new Error("createBot: `payments` needs `admins` (the refund approver)");
+				if (!opts.admins)
+					throw new Error(
+						"createBot: `payments` needs `admins` (the refund approver)",
+					);
 				bot.extend(payments.plugin);
 			}
 
@@ -184,7 +235,9 @@ export function createBot(opts: CreateBotOptions = {}): BotApp {
 						items: composed,
 						...(personalData === false
 							? {}
-							: { personalData: { storage, onForget: personalData?.onForget } }),
+							: {
+									personalData: { storage, onForget: personalData?.onForget },
+								}),
 					}).plugin,
 				);
 			}
@@ -198,7 +251,9 @@ export function createBot(opts: CreateBotOptions = {}): BotApp {
 	const adminIds = (): (() => Promise<readonly number[]>) | undefined => {
 		const a = opts.admins;
 		if (a === undefined) return undefined;
-		return typeof a === "function" ? async () => idsOf(await a()) : async () => idsOf(a);
+		return typeof a === "function"
+			? async () => idsOf(await a())
+			: async () => idsOf(a);
 	};
 
 	const workerFetch = botWorkerFetch<EnvLike>(async (env) => {

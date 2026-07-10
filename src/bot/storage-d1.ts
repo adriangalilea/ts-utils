@@ -62,7 +62,10 @@ export function d1Storage(opts: D1StorageOptions): FlushableStorage {
 	const pending = new Set<Promise<unknown>>();
 	const track = <T>(promise: Promise<T>): Promise<T | undefined> => {
 		const settled = promise.catch((error) => {
-			log.error("write failed:", error instanceof Error ? error.message : error);
+			log.error(
+				"write failed:",
+				error instanceof Error ? error.message : error,
+			);
 			return undefined;
 		});
 		pending.add(settled);
@@ -80,7 +83,10 @@ export function d1Storage(opts: D1StorageOptions): FlushableStorage {
 				if (!row) return undefined;
 				return JSON.parse(row.value);
 			} catch (error) {
-				log.error("read failed:", error instanceof Error ? error.message : error);
+				log.error(
+					"read failed:",
+					error instanceof Error ? error.message : error,
+				);
 				return undefined;
 			}
 		},
@@ -98,13 +104,20 @@ export function d1Storage(opts: D1StorageOptions): FlushableStorage {
 		async set(key, value) {
 			await track(
 				db
-					.prepare(`INSERT INTO ${table} (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2`)
+					.prepare(
+						`INSERT INTO ${table} (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2`,
+					)
 					.bind(String(key), JSON.stringify(value))
 					.run(),
 			);
 		},
 		async delete(key) {
-			const res = await track(db.prepare(`DELETE FROM ${table} WHERE key = ?1`).bind(String(key)).run());
+			const res = await track(
+				db
+					.prepare(`DELETE FROM ${table} WHERE key = ?1`)
+					.bind(String(key))
+					.run(),
+			);
 			return (res?.meta.changes ?? 0) > 0;
 		},
 		async flush() {

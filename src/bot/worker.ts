@@ -41,7 +41,12 @@
  */
 import { buildAllowedUpdates } from "gramio";
 import { createLogger } from "../universal/log.js";
-import { type AlertThrottle, alertAdminError, alertThrottle, notifyAdmins } from "./notify.js";
+import {
+	type AlertThrottle,
+	alertAdminError,
+	alertThrottle,
+	notifyAdmins,
+} from "./notify.js";
 
 const log = createLogger("bot/worker");
 
@@ -50,7 +55,11 @@ export type WorkerBot = {
 	info?: { username?: string };
 	updates: { handleUpdate(update: unknown): Promise<unknown> };
 	api: {
-		setWebhook(params: { url: string; secret_token: string; allowed_updates: string[] }): Promise<unknown>;
+		setWebhook(params: {
+			url: string;
+			secret_token: string;
+			allowed_updates: string[];
+		}): Promise<unknown>;
 		deleteWebhook(): Promise<unknown>;
 		getWebhookInfo(): Promise<{ url?: string; [k: string]: unknown }>;
 		/** For the lifecycle DMs (notifyAdmins rides the same bot). */
@@ -75,7 +84,11 @@ export type BotWorkerRuntime = {
 	/** Extra fields merged into /webhook-status (e.g. a live feature flag). */
 	statusExtra?: () => Promise<Record<string, unknown>>;
 	/** Consumer endpoints, tried BEFORE the built-ins. Return null to fall through. */
-	routes?: (request: Request, url: URL, ctx: WaitUntilCtx) => Promise<Response | null> | Response | null;
+	routes?: (
+		request: Request,
+		url: URL,
+		ctx: WaitUntilCtx,
+	) => Promise<Response | null> | Response | null;
 	/** Error-alert throttle (share one to share its budget). Default: own 60s window. */
 	errorThrottle?: AlertThrottle;
 };
@@ -110,8 +123,12 @@ export function botWorkerFetch<Env>(
 			}
 
 			if (request.method === "POST" && url.pathname === "/") {
-				if (!webhookSecret) return new Response("webhookSecret is required", { status: 500 });
-				if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== webhookSecret) {
+				if (!webhookSecret)
+					return new Response("webhookSecret is required", { status: 500 });
+				if (
+					request.headers.get("X-Telegram-Bot-Api-Secret-Token") !==
+					webhookSecret
+				) {
 					return new Response("Unauthorized", { status: 401 });
 				}
 				let update: unknown;
@@ -127,9 +144,18 @@ export function botWorkerFetch<Env>(
 						await bot.updates.handleUpdate(update);
 						if (rt.flush) await rt.flush();
 					})().catch(async (error) => {
-						log.error("update failed:", error instanceof Error ? error.message : error);
+						log.error(
+							"update failed:",
+							error instanceof Error ? error.message : error,
+						);
 						// awaited so the DM rides the same waitUntil, not a frozen isolate
-						await alertAdminError(bot, await adminIds(), "webhook update failed", error, throttle);
+						await alertAdminError(
+							bot,
+							await adminIds(),
+							"webhook update failed",
+							error,
+							throttle,
+						);
 					}),
 				);
 				return new Response("OK");
@@ -137,14 +163,19 @@ export function botWorkerFetch<Env>(
 
 			// Deploy narration, step 1 of 2: what is SHIPPING (curled on the still-live version).
 			if (request.method === "POST" && url.pathname === "/deploy-started") {
-				if (!webhookSecret) return new Response("webhookSecret is required", { status: 500 });
-				if (bearerToken(request.headers.get("Authorization")) !== webhookSecret) {
+				if (!webhookSecret)
+					return new Response("webhookSecret is required", { status: 500 });
+				if (
+					bearerToken(request.headers.get("Authorization")) !== webhookSecret
+				) {
 					return new Response("forbidden", { status: 403 });
 				}
 				const meta = await request.json().catch(() => ({}));
 				const commit = parseCommitMeta(meta);
 				const eta = etaSeconds(meta);
-				log.info(`deploy started${commit ? ` · ${describeCommit(commit)}` : ""}`);
+				log.info(
+					`deploy started${commit ? ` · ${describeCommit(commit)}` : ""}`,
+				);
 				ctx.waitUntil(
 					adminIds().then((ids) =>
 						notifyAdmins(
@@ -161,12 +192,22 @@ export function botWorkerFetch<Env>(
 			// Deploy narration, step 2 of 2: what went LIVE — and the load-bearing
 			// webhook re-registration (allowed_updates derives from the handlers).
 			if (request.method === "POST" && url.pathname === "/setup") {
-				if (!webhookSecret) return new Response("webhookSecret is required", { status: 500 });
-				const token = bearerToken(request.headers.get("Authorization")) ?? request.headers.get("X-Setup-Token");
-				if (token !== webhookSecret) return new Response("forbidden", { status: 403 });
+				if (!webhookSecret)
+					return new Response("webhookSecret is required", { status: 500 });
+				const token =
+					bearerToken(request.headers.get("Authorization")) ??
+					request.headers.get("X-Setup-Token");
+				if (token !== webhookSecret)
+					return new Response("forbidden", { status: 403 });
 				const commit = parseCommitMeta(await request.json().catch(() => ({})));
-				const allowedUpdates = await registerWebhook(bot, url.origin, webhookSecret);
-				log.success(`deployed${commit ? ` · ${describeCommit(commit)}` : ""} — webhook registered`);
+				const allowedUpdates = await registerWebhook(
+					bot,
+					url.origin,
+					webhookSecret,
+				);
+				log.success(
+					`deployed${commit ? ` · ${describeCommit(commit)}` : ""} — webhook registered`,
+				);
 				ctx.waitUntil(
 					adminIds().then((ids) =>
 						notifyAdmins(
@@ -177,12 +218,18 @@ export function botWorkerFetch<Env>(
 						),
 					),
 				);
-				return new Response(`[${mode}] webhook set to ${url.origin}/ (updates: ${allowedUpdates.join(", ")})`);
+				return new Response(
+					`[${mode}] webhook set to ${url.origin}/ (updates: ${allowedUpdates.join(", ")})`,
+				);
 			}
 
 			// The operator tap: pause = deleteWebhook (Telegram queues ~24h),
 			// resume = re-register, status = getWebhookInfo (+statusExtra).
-			if (url.pathname === "/pause" || url.pathname === "/resume" || url.pathname === "/webhook-status") {
+			if (
+				url.pathname === "/pause" ||
+				url.pathname === "/resume" ||
+				url.pathname === "/webhook-status"
+			) {
 				const secret = rt.operatorSecret?.trim();
 				if (!secret) return json({ error: "operator API disabled" }, 404);
 				if (request.headers.get("Authorization") !== `Bearer ${secret}`) {
@@ -192,18 +239,29 @@ export function botWorkerFetch<Env>(
 					await bot.api.deleteWebhook();
 					ctx.waitUntil(
 						adminIds().then((ids) =>
-							notifyAdmins(bot, ids, `⏸️ @${bot.info?.username} [${mode}] paused — webhook deleted, Telegram queues ~24h.`),
+							notifyAdmins(
+								bot,
+								ids,
+								`⏸️ @${bot.info?.username} [${mode}] paused — webhook deleted, Telegram queues ~24h.`,
+							),
 						),
 					);
 				} else if (request.method === "POST" && url.pathname === "/resume") {
-					if (!webhookSecret) return new Response("webhookSecret is required", { status: 500 });
+					if (!webhookSecret)
+						return new Response("webhookSecret is required", { status: 500 });
 					await registerWebhook(bot, url.origin, webhookSecret);
 					ctx.waitUntil(
 						adminIds().then((ids) =>
-							notifyAdmins(bot, ids, `▶️ @${bot.info?.username} [${mode}] resumed — webhook re-registered.`),
+							notifyAdmins(
+								bot,
+								ids,
+								`▶️ @${bot.info?.username} [${mode}] resumed — webhook re-registered.`,
+							),
 						),
 					);
-				} else if (!(request.method === "GET" && url.pathname === "/webhook-status")) {
+				} else if (
+					!(request.method === "GET" && url.pathname === "/webhook-status")
+				) {
 					return new Response("Not Found", { status: 404 });
 				}
 				const info = await bot.api.getWebhookInfo();
@@ -213,7 +271,10 @@ export function botWorkerFetch<Env>(
 
 			return new Response("Not Found", { status: 404 });
 		} catch (error) {
-			log.error("worker request failed:", error instanceof Error ? error.message : error);
+			log.error(
+				"worker request failed:",
+				error instanceof Error ? error.message : error,
+			);
 			return new Response("internal error", { status: 500 });
 		}
 	};
@@ -223,9 +284,17 @@ export function botWorkerFetch<Env>(
 // events) or Telegram never delivers them. Derived from the bot's registered
 // handlers — which is why deploys re-register (/setup) and /resume re-derives
 // instead of remembering a stale list.
-async function registerWebhook(bot: WorkerBot, origin: string, webhookSecret: string): Promise<string[]> {
+async function registerWebhook(
+	bot: WorkerBot,
+	origin: string,
+	webhookSecret: string,
+): Promise<string[]> {
 	const allowedUpdates = [...buildAllowedUpdates(bot as never)];
-	await bot.api.setWebhook({ url: `${origin}/`, secret_token: webhookSecret, allowed_updates: allowedUpdates });
+	await bot.api.setWebhook({
+		url: `${origin}/`,
+		secret_token: webhookSecret,
+		allowed_updates: allowedUpdates,
+	});
 	return allowedUpdates;
 }
 
@@ -235,7 +304,10 @@ function bearerToken(header: string | null): string | null {
 }
 
 function json(value: unknown, status = 200): Response {
-	return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
+	return new Response(JSON.stringify(value), {
+		status,
+		headers: { "content-type": "application/json" },
+	});
 }
 
 // The commit riding in the JSON body a deploy script sends to /deploy-started
@@ -247,14 +319,19 @@ function parseCommitMeta(meta: unknown): CommitMeta | null {
 	const commit: CommitMeta = {
 		sha: typeof m?.sha === "string" ? m.sha.trim().slice(0, 7) : "",
 		author: typeof m?.author === "string" ? m.author.trim() : "",
-		message: typeof m?.message === "string" ? (m.message.split("\n")[0]?.trim().slice(0, 120) ?? "") : "",
+		message:
+			typeof m?.message === "string"
+				? (m.message.split("\n")[0]?.trim().slice(0, 120) ?? "")
+				: "",
 	};
 	return commit.sha || commit.author || commit.message ? commit : null;
 }
 
 /** One line for the operator log: `abc1234 · Author · "message"`. */
 function describeCommit(c: CommitMeta): string {
-	return [c.sha, c.author, c.message ? `“${c.message}”` : ""].filter(Boolean).join(" · ");
+	return [c.sha, c.author, c.message ? `“${c.message}”` : ""]
+		.filter(Boolean)
+		.join(" · ");
 }
 
 /**
@@ -263,13 +340,23 @@ function describeCommit(c: CommitMeta): string {
  */
 function commitHtml(c: CommitMeta | null): string {
 	if (!c) return "";
-	const head = [c.sha ? `<code>${escapeHtml(c.sha)}</code>` : "", escapeHtml(c.author)].filter(Boolean).join(" · ");
-	const quote = c.message ? `\n<blockquote>${escapeHtml(c.message)}</blockquote>` : "";
+	const head = [
+		c.sha ? `<code>${escapeHtml(c.sha)}</code>` : "",
+		escapeHtml(c.author),
+	]
+		.filter(Boolean)
+		.join(" · ");
+	const quote = c.message
+		? `\n<blockquote>${escapeHtml(c.message)}</blockquote>`
+		: "";
 	return `${head ? `\n${head}` : ""}${quote}`;
 }
 
 // HTML mode + no link preview, shared by both deploy DMs.
-const DEPLOY_DM_PARAMS = { parse_mode: "HTML", link_preview_options: { is_disabled: true } } as const;
+const DEPLOY_DM_PARAMS = {
+	parse_mode: "HTML",
+	link_preview_options: { is_disabled: true },
+} as const;
 
 /** The recent average deploy duration (seconds) a CI measured, when present and sane. */
 function etaSeconds(meta: unknown): number | null {
