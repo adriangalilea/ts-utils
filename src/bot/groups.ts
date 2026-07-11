@@ -1,11 +1,22 @@
 /**
- * Group-chat identity — chat-type predicates and the group-admin check. Worker-safe
- * (no env, no OS).
+ * Group-chat identity — chat-type predicates, the chat-id resolver, and the group-admin
+ * check. Worker-safe (no env, no OS).
  *
  * Telegram's Bot API has no "is this user a group admin?" primitive and neither does
  * gramio: the raw material is `getChatMember` returning a member whose `status` may be
  * `"creator"` or `"administrator"`. Every bot with an admin-gated group setting re-rolls
  * that check; this module rolls it ONCE.
+ *
+ * ## The two ctx spellings (the trap this module absorbs)
+ *
+ * gramio spells "which chat" differently per event: message-flavoured contexts carry
+ * `ctx.chat`, but `CallbackQueryContext` — every inline-button tap, i.e. the surface most
+ * gates live on — has NO `chat` at all, only `ctx.chatId` and `ctx.message.chat`. Because
+ * `chat` is optional in the structural types, the mismatch compiles and then reads as
+ * `undefined` at runtime: a gate that "works" in a handler silently denies on a tap.
+ * Every reader here ({@link chatIdOf}, the predicates, {@link isGroupAdmin}) resolves BOTH
+ * spellings, so one call site works on any ctx. Read chat ids through `chatIdOf`, never
+ * `ctx.chat?.id`.
  *
  * These take minimum structural ctx shapes (the `bot/ctx.ts` philosophy) that real
  * gramio contexts AND `bot/menu`'s `MenuCtx` satisfy by duck typing — a menu action
@@ -35,17 +46,26 @@
  */
 import { assert } from "../offensive.js";
 
-/** Minimum ctx shape the chat-type predicates read. */
+/** Minimum ctx shape the chat-type predicates read: `chat` on message-flavoured ctxs,
+ *  `message.chat` on callback ctxs (which have no `chat`). */
 export type ChatTypeCtx = {
 	chat?: { type?: string };
+	message?: { chat?: { type?: string } };
+};
+
+/** Minimum ctx shape {@link chatIdOf} reads: `chat` (message ctxs), or `chatId` /
+ *  `message.chat` (callback ctxs). */
+export type ChatIdCtx = {
+	chat?: { id?: number };
+	chatId?: number;
+	message?: { chat?: { id?: number } };
 };
 
 /** Minimum ctx shape `isGroupAdmin` reads. `bot` is the running gramio Bot — typed
  *  `unknown` so MenuCtx and every real ctx assign without a cast; its
  *  `api.getChatMember` is asserted at call time. */
-export type GroupAdminCtx = {
+export type GroupAdminCtx = ChatIdCtx & {
 	bot: unknown;
-	chat?: { id?: number };
 	from?: { id?: number };
 };
 
@@ -61,17 +81,28 @@ type GetChatMemberApi = {
 // contract is the question `isGroupAdmin` answers, never status comparison.
 const GROUP_ADMIN_STATUSES = new Set(["creator", "administrator"]);
 
+/** The ctx's chat id, whatever the event spelling. `undefined` only when the event has
+ *  no chat at all (inline queries, some service events). */
+export const chatIdOf = (ctx: ChatIdCtx): number | undefined =>
+	ctx.chat?.id ?? ctx.chatId ?? ctx.message?.chat?.id;
+
+// The chat type, both spellings (private helper twin of chatIdOf).
+const chatTypeOf = (ctx: ChatTypeCtx): string | undefined =>
+	ctx.chat?.type ?? ctx.message?.chat?.type;
+
 /** True for a group or supergroup chat. */
-export const isGroupChat = (ctx: ChatTypeCtx): boolean =>
-	ctx.chat?.type === "group" || ctx.chat?.type === "supergroup";
+export const isGroupChat = (ctx: ChatTypeCtx): boolean => {
+	const type = chatTypeOf(ctx);
+	return type === "group" || type === "supergroup";
+};
 
 /** True for a 1:1 private chat. */
 export const isPrivateChat = (ctx: ChatTypeCtx): boolean =>
-	ctx.chat?.type === "private";
+	chatTypeOf(ctx) === "private";
 
 /**
  * Whether a user is a creator/administrator of a group, per `getChatMember`. Chat and
- * user default to the ctx's own (`ctx.chat.id`, `ctx.from.id` — gramio's own
+ * user default to the ctx's own ({@link chatIdOf}, `ctx.from.id` — gramio's own
  * parameter-defaulting idiom); pass `chatId` / `userId` for cross-chat checks. Missing
  * ids (an actor-less service event) or an API rejection answer `false`.
  */
@@ -79,7 +110,7 @@ export async function isGroupAdmin(
 	ctx: GroupAdminCtx,
 	opts: { chatId?: number; userId?: number } = {},
 ): Promise<boolean> {
-	const chatId = opts.chatId ?? ctx.chat?.id;
+	const chatId = opts.chatId ?? chatIdOf(ctx);
 	const userId = opts.userId ?? ctx.from?.id;
 	if (chatId === undefined || userId === undefined) return false;
 	const bot = ctx.bot as { api?: Partial<GetChatMemberApi> } | undefined;

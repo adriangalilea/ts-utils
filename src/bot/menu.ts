@@ -80,6 +80,7 @@ import type { Storage } from "@gramio/storage";
 import { CallbackData, InlineKeyboard, Plugin } from "gramio";
 
 import { type Polyglot, say } from "../say/index.js";
+import { isPrivateChat } from "./groups.js";
 import { botStorageKey } from "./keys.js";
 import { langHintOf } from "./language.js";
 
@@ -88,8 +89,14 @@ import { langHintOf } from "./language.js";
 /**
  * Shape of the `ctx` an action / label / predicate sees.
  *
- * - Static fields (`bot`, `from`, `chat`, `session`, `threadId`,
- *   `message`) come from gramio's `CallbackQueryContext`.
+ * - Static fields come from the dispatching gramio ctx — a
+ *   `MessageContext` on the initial `/settings` render, a
+ *   `CallbackQueryContext` on every tap. The two SPELL the chat
+ *   differently: `chat` exists only on message ctxs; callback ctxs
+ *   carry `chatId` and `message.chat` instead, so `ctx.chat` is
+ *   `undefined` inside every action. Read the chat through
+ *   `chatIdOf` / `isGroupChat` from `bot/groups` (they resolve both
+ *   spellings), never `ctx.chat` directly.
  * - Common reply methods (`send`, `reply`, `answer`, `editText`) are
  *   declared as optional so action callbacks can call them without
  *   `as unknown as` casts. They exist at runtime on every callback ctx
@@ -103,9 +110,10 @@ export type MenuCtx = {
 	bot: unknown;
 	from?: { id: number; languageCode?: string };
 	chat?: { id: number; type: string };
+	chatId?: number;
 	session?: { language?: string };
 	threadId?: number;
-	message?: { threadId?: number };
+	message?: { threadId?: number; chat?: { id?: number; type?: string } };
 	send?: (
 		text: string | { toString(): string },
 		params?: object,
@@ -725,14 +733,8 @@ const buildMenuPlugin = (menu: BotMenu) => {
 			},
 			lang,
 		);
-	const isPrivateContext = (ctx: MenuCtx): boolean => {
-		const messageChatType = (
-			ctx.message as { chat?: { type?: string } } | undefined
-		)?.chat?.type;
-		return (ctx.chat?.type ?? messageChatType) === "private";
-	};
 	const guardPrivate = async (ctx: MenuCtx): Promise<boolean> => {
-		if (!personalData || menu._opts.allowInGroups || isPrivateContext(ctx))
+		if (!personalData || menu._opts.allowInGroups || isPrivateChat(ctx))
 			return true;
 		const lang = ctxLang(ctx);
 		if (ctx.answer) {

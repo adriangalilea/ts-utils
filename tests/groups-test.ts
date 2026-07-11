@@ -2,7 +2,7 @@
 // ctx-defaulted and explicit ids, fail-closed on API rejection, panic on a
 // miswired ctx. Run: pnpm test:groups
 import assert from "node:assert/strict";
-import { isGroupAdmin, isGroupChat, isPrivateChat } from "../src/bot/groups.js";
+import { chatIdOf, isGroupAdmin, isGroupChat, isPrivateChat } from "../src/bot/groups.js";
 import type { MenuCtx } from "../src/bot/menu.js";
 import { Panic } from "../src/offensive.js";
 
@@ -55,9 +55,28 @@ await ok("chat-type predicates read ctx.chat.type", () => {
 	assert.equal(isPrivateChat({}), false);
 });
 
+// gramio's CallbackQueryContext has NO `chat` — the chat lives at `chatId` and
+// `message.chat`. Every reader must resolve that spelling too, or every gate on an
+// inline-button tap silently reads `undefined`.
+await ok("callback-shaped ctxs (no chat, only chatId/message.chat) resolve too", () => {
+	const tap = { chatId: -100, message: { chat: { id: -100, type: "supergroup" } } };
+	assert.equal(isGroupChat(tap), true);
+	assert.equal(isPrivateChat(tap), false);
+	assert.equal(chatIdOf(tap), -100);
+	assert.equal(chatIdOf({ chat: { id: 5 } }), 5);
+	assert.equal(chatIdOf({}), undefined);
+});
+
 await ok("isGroupAdmin defaults chat/user from the ctx", async () => {
 	const { ctx, calls } = makeCtx({ "-100:7": "administrator" });
 	assert.equal(await isGroupAdmin(ctx), true);
+	assert.deepEqual(calls, [{ chat_id: -100, user_id: 7 }]);
+});
+
+await ok("isGroupAdmin resolves the chat from a callback-shaped ctx", async () => {
+	const { ctx, calls } = makeCtx({ "-100:7": "administrator" });
+	const tap = { bot: ctx.bot, from: ctx.from, chatId: -100 };
+	assert.equal(await isGroupAdmin(tap), true);
 	assert.deepEqual(calls, [{ chat_id: -100, user_id: 7 }]);
 });
 
