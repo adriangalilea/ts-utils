@@ -26,3 +26,4 @@ export * from "./menu.js";
 export * from "./notify.js";
 export * from "./payments/index.js";
 export * from "./storage.js";
+export * from "./user.js";

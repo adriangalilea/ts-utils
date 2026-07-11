@@ -37,6 +37,7 @@ const SAFE_ENTRIES = [
 	"bot/profile.js",
 	"bot/flags.js",
 	"bot/groups.js",
+	"bot/user.js",
 	"bot/session.js",
 	"bot/storage.js",
 	"bot/storage-d1.js",
