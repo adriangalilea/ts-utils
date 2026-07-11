@@ -762,7 +762,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 				await ctx.send(await labelOf(header, ctx), headerParams(menu, kb));
 				// Tidy mode: drop the /command invocation once the menu is up, when the
 				// bot author's predicate says so. Best-effort — never blocks the menu.
-				if (menu._opts.deleteInvocation && (await menu._opts.deleteInvocation(ctx).catch(() => false)))
+				if (menu._opts.deleteInvocation && (await Promise.resolve(menu._opts.deleteInvocation(ctx)).catch(() => false)))
 					await ctx.delete?.().catch(() => {});
 			})
 			// Navigate (root / submenu)
