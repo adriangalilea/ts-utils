@@ -404,8 +404,11 @@ export function addLanguageRows(
 		codes: readonly string[];
 		pack: (code: string) => string;
 		labelFor?: (code: string) => string;
-		/** The code that wears the `primary` fill (the current setting), if any. */
+		/** The code that wears the active fill (the current setting), if any. */
 		active?: string;
+		/** The active code's fill (default `primary`). Pass `success` when blue already
+		 *  means something else on the same keyboard (e.g. an active nav tab). */
+		activeStyle?: "primary" | "success" | "danger";
 		perRow?: number;
 	},
 ): InlineKeyboard {
@@ -416,7 +419,7 @@ export function addLanguageRows(
 		kb.text(
 			labelFor(code),
 			opts.pack(code),
-			code === opts.active ? { style: "primary" } : undefined,
+			code === opts.active ? { style: opts.activeStyle ?? "primary" } : undefined,
 		);
 	});
 	return kb;
