@@ -1,6 +1,6 @@
 {
 	"name": "@adriangalilea/utils",
-	"version": "1.11.0",
+	"version": "1.12.0",
 	"description": "TypeScript utilities - logger, currency, formatter, GramIO bot plugins, and more",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -161,7 +161,8 @@
 		"test:tg-html": "tsx tests/tg-html-test.ts",
 		"test:flags": "tsx tests/flags-test.ts",
 		"test:groups": "tsx tests/groups-test.ts",
-		"test:user": "tsx tests/user-test.ts"
+		"test:user": "tsx tests/user-test.ts",
+		"test:language-picker": "tsx tests/language-picker-test.ts"
 	},
 	"keywords": [
 		"typescript",

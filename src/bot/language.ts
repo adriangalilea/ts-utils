@@ -62,10 +62,10 @@
  */
 
 import type { session } from "@gramio/session";
-import { type DeriveDefinitions, Plugin } from "gramio";
+import { type DeriveDefinitions, type InlineKeyboard, Plugin } from "gramio";
 
 import { type Polyglot, say } from "../say/index.js";
-import type { MenuItem } from "./menu.js";
+import type { ActionResult, MenuCtx, MenuItem } from "./menu.js";
 
 // ─── public types ──────────────────────────────────────────────────
 
@@ -304,6 +304,13 @@ const REGIONLESS_FLAGS: Record<string, string> = {
 	pl: "🇵🇱",
 	nl: "🇳🇱",
 	uk: "🇺🇦",
+	hi: "🇮🇳",
+	bn: "🇧🇩",
+	id: "🇮🇩",
+	vi: "🇻🇳",
+	th: "🇹🇭",
+	fa: "🇮🇷",
+	he: "🇮🇱",
 };
 
 const regionToFlag = (region: string): string =>
@@ -314,7 +321,9 @@ const regionToFlag = (region: string): string =>
 			.map((c) => 0x1f1a5 + c.charCodeAt(0)),
 	);
 
-const flagFor = (lang: string): string => {
+/** A representative flag for a language tag: the region's flag when the tag carries one
+ *  (`pt-BR` → 🇧🇷), a curated flag for common regionless tags (`es` → 🇪🇸), 🌐 otherwise. */
+export const flagFor = (lang: string): string => {
 	const parts = lang.split("-");
 	if (parts.length > 1) {
 		const region = parts.find((p) => /^[A-Z]{2}$/.test(p));
@@ -323,7 +332,9 @@ const flagFor = (lang: string): string => {
 	return REGIONLESS_FLAGS[parts[0].toLowerCase()] ?? "🌐";
 };
 
-const autonym = (lang: string): string => {
+/** The language's name in itself (`es` → "Español", `ja` → "日本語") — what its own
+ *  speakers scan a picker for. Falls back to the tag when Intl doesn't know it. */
+export const autonym = (lang: string): string => {
 	try {
 		const dn = new Intl.DisplayNames([lang], { type: "language" });
 		return dn.of(lang) ?? lang;
@@ -332,9 +343,84 @@ const autonym = (lang: string): string => {
 	}
 };
 
-const defaultLabel = (lang: string) => `${flagFor(lang)} ${autonym(lang)}`;
+/** The canonical picker label: flag + autonym (`es` → "🇪🇸 Español"). The autonym is
+ *  title-cased for the label position — Intl returns "español" (correct in running
+ *  Spanish prose, wrong on a button); caseless scripts pass through untouched. */
+export const languageLabel = (lang: string): string => {
+	const name = autonym(lang);
+	return `${flagFor(lang)} ${name.charAt(0).toLocaleUpperCase(lang)}${name.slice(1)}`;
+};
 
-// The picker packs its own callback data via menuItem — no schema needed here.
+/**
+ * The language-picker MenuItem, storage- and policy-agnostic: one submenu entry per
+ * code, packed two-up, the active code wearing Telegram's `primary` fill, re-rendered
+ * in place after a tap. What "active" means and what a tap DOES live in your closures —
+ * the plugin's own session-writing `menuItem`, a group-scoped admin-gated picker, and a
+ * tier-gated one are all this one factory.
+ *
+ * `pick` returns the toast (or a refusal toast — gate inside it); the menu owns the
+ * single answerCallbackQuery, so never call `ctx.answer` from `pick`.
+ */
+export type LanguagePickerSpec = {
+	/** MenuItem id (default "lang"); submenu entry ids are the codes. */
+	id?: string;
+	/** The submenu button's label. */
+	label: string | Polyglot<string>;
+	codes: readonly string[];
+	/** Button label per code; default {@link languageLabel}. */
+	labelFor?: (code: string) => string;
+	isActive: (ctx: MenuCtx, code: string) => boolean | Promise<boolean>;
+	pick: (ctx: MenuCtx, code: string) => ActionResult | Promise<ActionResult>;
+};
+
+export function languagePickerItem(spec: LanguagePickerSpec): MenuItem {
+	const labelFor = spec.labelFor ?? languageLabel;
+	return {
+		id: spec.id ?? "lang",
+		label: spec.label,
+		submenu: spec.codes.map((code, i, arr) => ({
+			id: code,
+			label: labelFor(code),
+			// Two per row (break after each even index).
+			keepRow: i % 2 === 0 && i < arr.length - 1,
+			style: async (ctx) =>
+				(await spec.isActive(ctx, code)) ? "primary" : undefined,
+			refresh: true,
+			action: (ctx) => spec.pick(ctx, code),
+		})),
+	};
+}
+
+/**
+ * Append flag-labeled language rows to an InlineKeyboard — the raw-surface twin of
+ * {@link languagePickerItem} for keyboards outside `botMenu` (an onboarding /start, a
+ * group welcome). The caller owns the callback schema: `pack(code)` returns the
+ * callback_data. Returns the same keyboard, so lead rows go before and trailing rows
+ * chain after.
+ */
+export function addLanguageRows(
+	kb: InlineKeyboard,
+	opts: {
+		codes: readonly string[];
+		pack: (code: string) => string;
+		labelFor?: (code: string) => string;
+		/** The code that wears the `primary` fill (the current setting), if any. */
+		active?: string;
+		perRow?: number;
+	},
+): InlineKeyboard {
+	const labelFor = opts.labelFor ?? languageLabel;
+	const perRow = opts.perRow ?? 2;
+	opts.codes.forEach((code, i) => {
+		if (i % perRow === 0) kb.row();
+		kb.text(
+			labelFor(code),
+			opts.pack(code),
+			code === opts.active ? { style: "primary" } : undefined,
+		);
+	});
+	return kb;
+}
 
 // ─── feature factory ───────────────────────────────────────────────
 
@@ -412,42 +498,23 @@ export const language = <const Langs extends readonly string[]>(
 		scopeOpt,
 	});
 
-	const menuItem: MenuItem = {
-		id: "lang",
+	// The plugin's stock picker is the generic factory with session-backed closures.
+	// `isActive` resolves stored → hint → default LIVE (not `ctx.lang`, the event-start
+	// snapshot — stale within the same callback after `pick` mutated the session), so
+	// the highlight tracks reality even before any explicit pick exists.
+	const menuItem: MenuItem = languagePickerItem({
 		label: menuLabel,
-		submenu: canonical.map((l, i, arr) => ({
-			id: l,
-			label: labels[l] ?? defaultLabel(l),
-			// Pack the picker two languages per row (break after each odd index).
-			keepRow: i % 2 === 0 && i < arr.length - 1,
-			// The user's EFFECTIVE language renders blue (Telegram's `primary`
-			// style); the rest stay at app default.
-			//
-			// Resolves stored → hint → default LIVE (not `ctx.lang`, the
-			// event-start snapshot — stale within the same callback after the
-			// sibling action mutated the session), so the highlight tracks
-			// reality even before any explicit pick exists.
-			style: (ctx) => (effectiveLang(ctx) === l ? "primary" : undefined),
-			// Re-render the submenu in place after the tap so the colour
-			// moves to the newly-selected language without the user having
-			// to re-open the menu.
-			refresh: true,
-			action: (ctx) => {
-				// ctx.session is the shared session record. Mutating any
-				// field on it goes through @gramio/session's Proxy and
-				// auto-persists. We own the `language` field by convention.
-				//
-				// The menu plugin owns the single `answerCallbackQuery` for
-				// this tap — we return the toast string and it gets sent.
-				// Calling ctx.answer directly here would be a second answer
-				// → Telegram rejects → action throws → `refresh: true` skipped
-				// → button colour wouldn't update.
-				const c = ctx as unknown as { session: { language?: Lang } };
-				c.session.language = l;
-				return `✓ ${l}`;
-			},
-		})),
-	};
+		codes: canonical,
+		labelFor: (l) => labels[l] ?? languageLabel(l),
+		isActive: (ctx, l) => effectiveLang(ctx) === l,
+		pick: (ctx, l) => {
+			// ctx.session is the shared session record; mutations go through
+			// @gramio/session's Proxy and auto-persist. We own `language` by convention.
+			const c = ctx as unknown as { session: { language?: Lang } };
+			c.session.language = l as Lang;
+			return `✓ ${l}`;
+		},
+	});
 
 	return { plugin, menuItem };
 };

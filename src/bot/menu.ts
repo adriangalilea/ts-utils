@@ -167,7 +167,7 @@ type Predicate = (ctx: MenuCtx) => boolean | Promise<boolean>;
  * and `refresh: true` never runs. Return the toast instead; the menu
  * sends the single answer.
  */
-type ActionResult = undefined | string | Polyglot<string>;
+export type ActionResult = undefined | string | Polyglot<string>;
 type Action = (ctx: MenuCtx) => Promise<ActionResult> | ActionResult;
 
 /**
