@@ -123,6 +123,7 @@ export type MenuCtx = {
 		params?: object,
 	) => Promise<unknown>;
 	answer?: (params: object) => Promise<unknown>;
+	delete?: () => Promise<unknown>;
 	// gramio 0.12 narrowed ctx.editText's text param to `string | undefined`;
 	// the menu only ever passes strings, so `string` keeps the real gramio
 	// ctx assignable to MenuCtx on both 0.10 and 0.12.
@@ -369,6 +370,12 @@ export type BotMenuOptions = {
 	 * per-group toggle) that must be reachable from inside the group.
 	 */
 	allowInGroups?: boolean;
+	/**
+	 * Delete the user's `/command` invocation message after the menu opens, when this
+	 * predicate answers true (e.g. "in groups where tidy-mode is on and the bot holds
+	 * the Delete-messages right"). Best-effort: a failed delete never blocks the menu.
+	 */
+	deleteInvocation?: (ctx: MenuCtx) => boolean | Promise<boolean>;
 };
 
 const DEFAULT_COMMAND = "settings";
@@ -416,6 +423,7 @@ type ResolvedOpts = {
 	adminContact: string;
 	personalData: ResolvedPersonalData | null;
 	allowInGroups: boolean;
+	deleteInvocation: ((ctx: MenuCtx) => boolean | Promise<boolean>) | null;
 	parseMode: "HTML" | "MarkdownV2" | null;
 };
 
@@ -469,6 +477,7 @@ export class BotMenu {
 					}
 				: null,
 			allowInGroups: opts.allowInGroups ?? false,
+			deleteInvocation: opts.deleteInvocation ?? null,
 			parseMode: opts.parseMode ?? null,
 		};
 	}
@@ -751,6 +760,10 @@ const buildMenuPlugin = (menu: BotMenu) => {
 				if (!(await guardPrivate(ctx))) return;
 				const kb = await renderKeyboard(menu._items, ctx, []);
 				await ctx.send(await labelOf(header, ctx), headerParams(menu, kb));
+				// Tidy mode: drop the /command invocation once the menu is up, when the
+				// bot author's predicate says so. Best-effort — never blocks the menu.
+				if (menu._opts.deleteInvocation && (await menu._opts.deleteInvocation(ctx).catch(() => false)))
+					await ctx.delete?.().catch(() => {});
 			})
 			// Navigate (root / submenu)
 			.callbackQuery(navCb, async (ctx) => {
