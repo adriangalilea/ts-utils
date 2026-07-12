@@ -429,6 +429,9 @@ export class Llm {
 				temperature: resolveTemperature(provider),
 				maxOutputTokens: resolveMaxTokens(provider, req.maxTokens),
 				maxRetries: 0, // retry policy lives in the failover loop, not the transport
+				// The failover loop consumes error parts and reports once per attempt;
+				// without this no-op the SDK ALSO dumps the full APICallError to console.
+				onError: () => {},
 				abortSignal: withTimeout(
 					req.abortSignal,
 					this.opts.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
