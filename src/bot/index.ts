@@ -19,6 +19,7 @@ export * from "./coalesce.js";
 export * from "./ctx.js";
 export * from "./draft.js";
 export * from "./groups.js";
+export * from "./inline-feedback.js";
 export * from "./keys.js";
 export * from "./kit.js";
 export * from "./language.js";

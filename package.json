@@ -1,6 +1,6 @@
 {
 	"name": "@adriangalilea/utils",
-	"version": "2.6.0",
+	"version": "2.7.0",
 	"description": "TypeScript utilities - logger, currency, formatter, GramIO bot plugins, and more",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -147,6 +147,10 @@
 		"./llm": {
 			"types": "./dist/llm/index.d.ts",
 			"default": "./dist/llm/index.js"
+		},
+		"./bot/inline-feedback": {
+			"types": "./dist/bot/inline-feedback.d.ts",
+			"default": "./dist/bot/inline-feedback.js"
 		}
 	},
 	"files": [
