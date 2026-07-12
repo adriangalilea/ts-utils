@@ -25,6 +25,7 @@ export * from "./kit.js";
 export * from "./language.js";
 export * from "./llm.js";
 export * from "./menu.js";
+export * from "./metrics.js";
 export * from "./notify.js";
 export * from "./payments/index.js";
 export * from "./storage.js";
