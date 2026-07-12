@@ -433,7 +433,7 @@ charge log. Telegram doesn't push expiry events; we compute.
 | Auto-read Fragment payouts from TON wallet | Needs TON SDK. Manual `payments.payouts.record()` works fine for low volume. |
 | Per-user Spanish facturas | One factura per Fragment payout is cleaner (§4). Re-evaluate at scale. |
 | Annual subscriptions | Telegram supports only `period: '30d'`. Build N×30d manually if ever needed. |
-| Token-usage-based credit deduction | Needs upstream `streamChat` change to surface SSE `usage` chunk. Fixed-cost-per-call works now. |
+| Token-usage-based credit deduction | The `llm` module's `end` event carries usage + costUsd already; wire `ctx.payments.credits` to it when a bot wants metered billing. Fixed-cost-per-call works now. |
 | Deep-linking `require()` → exact menu rung | v1 opens VIP root; deep-link is a follow-up (TODO marker in `plugin.ts`). |
 
 ### File layout
@@ -478,8 +478,8 @@ src/bot/payments/
   `menuNavCb` schema re-exported by `bot/menu`).
 - **In-menu history view + per-charge refund tap** (v2 — needs
   per-charge `confirm` overlay + page renderer using `refundRequestCb`).
-- **Token-usage credit deduction** (v2 — needs `streamChat` to surface
-  the SSE `usage` chunk; fixed-cost works today).
+- **Token-usage credit deduction** (v2 — the `llm` module's `end` event
+  carries usage + costUsd; fixed-cost works today).
 - **Auto-Fragment payout reader** from TON wallet (v2 — TON SDK).
 - **Stripe-outside-Telegram adapter** when product demand justifies it
   (separate channel + OSS).

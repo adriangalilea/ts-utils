@@ -281,7 +281,8 @@ Every `SourcedError` carries `source`, `operation`, `status`, `context`, and the
 - **XDG**: XDG Base Directory paths — reads env vars set by [xdg-dirs](https://github.com/adriangalilea/xdg-dirs), falls back to spec defaults
 - **Unseen**: Persistent dedup filter — "what's new since last time?" for cron/monitoring workflows
 - **Project Discovery**: Find project/monorepo roots, detect JS/TS projects
-- **Bot plugins (GramIO)**: `kit` (graceful shutdown + admin context), `access-control` (gate + approve/deny menu, backed by sessions), `llm` (OpenAI-compat SSE parser `streamChat` + Telegram streaming output `ctx.startStream` + per-thread conversation history `ctx.llm`), `payments` (Telegram Stars: VIP tiers + credits + perks + waiver + refund flow, ToS-compliant, Spanish-autónomo-aware), `coalesce`, `language`, `menu`
+- **LLM caller (`llm`)**: multi-provider failover on top of the Vercel AI SDK — priority ordering, per-key circuit breaker (KV-backed), reset events for live previews, usage accounting with actual billed cost (OpenRouter), tool calling. Worker-safe.
+- **Bot plugins (GramIO)**: `kit` (graceful shutdown + admin context), `access-control` (gate + approve/deny menu, backed by sessions), `llm` (draft-streamed replies `streamChatReply` + per-thread conversation history `ctx.llm`), `payments` (Telegram Stars: VIP tiers + credits + perks + waiver + refund flow, ToS-compliant, Spanish-autónomo-aware), `coalesce`, `language`, `menu`
 
 ### XDG Base Directories
 
@@ -447,7 +448,8 @@ Then `pnpm install`. Every `ctx.send` / `ctx.sendDocument` / `ctx.reply` / etc. 
 | `@adriangalilea/utils/bot/language` (picker surface) | The language-picker vocabulary and surfaces, so bots don't fork label lists: `flagFor` / `autonym` / `languageLabel` ("🇪🇸 Español"), `languagePickerItem({ label, codes, isActive, pick })` (the 2-up primary-highlighted MenuItem factory — storage and policy live in your closures), and `addLanguageRows(kb, { codes, pack, active?, activeStyle? })` (the raw-InlineKeyboard twin for onboarding / group-welcome keyboards; `activeStyle: "success"` when primary already marks something else on the keyboard). |
 | `@adriangalilea/utils/bot/user` | `userLabel(u)` — the conditional "[name] [@username] [id]" line every bot re-rolls for admin DMs and logs: `Ada Lovelace (@ada · 42)` / `Ada (42)` / `@ada (42)` / `id 42`, missing pieces drop instead of padding. Reads both gramio spellings (`firstName` / `first_name`); plain text by design. |
 | `@adriangalilea/utils/bot/coalesce` | Joins client-split inbound messages back into one. When a user pastes >4096 chars, Telegram clients fragment it into separate `message` updates with no marker. Middleware detects the burst and emits one combined event. |
-| `@adriangalilea/utils/bot/llm` | The full LLM-chatbot pipeline in one module. **Input:** `streamChat(response)` parses OpenAI-compatible SSE (OpenAI, vllm, mlx-lm, llama.cpp, Together, Groq, …) into a typed `AsyncGenerator<{type: 'content' \| 'reasoning', text}>`. **Output:** `ctx.startStream()` (low-level: debounced markdown to Telegram, 4000-char split, exposes `wasPartial` after `.end()`). `ctx.startChatStream(response)` (high-level: consumes the stream, renders reasoning as a Telegram `expandable_blockquote` entity + content as streamed markdown — both go through `markdownToFormattable` with graceful degradation — returns `{ content, reasoning }`). **History:** `llmHistory({...})` returns `.plugin` (decorates `ctx.llm` with `.add() / .get() / .clear() / .all() / .clearAll()`, per-(user, thread) OpenAI `ChatMessage` shape, persisted in the shared session record so the menu's 🗑 Forget wipes it automatically) AND `.menuItem` (drop-in "🗑 Delete this thread" for `botMenu` — wipes the LLM history AND calls `deleteForumTopic` so the Telegram thread + all its messages disappear from the chat; falls back to Redis-only clear when no `threadId` is present). |
+| `@adriangalilea/utils/llm` | Multi-provider LLM caller on the Vercel AI SDK — the policy layer the SDK doesn't ship. `createLlm({ providers, health? })` → `.stream(req)` (typed events: `delta` / `reasoning` / `reset` / `tool-call` / `end`) and `.complete(req)`. **Failover:** priority-ordered across OpenAI-compatible, Anthropic-compatible, and OpenRouter endpoints; multiple keys per provider (health tracked per key fingerprint); per-key circuit breaker with exponential cool-down persisted in any KV-shaped `HealthStore`; an attempt that dies after emitting yields `reset` (discard, next candidate regenerates); empty completions count as failures. **Accounting:** tokens summed across billed attempts; `costUsd` is the ACTUAL charge (OpenRouter usage accounting via `providerMetadata`, or a `cost` field on the raw usage frame) — never a price-table estimate. **Knobs:** per-model temperature, maxTokens caps, `disableThinking` mapped to each dialect. **Tools:** AI SDK `tool()` + `toolChoice` pass through (re-exported). Worker-safe; peers: `ai`, `@ai-sdk/openai-compatible`, `@ai-sdk/anthropic`, `@openrouter/ai-sdk-provider`. |
+| `@adriangalilea/utils/bot/llm` | The Telegram side of an LLM chatbot; the model side is `@adriangalilea/utils/llm`. **Output:** `streamChatReply(ctx, events, opts?)` consumes an `AsyncIterable<LlmStreamEvent>` and paints it with Telegram's native message-draft streaming (`sendMessageDraft` full-frame repaints, throttled ~1/s, keepalive under the ~30s draft TTL), then persists the finished markdown via `ctx.send`, entity-split across 4096 by `@gramio/split`. Reasoning models get a thinking phase — streams into the ephemeral draft and evaporates (`reasoning: 'preview'`, default), persists as an expandable blockquote (`'message'`), or never renders (`'hidden'`). Upstream `reset` (provider failover) repaints the draft from scratch. Drafts are private-chat-only (+ BotFather forum-topic mode); elsewhere the preview phase is skipped and only the final send happens. Returns `{ content, reasoning, toolCalls, usage, messages }`. **History:** `llmHistory({...})` returns `.plugin` (decorates `ctx.llm` with `.add() / .get() / .clear() / .all() / .clearAll()`, per-(user, thread) OpenAI `ChatMessage` shape, persisted in the shared session record so the menu's 🗑 Forget wipes it automatically) AND `.menuItem` (drop-in "🗑 Delete this thread" for `botMenu` — wipes the LLM history AND calls `deleteForumTopic` so the Telegram thread + all its messages disappear from the chat; falls back to history-only clear when no `threadId` is present). |
 | `@adriangalilea/utils/bot/menu` | `botMenu({ command, description, items, privacy?, personalData?, adminContact })` — `/settings` command + InlineKeyboard router. Root view always renders a `🛡️ Privacy & data` submenu button that wraps the privacy policy link plus (if `personalData: { storage }`) 🗑 Forget + 📥 Export buttons. Items take `keepRow` (render on the same row as the next item — e.g. a two-per-row language picker) and `rootExtra` (render at the bottom of the root menu, below Privacy & data). `label` / `header` / `style` / `visible` resolvers may be **async** (read your db at render time — never cache render strings in the session); `parseMode: 'HTML'` renders the header formatted (you own escaping); `personalData.onForget(ctx, userId)` wipes YOUR tables inside the same try as the session delete, so Forget either forgets everything or reports failure. `toggleMenuItem({ id, read, write, label: { off, on }, toast? })` — convenience factory for boolean-toggle items with dynamic label + optional toast, storage-agnostic via `read`/`write` closures. |
 | `@adriangalilea/utils/bot/payments` | `botPayments({ session, storage, paysupport, paysupportHint?, legal, waiver, vip?, credits?, perks? })` — Telegram Stars monetization in one drop-in plugin. **Three axes, all optional:** `vip` (positional tier ladder — single rung in v1 is just `vip: [{...}]`, ladder is `vip: [{...}, {...}]`; ids are `vip.1`, `vip.2`, …), `credits` (consumable balance + top-up packs `credits.1`, `credits.2`, …), `perks` (orthogonal one-shot unlocks `perks.<key>`). **Surface:** `ctx.payments.atLeast('vip')` / `atLeast('vip.2')` (typed rank check), `ctx.payments.tier()` / `.tier.level()` / `.tier.label()`, `ctx.payments.credits.{balance, consume, tryConsume}` (throws `InsufficientCredits`), `ctx.payments.has(perkId)`, `await ctx.payments.require('vip', { feature? })` (gate that sends a localized upgrade prompt deep-linked to `/settings → 💎 VIP`), `await ctx.payments.invoice(productKey)` (threads Art. 103(m) TRLGDCU consent inline before `sendInvoice`). **Owns:** waiver consent flow (versioned text → forces re-consent on bump, snapshotted on every charge for audit), `/paysupport` slash command (Telegram ToS §6.5; `paysupportHint` overrides the where-to-manage-charges line when your menu isn't `/settings`), idempotent `successful_payment` fulfillment via `pay:idempotency:{chargeId}` sentinel, lazy subscription expiry (no cron needed), tier upgrade auto-cancel of the lower rung's renewal, and admin-DM refund approval (mirror of `accessControl`'s [✅ Aprobar][❌ Denegar] pattern). **Returns:** `{ plugin, menuItem, payouts, onFulfilled }` — `menuItem` is the drop-in `💎 VIP` entry for `botMenu`; `payouts.{record, list, export, exportForUsers}` is the Fragment payout ledger (you receive TON, log the EUR conversion, export time-windowed CSV/JSON for your gestor); `onFulfilled(productKey \| '*', handler)` / `onRefunded(...)` register fire-and-forget hooks (purchase applied / admin-approved refund — a revenue ledger writes on one, reverses on the other). **Stars-only by design** — Telegram ToS §6.2 forbids third-party payment providers for digital goods. Crypto Pay deferred (MiCA risk); Stripe-outside-Telegram is a future v2 channel. Full compliance memo (Spanish-autónomo seller-of-record analysis, Verifactu vs Crea y Crece, MiCA, Art. 103(m) waiver text, GDPR retention) in `src/bot/payments/CLAUDE.md`. |
 | `@adriangalilea/utils/bot/create` | `createBot<S>({ token?, storage?, initial?, admins?, language?, menu?, access?, payments?, handlers?, worker? })` — the composer (see "One bot file, ideation → production" above). Returns `{ build, session, poll, isMain, fetch }`: `poll()` long-polls, `export default app` is a complete Worker, `app.session(ctx)` / the `handlers` callback's `session(ctx)` is the TYPED accessor for your `S` fields. Owns storage+session wiring; resolves storage per environment (D1 binding → `bot/storage-d1`; `BOT_PERSIST` path → sqlite, `redis://` → redis, lazily-imported optional peers; else announced-ephemeral memory) — or pass `storage: (env) => Storage` when the choice is env-dependent (e.g. a D1 binding not named `DB`). Boot NARRATES the composition (`session: memory …`, `features: language(en,es) · menu(/settings)`) so every implicit decision is visible where you're looking. Runnable demo: `pnpm demo:bot`. |
@@ -463,7 +465,8 @@ import { redisStorage } from '@gramio/storage-redis'
 import { adminContext, gracefulStart } from '@adriangalilea/utils/bot/kit'
 import { botSession } from '@adriangalilea/utils/bot/session'
 import { accessControl } from '@adriangalilea/utils/bot/access-control'
-import { llmStream, llmHistory } from '@adriangalilea/utils/bot/llm'
+import { createLlm } from '@adriangalilea/utils/llm'
+import { streamChatReply, llmHistory, toModelMessages } from '@adriangalilea/utils/bot/llm'
 
 // Raw redis is fine — bot-id namespacing happens inside botSession +
 // every plugin via ctx.bot.info.id. Multiple bots sharing this Redis
@@ -472,29 +475,26 @@ const storage = redisStorage()
 const userSession = botSession({ storage, key: 'session', initial: () => ({}) })
 const chat = llmHistory({ session: userSession, maxTurns: 20, retentionDays: 7 })
 
+// Any OpenAI-compatible endpoint: vllm-mlx, mlx-lm, llama.cpp, Together, Groq, OpenAI, …
+// More entries = priority failover; a KV-shaped `health` store adds the circuit breaker.
+const llm = createLlm({
+  providers: [{ id: 'local', type: 'openai', baseUrl: process.env.LLM_URL!, apiKey: 'none', defaultModel: process.env.LLM_MODEL! }],
+})
+
 const bot = new Bot(process.env.BOT_TOKEN!)
   .extend(adminContext({ adminId: 190202471 }))     // KEV.TELEGRAM_ADMIN_ID overrides
   .extend(userSession)
   .extend(accessControl({ session: userSession, storage, defaults: [] }))
-  .extend(llmStream())
   .extend(chat.plugin)
   .on('message', async (ctx) => {
     if (!ctx.access.allowed) return
     ctx.llm.add({ role: 'user', content: ctx.text ?? '' })
 
-    // Any OpenAI-compatible endpoint: vllm-mlx, mlx-lm, llama.cpp, Together, Groq, OpenAI, …
-    const response = await fetch(process.env.LLM_URL!, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: process.env.LLM_MODEL,
-        messages: [{ role: 'system', content: 'You are helpful.' }, ...ctx.llm.get()],
-        stream: true,
-      }),
-    })
-
-    // High-level: handles reasoning (collapsed blockquote) + content streaming.
-    const { content } = await ctx.startChatStream(response)
+    // Draft-streamed reply: thinking phase previews + final entity-split send.
+    const { content } = await streamChatReply(ctx, llm.stream({
+      instructions: 'You are helpful.',
+      messages: toModelMessages(ctx.llm.get()),
+    }))
     ctx.llm.add({ role: 'assistant', content })
   })
 

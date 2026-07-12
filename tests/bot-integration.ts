@@ -9,8 +9,9 @@
  *   /start      — shows you which gate let the request through
  *                 (admin / default / store), plus thread/topic info
  *                 for the chat the command was sent in.
- *   /stream     — exercises llmStream: streams a markdown reply with
- *                 bullets, code, and a blockquote
+ *   /stream     — exercises streamChatReply: a fake thinking phase in the
+ *                 draft preview, then a markdown reply with bullets, code,
+ *                 and a blockquote
  *   <any text>  — echoes the message back into the same thread, plus
  *                 exercises coalesceLongMessages. Paste >4096 chars
  *                 and the echo should report the full length, not half.
@@ -72,10 +73,11 @@ import {
 import { coalesceLongMessages } from "../src/bot/coalesce.js";
 import { adminContext, gracefulStart } from "../src/bot/kit.js";
 import { language } from "../src/bot/language.js";
-import { llmHistory, llmStream } from "../src/bot/llm.js";
+import { llmHistory, streamChatReply } from "../src/bot/llm.js";
 import { botMenu } from "../src/bot/menu.js";
 import { botPayments } from "../src/bot/payments/index.js";
 import { refundApproveCb } from "../src/bot/payments/refund.js";
+import type { LlmStreamEvent } from "../src/llm/index.js";
 import { kev } from "../src/platform/kev.js";
 
 const token = kev.mustGet("BOT_TOKEN");
@@ -215,7 +217,6 @@ const bot = new Bot(token)
 	.extend(userSession) // session first
 	.extend(accessControl({ session: userSession, storage, defaults: [] }))
 	.extend(coalesceLongMessages({ log: true }))
-	.extend(llmStream())
 	.extend(chat.plugin)
 	.extend(lang.plugin)
 	.extend(payments.plugin)
@@ -259,17 +260,16 @@ const bot = new Bot(token)
 		});
 	})
 
-	// ─── /stream — exercises llmStream ─────────────────────────────
+	// ─── /stream — exercises streamChatReply ───────────────────────
+	// Draft-native: thinking streams in the ephemeral preview, content
+	// finalizes as entity-split message(s). Try `reasoning: 'message'`
+	// to persist the thinking as an expandable blockquote.
 	.command(
 		"stream",
 		{ description: "Stream a fake LLM markdown reply" },
 		async (ctx) => {
 			if (!ctx.access.allowed) return;
-			const stream = ctx.startStream();
-			for await (const chunk of fakeLLM()) {
-				await stream.append(chunk);
-			}
-			await stream.end();
+			await streamChatReply(ctx, fakeLLM());
 		},
 	)
 
@@ -469,10 +469,11 @@ await gracefulStart(bot);
 // ─── helpers ───────────────────────────────────────────────────────
 
 /**
- * Fakes an LLM token stream so we can exercise the streaming plugin
- * without a real model. Yields a piece of markdown every ~80ms.
+ * Fakes an LLM event stream (a thinking phase, then markdown content) so we
+ * can exercise streamChatReply without a real model. Yields every ~80ms.
  */
-async function* fakeLLM(): AsyncGenerator<string> {
+async function* fakeLLM(): AsyncGenerator<LlmStreamEvent> {
+	const reasoning = `El usuario quiere una demo de streaming. Pienso un momento… listo.`;
 	const reply =
 		`**Streaming test** — markdown crudo parseado en cliente.\n\n` +
 		`Aquí va una respuesta simulada:\n\n` +
@@ -484,11 +485,15 @@ async function* fakeLLM(): AsyncGenerator<string> {
 		`> Cita al final para cerrar.`;
 
 	// Tokenize keeping whitespace so the stream "feels" like an LLM.
-	const tokens = reply.match(/\S+|\s+/g) ?? [reply];
-	for (const t of tokens) {
-		await sleep(80);
-		yield t;
+	for (const t of reasoning.match(/\S+|\s+/g) ?? []) {
+		await sleep(40);
+		yield { kind: "reasoning", text: t };
 	}
+	for (const t of reply.match(/\S+|\s+/g) ?? []) {
+		await sleep(80);
+		yield { kind: "delta", text: t };
+	}
+	yield { kind: "end", usage: null };
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));

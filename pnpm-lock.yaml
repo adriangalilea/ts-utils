@@ -8,6 +8,12 @@ importers:
 
   .:
     devDependencies:
+      '@ai-sdk/anthropic':
+        specifier: ^4.0.12
+        version: 4.0.12(zod@4.4.3)
+      '@ai-sdk/openai-compatible':
+        specifier: ^3.0.7
+        version: 3.0.7(zod@4.4.3)
       '@biomejs/biome':
         specifier: 2.4.15
         version: 2.4.15
@@ -17,12 +23,21 @@ importers:
       '@gramio/session':
         specifier: ^0.2.0
         version: 0.2.0(gramio@0.12.0(inspectable@3.0.2)(marked@15.0.12))
+      '@gramio/split':
+        specifier: ^0.0.1
+        version: 0.0.1(marked@15.0.12)
       '@gramio/storage':
         specifier: ^2.0.1
         version: 2.0.1
+      '@openrouter/ai-sdk-provider':
+        specifier: ^3.0.0
+        version: 3.0.0(ai@7.0.22(zod@4.4.3))(zod@4.4.3)
       '@types/node':
         specifier: ^24.3.0
         version: 24.3.0
+      ai:
+        specifier: ^7.0.22
+        version: 7.0.22(zod@4.4.3)
       gramio:
         specifier: ^0.12.0
         version: 0.12.0(inspectable@3.0.2)(marked@15.0.12)
@@ -40,6 +55,34 @@ importers:
         version: 4.4.3
 
 packages:
+
+  '@ai-sdk/anthropic@4.0.12':
+    resolution: {integrity: sha512-IquWNkGRSF2ulYJ6YIIUqMsNAIDeZFB3/4W92aSOtCxH1TfuVoq3qw4M4TxTxIw4As9cnkeRLe7b9LDMzPDsnA==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/gateway@4.0.16':
+    resolution: {integrity: sha512-9iYxdOLquoOFk5e+02P9qfBIA+EJU0FNJvyjGxi4iXJabt2+GlbaCg7TX0sTtxOsBVkdabkatqWM6+kvp53tBg==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/openai-compatible@3.0.7':
+    resolution: {integrity: sha512-y8RVpm8BZKNHDxlbNVt/GYmoBBqLx10m4d7bOzOnRD8V2aP3Cr6/g/bfubR4EkbW1ySrnPr62svZIeND2fdp3Q==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider-utils@5.0.7':
+    resolution: {integrity: sha512-OSm5/5kdrHa11WIOo5LYgDKnxYWp5aB/wx5EXRHi0jpUGduMDeB6oht9U6p+UNNWIP3F/EqPpV8d7vdP/iRnqg==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider@4.0.3':
+    resolution: {integrity: sha512-e0CpNWJUY7OxAFAnCZkw+ri9QOHWwTs1tXP42782KFGCU07qt8NiXCrCVowyCB5dP2r5/Uls+g2oPd8kOJn9dw==}
+    engines: {node: '>=22'}
 
   '@biomejs/biome@2.4.15':
     resolution: {integrity: sha512-j5VH3a/h/HXTKBM50MDMxRCzkeLv9S2XJcW2WgnZT1+xyisi+0bISrXR82gCX+8S9lvK0skEvHJRN+3Ktr2hlw==}
@@ -269,6 +312,14 @@ packages:
   '@gramio/files@0.6.1':
     resolution: {integrity: sha512-by1v+a3D/9e5kO0Yl7Ob92iSXMdorqLvTscb+wwA4z6YBMGmnwL8I7CqzL0yFUUI0Xzi9S7uKbPBWm7VH4GZ8w==}
 
+  '@gramio/format@0.3.4':
+    resolution: {integrity: sha512-j5fUVG8cJ4Oi3Tdtxp1K5K34ED/Btkg4ctpFdLDIOHRvN9N8TUIw7MwqPRxNYBXTXawJ2YmPTkEahitbMSjZOA==}
+    peerDependencies:
+      marked: ^15.0.11
+    peerDependenciesMeta:
+      marked:
+        optional: true
+
   '@gramio/format@0.8.0':
     resolution: {integrity: sha512-u0iZm+yfAg1H2I6Jau56KacGq61La/cIh3f63PydB5PEmX/lwFjajBaUKaXovhrQQ99nB7WLulHREiE0u26ZQw==}
     peerDependencies:
@@ -299,6 +350,9 @@ packages:
     peerDependencies:
       gramio: '>=0.4.14'
 
+  '@gramio/split@0.0.1':
+    resolution: {integrity: sha512-eQ+/UeLegsjJtfG9TkfmA7OPFS3TcIQUdsGSpiwKYrnZ9HCT++b3i7EAKX3Nc1qzUw4jXL9KA0x/6Lt8VO6hKQ==}
+
   '@gramio/storage@2.0.1':
     resolution: {integrity: sha512-aUZM3PCfvtKisMXvJyTwothKNJygaocuCJ4D4rvibdqfv6XnU2retVMOt7RTFM1BOEyVVByfaqkAXcZ1z6NsEw==}
 
@@ -308,8 +362,34 @@ packages:
   '@gramio/types@10.1.0':
     resolution: {integrity: sha512-vced/i5k2wbkkcOZvD3LJgv7EjPK6oJOL12u0Piag+JDDSXJt/fejPPXXG+st0vYoIQR5bd4ndrWi4Cn5PshFQ==}
 
+  '@gramio/types@9.6.1':
+    resolution: {integrity: sha512-O/tJgU98oiCVcQHXO/yyJgEn5DpIZr/OiuRp3CxIGynRLK2doWguOR+jlRZQNMR5sx5VTVBBCAPRNRJ8qBLEKw==}
+
+  '@openrouter/ai-sdk-provider@3.0.0':
+    resolution: {integrity: sha512-m9XTSWoODH2RM5OsZpaGiN7QRR8cdP5paBWq699Tu3JVmGPBKT8xF8XwV0ZBVVsjikD/JgWfak4VSsTR4wAVbg==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      ai: ^7.0.0
+      zod: ^3.25.76 || ^4.1.8
+
+  '@standard-schema/spec@1.1.0':
+    resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
   '@types/node@24.3.0':
     resolution: {integrity: sha512-aPTXCrfwnDLj4VvXrm+UUCQjNEvJgNA8s5F1cvwQU+3KNltTOkBm1j30uNLyqqPNe7gE3KFzImYoZEfLhp4Yow==}
+
+  '@vercel/oidc@3.2.0':
+    resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
+    engines: {node: '>= 20'}
+
+  '@workflow/serde@4.1.0':
+    resolution: {integrity: sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ==}
+
+  ai@7.0.22:
+    resolution: {integrity: sha512-iAXYwQtR18qN7GXwNmGVAQM4uSJOh2+nZ5RP9NtDXfH5d4tlYyYzAM133O3U+eVcyWrvNRzecN9yW58xpCdfMg==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
 
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
@@ -325,6 +405,10 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
+  eventsource-parser@3.1.0:
+    resolution: {integrity: sha512-kJezFj9YFAMLeORyi7aCLxLbD5/qWMQnoMVlVPyHIll7lgRJCc3JVln9Vgl9nwQi0YkMnhdGTMNn7CkRRAptMg==}
+    engines: {node: '>=18.0.0'}
+
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
@@ -339,6 +423,9 @@ packages:
   inspectable@3.0.2:
     resolution: {integrity: sha512-XHygPjNXXe1TWQLlVdCYLejUklsGGo+XWS3Cn/RlkvnhkbZqcQxoXPrSh7Via5aATYJUMWVnrD5CbW2c+BtKMA==}
     engines: {node: '>=20.0.0'}
+
+  json-schema@0.4.0:
+    resolution: {integrity: sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA==}
 
   marked@15.0.12:
     resolution: {integrity: sha512-8dD6FusOQSrpv9Z1rdNMdlSgQOIP880DHqnohobOmYLElGEqAL/JvxvuxZO16r4HtjTlfPRDC1hbvxC9dPN2nA==}
@@ -368,6 +455,37 @@ packages:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
 snapshots:
+
+  '@ai-sdk/anthropic@4.0.12(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.3
+      '@ai-sdk/provider-utils': 5.0.7(zod@4.4.3)
+      zod: 4.4.3
+
+  '@ai-sdk/gateway@4.0.16(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.3
+      '@ai-sdk/provider-utils': 5.0.7(zod@4.4.3)
+      '@vercel/oidc': 3.2.0
+      zod: 4.4.3
+
+  '@ai-sdk/openai-compatible@3.0.7(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.3
+      '@ai-sdk/provider-utils': 5.0.7(zod@4.4.3)
+      zod: 4.4.3
+
+  '@ai-sdk/provider-utils@5.0.7(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.3
+      '@standard-schema/spec': 1.1.0
+      '@workflow/serde': 4.1.0
+      eventsource-parser: 3.1.0
+      zod: 4.4.3
+
+  '@ai-sdk/provider@4.0.3':
+    dependencies:
+      json-schema: 0.4.0
 
   '@biomejs/biome@2.4.15':
     optionalDependencies:
@@ -495,6 +613,12 @@ snapshots:
     dependencies:
       '@gramio/types': 10.0.0
 
+  '@gramio/format@0.3.4(marked@15.0.12)':
+    dependencies:
+      '@gramio/types': 9.6.1
+    optionalDependencies:
+      marked: 15.0.12
+
   '@gramio/format@0.8.0(marked@15.0.12)':
     dependencies:
       '@gramio/types': 10.0.0
@@ -516,15 +640,42 @@ snapshots:
       '@gramio/storage': 2.0.1
       gramio: 0.12.0(inspectable@3.0.2)(marked@15.0.12)
 
+  '@gramio/split@0.0.1(marked@15.0.12)':
+    dependencies:
+      '@gramio/format': 0.3.4(marked@15.0.12)
+      '@gramio/types': 9.6.1
+    transitivePeerDependencies:
+      - marked
+
   '@gramio/storage@2.0.1': {}
 
   '@gramio/types@10.0.0': {}
 
   '@gramio/types@10.1.0': {}
 
+  '@gramio/types@9.6.1': {}
+
+  '@openrouter/ai-sdk-provider@3.0.0(ai@7.0.22(zod@4.4.3))(zod@4.4.3)':
+    dependencies:
+      ai: 7.0.22(zod@4.4.3)
+      zod: 4.4.3
+
+  '@standard-schema/spec@1.1.0': {}
+
   '@types/node@24.3.0':
     dependencies:
       undici-types: 7.10.0
+
+  '@vercel/oidc@3.2.0': {}
+
+  '@workflow/serde@4.1.0': {}
+
+  ai@7.0.22(zod@4.4.3):
+    dependencies:
+      '@ai-sdk/gateway': 4.0.16(zod@4.4.3)
+      '@ai-sdk/provider': 4.0.3
+      '@ai-sdk/provider-utils': 5.0.7(zod@4.4.3)
+      zod: 4.4.3
 
   debug@4.4.3:
     dependencies:
@@ -559,6 +710,8 @@ snapshots:
       '@esbuild/win32-ia32': 0.25.9
       '@esbuild/win32-x64': 0.25.9
 
+  eventsource-parser@3.1.0: {}
+
   fsevents@2.3.3:
     optional: true
 
@@ -583,6 +736,8 @@ snapshots:
       - supports-color
 
   inspectable@3.0.2: {}
+
+  json-schema@0.4.0: {}
 
   marked@15.0.12: {}
 

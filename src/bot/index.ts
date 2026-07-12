@@ -6,7 +6,7 @@
  *
  *   import { adminContext, gracefulStart } from '@adriangalilea/utils/bot/kit'
  *   import { accessControl } from '@adriangalilea/utils/bot/access-control'
- *   import { llmStream } from '@adriangalilea/utils/bot/llm'
+ *   import { streamChatReply, llmHistory } from '@adriangalilea/utils/bot/llm'
  *
  * Or all-in-one (pulls every subpath):
  *   import { ... } from '@adriangalilea/utils/bot'

@@ -1,642 +1,244 @@
 /**
- * GramIO LLM toolkit — three primitives that together form a complete
- * Telegram LLM-chatbot pipeline:
+ * GramIO LLM toolkit — the Telegram side of an LLM chatbot. The model side
+ * (providers, failover, usage accounting, tools) lives in
+ * `@adriangalilea/utils/llm`; this module renders its event stream into a
+ * chat and remembers conversations:
  *
- *   `streamChat(response)`   — INPUT. Parses OpenAI-compatible SSE
- *                              (OpenAI, vllm, mlx-lm, llama.cpp,
- *                              Together, Groq, …) into a typed
- *                              `AsyncGenerator` of `{type, text}` with
- *                              `content` / `reasoning` separation.
- *
- *   `ctx.startStream()`      — OUTPUT (low-level). Debounced
- *                              `editMessageText` to Telegram, local
- *                              Markdown parse via `@gramio/format`,
- *                              4000-char split on paragraph / line /
- *                              word boundary.
- *
- *   `ctx.startChatStream()`  — OUTPUT (high-level). Consumes a fetch
- *                              `Response` (or any `AsyncIterable<LLMChunk>`)
- *                              and renders BOTH phases of a thinking
- *                              model: `reasoning` chunks go into one
- *                              `<blockquote expandable>` message;
- *                              `content` chunks go into a streamed
- *                              markdown message below it. Returns
- *                              `{ content, reasoning }` once the
- *                              source generator ends.
+ *   `streamChatReply(ctx, events)` — OUTPUT. Consumes an
+ *       `AsyncIterable<LlmStreamEvent>` and paints it with Telegram's native
+ *       message-draft streaming (`sendMessageDraft`: ephemeral ~30s previews,
+ *       animated in place per draft_id), then persists the finished text via
+ *       `ctx.send`, entity-split across the 4096 limit by `@gramio/split`.
+ *       Reasoning models get a "thinking" phase: reasoning streams into the
+ *       draft preview and evaporates by default, or persists as an expandable
+ *       blockquote. A `reset` event (provider failover upstream) repaints the
+ *       draft from scratch — full-frame previews make that one cheap frame.
+ *       Drafts are a PRIVATE-chat capability (and the bot needs forum topic
+ *       mode enabled in BotFather); elsewhere the preview phase is skipped and
+ *       only the final send happens.
  *
  *   `ctx.llm.add / .get / …` — HISTORY. Per-(user, thread) conversation
- *                              buffer in OpenAI `ChatMessage` shape.
- *                              Persisted in the shared `@gramio/session`
- *                              record under the `llm` field, so the
- *                              `botMenu` 🗑 Forget button wipes it
- *                              together with everything else (one
- *                              record, one delete, no per-plugin
- *                              registry).
+ *       buffer in OpenAI `ChatMessage` shape, persisted in the shared
+ *       `@gramio/session` record under the `llm` field, so the `botMenu`
+ *       🗑 Forget button wipes it together with everything else.
  *
- * The trio composes:
+ * Peer deps: `gramio`, `@gramio/session`, `@gramio/format`, `@gramio/split`,
+ * `marked`.
  *
- *     fetch(...) ──streamChat──> chunks ──ctx.startStream──> Telegram
- *           ▲                                                   │
- *           └──── ctx.llm.get() ◀──── ctx.llm.add(assistant) ◀──┘
+ * @example  chatbot turn: history → llm.stream → streamed reply
+ * import { createLlm } from '@adriangalilea/utils/llm'
+ * import { streamChatReply, llmHistory, toModelMessages } from '@adriangalilea/utils/bot/llm'
  *
- * Peer deps: `gramio`, `@gramio/session`, `@gramio/format`, `marked`.
- *
- * @example  high-level — thinking model in ~10 LOC
- * import { Bot } from 'gramio'
- * import { session } from '@gramio/session'
- * import { llmStream, llmHistory } from '@adriangalilea/utils/bot/llm'
- *
- * const userSession = session({ storage, key: 'session', initial: () => ({}) })
+ * const llm = createLlm({ providers })
  * const chat = llmHistory({ session: userSession, maxTurns: 20, retentionDays: 7 })
  *
- * const bot = new Bot(process.env.BOT_TOKEN!)
- *   .extend(userSession)
- *   .extend(llmStream())
- *   .extend(chat.plugin)
- *   .on('message', async (ctx) => {
- *     ctx.llm.add({ role: 'user', content: ctx.text ?? '' })
- *     const response = await fetch(process.env.LLM_URL!, {
- *       method: 'POST',
- *       headers: { 'Content-Type': 'application/json' },
- *       body: JSON.stringify({
- *         model: process.env.LLM_MODEL,
- *         messages: [{ role: 'system', content: 'You are helpful.' }, ...ctx.llm.get()],
- *         stream: true,
- *       }),
- *     })
- *     const { content } = await ctx.startChatStream(response)
- *     ctx.llm.add({ role: 'assistant', content })
- *   })
- *
- * bot.start()
- *
- * @example  low-level — manual loop when you need to map/filter chunks
- * import { streamChat } from '@adriangalilea/utils/bot/llm'
- *
- * const stream = ctx.startStream()
- * for await (const chunk of streamChat(response)) {
- *   if (chunk.type === 'content') await stream.append(chunk.text)
- *   // reasoning chunks dropped here
- * }
- * await stream.end()
+ * bot.extend(userSession).extend(chat.plugin).on('message', async (ctx) => {
+ *   ctx.llm.add({ role: 'user', content: ctx.text ?? '' })
+ *   const { content } = await streamChatReply(ctx, llm.stream({
+ *     instructions: 'You are helpful.',
+ *     messages: toModelMessages(ctx.llm.get()),
+ *   }))
+ *   ctx.llm.add({ role: 'assistant', content })
+ * })
  */
 
 import { expandableBlockquote, type FormattableString } from "@gramio/format";
 import { markdownToFormattable } from "@gramio/format/markdown";
 import type { session } from "@gramio/session";
-import { type DeriveDefinitions, Plugin } from "gramio";
+import { splitMessage } from "@gramio/split";
+import {
+	type Bot,
+	type DeriveDefinitions,
+	type MessageContext,
+	Plugin,
+} from "gramio";
 
+import type {
+	LlmStreamEvent,
+	LlmToolCall,
+	LlmUsage,
+	ModelMessage,
+} from "../llm/index.js";
 import type { Polyglot } from "../say/index.js";
 import type { MenuItem } from "./menu.js";
 
-// ─── INPUT: OpenAI-compatible SSE parser ───────────────────────────
+// ─── OUTPUT: draft-streamed reply ──────────────────────────────────
 
-/**
- * A single chunk yielded by `streamChat`. Two kinds:
- *
- *   - `content`   — the visible reply text the user should see
- *   - `reasoning` — chain-of-thought / "thinking" text from reasoning
- *                   models. Empty unless the model emits it.
- *
- * Most callers care about `content` only. Render `reasoning` separately
- * (collapsed, italicized) if you want to surface thinking.
- */
-export type LLMChunk =
-	| { type: "content"; text: string }
-	| { type: "reasoning"; text: string };
+// Telegram animates draft repaints; one frame per second is smooth and stays
+// clear of rate limits.
+const THROTTLE_MS = 1000;
+// A streamed draft is ephemeral: Telegram drops it after ~30s. A quiet stretch
+// (LLM latency, an upstream failover) sends no frames, so the preview would
+// age out mid-generation. Re-emit the current frame comfortably under the TTL.
+const KEEPALIVE_MS = 20_000;
 
-/** OpenAI chat-completions chunk delta. Lifted into a real type so
- *  the parser's `any`-casts are contained to one spot. */
-type OpenAIDelta = {
-	content?: string;
-	reasoning?: string;
-	reasoning_content?: string;
-};
-type OpenAIChunk = { choices?: Array<{ delta?: OpenAIDelta }> };
+// Non-zero, ever-incrementing draft id per stream so a chat's concurrent /
+// sequential previews don't share an animation timeline. Per-isolate;
+// collisions across isolates are harmless (draft ids are chat-scoped).
+let draftSeq = 0;
 
-/**
- * Parse an OpenAI-compatible chat-completions SSE response into a
- * typed `AsyncGenerator<LLMChunk>`. Reads `response.body` once.
- *
- * Recognised reasoning aliases (as of 2026): `reasoning_content`
- * (vllm, qwen3, DeepSeek-R1, gpt-oss harmony) and `reasoning` (some
- * mlx-lm forks, gemma builds). If a model surfaces a new key, add it
- * here — single source of truth for the field.
- *
- * Constrained-SSE assumption: lines are `\n`-delimited and each event
- * is `data: <json>` or `data: [DONE]`. This matches every OpenAI-compat
- * server in the wild but is NOT the full SSE spec (no comments, no
- * multi-line `data:`, no `retry`/`id` fields). Swap to
- * `eventsource-parser` if you hit a producer that needs them.
- *
- * Malformed JSON lines are silently skipped; the generator ends when
- * the stream closes.
- *
- * @param response  the `fetch` `Response` from a `stream: true` chat
- *                  completion call. Must not be already consumed.
- * @throws if `response.body` is null (non-streaming response).
- *
- * @example  framework-agnostic — parser doesn't know about Telegram
- * const res = await fetch(url, { method: 'POST', body })
- * for await (const chunk of streamChat(res)) {
- *   if (chunk.type === 'content') process.stdout.write(chunk.text)
- * }
- */
-export async function* streamChat(
-	response: Response,
-): AsyncGenerator<LLMChunk> {
-	if (!response.body) throw new Error("streamChat: response.body is null");
-
-	const reader = response.body.getReader();
-	const decoder = new TextDecoder();
-	let buffer = "";
-
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		buffer += decoder.decode(value, { stream: true });
-		const lines = buffer.split("\n");
-		buffer = lines.pop() ?? "";
-		for (const line of lines) {
-			if (!line.startsWith("data: ")) continue;
-			const data = line.slice(6).trim();
-			if (data === "[DONE]") continue;
-			let parsed: OpenAIChunk;
-			try {
-				parsed = JSON.parse(data) as OpenAIChunk;
-			} catch {
-				continue;
-			}
-			const delta = parsed.choices?.[0]?.delta;
-			if (!delta) continue;
-			const reasoning = delta.reasoning_content ?? delta.reasoning;
-			if (typeof reasoning === "string" && reasoning.length > 0) {
-				yield { type: "reasoning", text: reasoning };
-			}
-			if (typeof delta.content === "string" && delta.content.length > 0) {
-				yield { type: "content", text: delta.content };
-			}
-		}
-	}
-}
-
-// ─── OUTPUT: Telegram streamer ─────────────────────────────────────
-
-const MAX_LEN = 4000; // Telegram caps at 4096; leave headroom for entity offsets
-const DEFAULT_DEBOUNCE_MS = 800;
-
-export type StreamOptions = {
-	/** Debounce window between edits, in ms. Default 800. */
-	debounceMs?: number;
-	/** Initial placeholder shown until the first chunk arrives. Default "…". */
-	placeholder?: string;
-	/** Parse buffer as markdown. Default true. Set false for plain text streaming. */
-	markdown?: boolean;
-	/** Called on edit/send errors after internal recovery (rate limits, etc.). */
-	onError?: (err: unknown) => void;
-};
-
-export class MarkdownStreamer {
-	private buffer = "";
-	private currentMessageId?: number;
-	private firstSendPromise?: Promise<void>;
-	private debounceTimer?: ReturnType<typeof setTimeout>;
-	private inFlight = false;
-	private dirty = false;
-	private ended = false;
+export interface StreamChatReplyOptions {
 	/**
-	 * `true` after `.end()` returns if the stream finished with un-flushed
-	 * buffer or an outstanding error that the streamer couldn't recover
-	 * from. Useful for partial-response diagnostics in catch blocks:
-	 *
-	 *   try { for await (...) await stream.append(...) }
-	 *   finally {
-	 *     await stream.end()
-	 *     if (stream.wasPartial) logger.warn('LLM stream cut off')
-	 *   }
+	 * What happens to a reasoning model's thinking text.
+	 * `preview` (default) — streams into the ephemeral draft, evaporates when
+	 * the answer starts. `message` — additionally persists as an expandable
+	 * blockquote message before the answer. `hidden` — never rendered.
 	 */
-	wasPartial = false;
-
-	private chatId: number;
-	private threadId?: number;
-	// Match gramio's `bot.api` shape structurally (we don't import gramio's
-	// full Bot type to keep the streamer testable in isolation). `text` is
-	// `string` to mirror gramio's declared API param types — a wider param
-	// here would make the real bot.api unassignable. Formattable payloads
-	// go through the same `as unknown as` bridge the reasoning path uses
-	// (gramio's api proxy converts FormattableString to text+entities at
-	// runtime; its declarations just don't say so).
-	private bot: {
-		api: {
-			sendMessage: (p: {
-				chat_id: number;
-				message_thread_id?: number;
-				text: string;
-			}) => Promise<{ message_id: number }>;
-			editMessageText: (p: {
-				chat_id: number;
-				message_id: number;
-				text: string;
-			}) => Promise<unknown>;
-		};
-	};
-	private opts: Required<StreamOptions>;
-
-	constructor(
-		ctx: {
-			chat: { id: number };
-			threadId?: number;
-			bot: MarkdownStreamer["bot"];
-		},
-		opts: StreamOptions,
-	) {
-		this.chatId = ctx.chat.id;
-		// Captured so the streamed reply stays in the same thread.
-		// We call bot.api.sendMessage directly (no ctx.send), so the
-		// SendMixin's auto-thread doesn't help us here.
-		this.threadId = ctx.threadId;
-		this.bot = ctx.bot;
-		this.opts = {
-			debounceMs: opts.debounceMs ?? DEFAULT_DEBOUNCE_MS,
-			placeholder: opts.placeholder ?? "…",
-			markdown: opts.markdown ?? true,
-			onError: opts.onError ?? ((e) => console.error("[bot/llm:stream]", e)),
-		};
-	}
-
-	/** Append a chunk. Schedules a debounced edit. */
-	async append(text: string): Promise<void> {
-		if (this.ended) throw new Error("stream already ended");
-		if (!text) return;
-
-		// first chunk: send the placeholder so we have a message_id to edit.
-		// Serialized via firstSendPromise so concurrent appends don't double-send.
-		if (this.currentMessageId === undefined && !this.firstSendPromise) {
-			this.firstSendPromise = (async () => {
-				const sent = await this.bot.api.sendMessage({
-					chat_id: this.chatId,
-					...(this.threadId !== undefined && {
-						message_thread_id: this.threadId,
-					}),
-					text: this.opts.placeholder,
-				});
-				this.currentMessageId = sent.message_id;
-			})();
-		}
-		if (this.firstSendPromise) await this.firstSendPromise;
-
-		// overflow: freeze current message at last good split, start a new one.
-		const next = this.buffer + text;
-		if (next.length > MAX_LEN) {
-			const splitAt = findSplit(next, MAX_LEN);
-			const head = next.slice(0, splitAt);
-			const tail = next.slice(splitAt).trimStart();
-
-			this.buffer = head;
-			this.dirty = true;
-			await this.flushNow(); // commits head into current message
-
-			this.buffer = "";
-			this.currentMessageId = undefined;
-			this.firstSendPromise = undefined;
-			this.dirty = false;
-			if (this.debounceTimer) {
-				clearTimeout(this.debounceTimer);
-				this.debounceTimer = undefined;
-			}
-
-			if (tail) await this.append(tail);
-			return;
-		}
-
-		this.buffer = next;
-		this.dirty = true;
-		this.scheduleFlush();
-	}
-
-	/** Flush any pending edit and close the stream. Idempotent. */
-	async end(): Promise<void> {
-		if (this.ended) return;
-		this.ended = true;
-		if (this.debounceTimer) {
-			clearTimeout(this.debounceTimer);
-			this.debounceTimer = undefined;
-		}
-		while (this.inFlight) await sleep(50);
-		if (this.dirty) {
-			await this.flushNow();
-			// If `dirty` is still set after the final flush, an edit error
-			// re-armed it and there's nothing more we'll do. Mark partial
-			// so the caller can log / fall back.
-			if (this.dirty) this.wasPartial = true;
-		}
-	}
-
-	private scheduleFlush(): void {
-		if (this.debounceTimer) return;
-		this.debounceTimer = setTimeout(async () => {
-			this.debounceTimer = undefined;
-			if (this.inFlight) {
-				this.scheduleFlush();
-				return;
-			}
-			await this.flushNow();
-			if (this.dirty && !this.ended) this.scheduleFlush();
-		}, this.opts.debounceMs);
-	}
-
-	private async flushNow(): Promise<void> {
-		if (!this.dirty) return;
-		if (this.currentMessageId === undefined) {
-			// No active message yet — likely the first send is still in flight
-			// or the recovery path cleared it. Caller's next append() will
-			// re-create one.
-			return;
-		}
-		this.inFlight = true;
-		this.dirty = false;
-		const snapshot = this.buffer;
-		try {
-			const payload = this.opts.markdown
-				? markdownToFormattable(snapshot)
-				: snapshot;
-			type EditParams = {
-				chat_id: number;
-				message_id: number;
-				text: string | FormattableString;
-			};
-			await (
-				this.bot.api.editMessageText as unknown as (
-					p: EditParams,
-				) => Promise<unknown>
-			)({
-				chat_id: this.chatId,
-				message_id: this.currentMessageId,
-				text: payload,
-			});
-		} catch (e) {
-			const msg = String((e as { message?: string } | undefined)?.message ?? e);
-			if (msg.includes("message is not modified")) {
-				// identical content — fine
-			} else if (msg.includes("message to edit not found")) {
-				// message gone (deleted by user, etc.) — restart with a fresh send
-				this.currentMessageId = undefined;
-				this.firstSendPromise = undefined;
-				this.dirty = true;
-			} else {
-				this.dirty = true;
-				this.opts.onError(e);
-			}
-		} finally {
-			this.inFlight = false;
-		}
-	}
+	reasoning?: "preview" | "message" | "hidden";
+	/** Ms between draft repaints. Default 1000. */
+	throttleMs?: number;
+	/**
+	 * Extra params for the finalizing `ctx.send` calls (e.g. `reply_markup`).
+	 * Applied to the LAST part when the reply splits across messages, so a
+	 * keyboard lands at the end.
+	 */
+	messageParams?: Parameters<MessageContext<Bot>["send"]>[1];
 }
 
-/**
- * GramIO plugin. Adds `ctx.startStream(opts?)` on every message context.
- *
- * Defaults set here apply to every stream; per-call options in
- * `ctx.startStream({...})` override them.
- */
-export const llmStream = (defaults: StreamOptions = {}) =>
-	new Plugin("@adriangalilea/utils/bot/llm/stream").derive(
-		"message",
-		(ctx) => ({
-			// gramio's `message` scope guarantees `ctx.chat`. `ctx.bot.api` is on
-			// every Context. Structural compat → no cast needed.
-			startStream: (opts: StreamOptions = {}) =>
-				new MarkdownStreamer(ctx, { ...defaults, ...opts }),
-			/**
-			 * One-call helper for chat completions: consumes a `Response`
-			 * (or any `AsyncIterable<LLMChunk>`), renders reasoning to an
-			 * expandable blockquote message + content to a streamed markdown
-			 * message, returns `{ content, reasoning }` when the stream ends.
-			 */
-			startChatStream: (
-				source: Response | AsyncIterable<LLMChunk>,
-				opts: ChatStreamOptions = {},
-			) => consumeChatStream(ctx, source, { ...defaults, ...opts }),
-		}),
-	);
-
-function findSplit(text: string, maxLen: number): number {
-	// Prefer paragraph break, then line, then space. Reject splits in the
-	// first half — better to truncate at maxLen than to leave a stub.
-	for (const sep of ["\n\n", "\n", " "]) {
-		const idx = text.lastIndexOf(sep, maxLen);
-		if (idx > maxLen / 2) return idx;
-	}
-	return maxLen;
-}
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-// ─── PIPELINE: streamChat → Telegram with reasoning support ────────
-
-/**
- * Return shape of `consumeChatStream` / `ctx.startChatStream`. Both
- * full transcripts are returned so the caller decides what to persist
- * (typically `content` to `ctx.llm`; `reasoning` already lives in the
- * Telegram message and is rarely worth storing).
- */
-export type ChatStreamResult = {
-	/** Full assistant text concatenated from all `content` chunks. */
+export interface ChatReplyResult {
+	/** Full assistant markdown, concatenated from `delta` events. */
 	content: string;
-	/** Full reasoning text concatenated from all `reasoning` chunks. Empty for non-thinking models. */
+	/** Full reasoning text. Empty for non-thinking models. */
 	reasoning: string;
-};
-
-export type ChatStreamOptions = StreamOptions;
+	/** Tool calls the model made (the caller executes them; nothing is rendered). */
+	toolCalls: LlmToolCall[];
+	/** End-of-stream usage accounting, when the provider reported it. */
+	usage: LlmUsage | null;
+	/** The persisted message(s), in order. Empty when the model produced no text (tool-call-only turns). */
+	messages: MessageContext<Bot>[];
+}
 
 /**
- * One-shot helper that consumes an LLM stream and renders BOTH phases
- * (reasoning, content) to Telegram with the canonical pattern:
- *
- *   - reasoning chunks → one message containing a single
- *     `<blockquote expandable>…</blockquote>` (HTML), debounced edits,
- *     stays expanded after the stream ends so the user can review it
- *     collapsed/uncollapsed at will
- *   - content chunks → a fresh `MarkdownStreamer` message below the
- *     reasoning one (auto-threaded via SendMixin)
- *
- * Returns when the source generator ends. Equivalent to (and replaces)
- * the ~50 LOC of bookkeeping every thinking-model bot would otherwise
- * write by hand around `streamChat` + `ctx.startStream`.
- *
- * Accepts either a raw `fetch` `Response` (wrapped with `streamChat`
- * internally) or an `AsyncIterable<LLMChunk>` (when you want to map /
- * filter chunks before the stream hits Telegram).
- *
- * @example  via ctx.startChatStream from the llmStream plugin
- * const response = await fetch(LLM_URL, { method: 'POST', body })
- * const { content } = await ctx.startChatStream(response)
- * ctx.llm.add({ role: 'assistant', content })
- *
- * @example  standalone, framework-agnostic
- * const { content, reasoning } = await consumeChatStream(ctx, response)
+ * Render an LLM event stream into the chat: live draft previews while
+ * generating, entity-split persisted message(s) when done. See the module doc
+ * for the full contract. Returns the transcript pieces plus the sent messages.
  */
-export const consumeChatStream = async (
-	ctx: {
-		chat: { id: number };
-		threadId?: number;
-		bot: MarkdownStreamer["bot"];
-	},
-	source: Response | AsyncIterable<LLMChunk>,
-	opts: ChatStreamOptions = {},
-): Promise<ChatStreamResult> => {
-	const chatId = ctx.chat.id;
-	const threadId = ctx.threadId;
-	const bot = ctx.bot;
-	const debounceMs = opts.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+export async function streamChatReply(
+	ctx: MessageContext<Bot>,
+	events: AsyncIterable<LlmStreamEvent>,
+	opts: StreamChatReplyOptions = {},
+): Promise<ChatReplyResult> {
+	const reasoningMode = opts.reasoning ?? "preview";
+	const throttle = opts.throttleMs ?? THROTTLE_MS;
+	// Drafts exist in private chats only; elsewhere skip the preview phase and
+	// deliver the finished reply in one shot.
+	const drafts = ctx.chat.type === "private";
+	const draftId = ++draftSeq;
 
-	const gen: AsyncIterable<LLMChunk> =
-		source instanceof Response ? streamChat(source) : source;
-
-	// ─── reasoning state ────────────────────────────────────────────
-	let reasoning = "";
-	let reasoningMessageId: number | undefined;
-	let reasoningTimer: ReturnType<typeof setTimeout> | undefined;
-	let reasoningDirty = false;
-	let reasoningInFlight = false;
-
-	// Same graceful-degradation pipeline as the content phase:
-	// markdownToFormattable parses the reasoning (lists, code blocks,
-	// bold — thinking models do emit markdown) into a FormattableString
-	// with native Telegram entities, and `expandableBlockquote` wraps
-	// the whole thing in a collapsed-by-default block quotation by
-	// adding the `expandable_blockquote` entity over the full text.
-	// Malformed mid-stream markdown degrades to plain text inside the
-	// blockquote instead of failing the message.
-	const renderReasoning = (): FormattableString =>
-		expandableBlockquote(markdownToFormattable(reasoning));
-
-	const sendReasoningMessage = async (): Promise<void> => {
-		type SendParams = {
-			chat_id: number;
-			message_thread_id?: number;
-			text: FormattableString;
-		};
-		const params: SendParams = {
-			chat_id: chatId,
-			...(threadId !== undefined && { message_thread_id: threadId }),
-			text: renderReasoning(),
-		};
-		const sent = await (
-			bot.api.sendMessage as unknown as (
-				p: SendParams,
-			) => Promise<{ message_id: number }>
-		)(params);
-		reasoningMessageId = sent.message_id;
-	};
-
-	const flushReasoning = async (): Promise<void> => {
-		if (!reasoningDirty || reasoningMessageId === undefined) return;
-		reasoningInFlight = true;
-		reasoningDirty = false;
-		try {
-			type EditParams = {
-				chat_id: number;
-				message_id: number;
-				text: FormattableString;
-			};
-			await (
-				bot.api.editMessageText as unknown as (
-					p: EditParams,
-				) => Promise<unknown>
-			)({
-				chat_id: chatId,
-				message_id: reasoningMessageId,
-				text: renderReasoning(),
-			});
-		} catch (e) {
-			const msg = String((e as { message?: string } | undefined)?.message ?? e);
-			// "message is not modified" is benign when reasoning chunks
-			// arrive faster than the debounce can render.
-			if (!msg.includes("message is not modified")) {
-				reasoningDirty = true;
-				opts.onError?.(e);
-			}
-		} finally {
-			reasoningInFlight = false;
-		}
-	};
-
-	const scheduleReasoningFlush = (): void => {
-		if (reasoningTimer) return;
-		reasoningTimer = setTimeout(async () => {
-			reasoningTimer = undefined;
-			if (reasoningInFlight) {
-				scheduleReasoningFlush();
-				return;
-			}
-			await flushReasoning();
-			if (reasoningDirty) scheduleReasoningFlush();
-		}, debounceMs);
-	};
-
-	// ─── content state ──────────────────────────────────────────────
-	let contentStreamer: MarkdownStreamer | undefined;
 	let content = "";
+	let reasoning = "";
+	const toolCalls: LlmToolCall[] = [];
+	let usage: LlmUsage | null = null;
 
-	// ─── main loop ──────────────────────────────────────────────────
-	for await (const chunk of gen) {
-		if (chunk.type === "reasoning") {
-			reasoning += chunk.text;
-			if (reasoningMessageId === undefined) {
-				// Defer the first send until the RENDERED markdown has
-				// visible content. Two distinct failure modes here:
-				//
-				//   1. Leading whitespace-only chunks (e.g. Gemma 4 via
-				//      mlx-vlm's gemma4 reasoning parser opens with '\n').
-				//      `reasoning.trim()` filters those out.
-				//
-				//   2. Markdown that COLLAPSES to empty even though the
-				//      raw text isn't whitespace: '\n*', '#', '```', etc.
-				//      `markdownToFormattable` parses '\n*' as an empty
-				//      list marker → FormattableString.text = ''. Telegram
-				//      then rejects sendMessage with "text must be non-empty".
-				//
-				// Checking the rendered text catches both. Accumulated
-				// reasoning keeps its full content; we just hold the
-				// message open until the first chunk that renders.
-				if (renderReasoning().text.trim().length > 0) {
-					await sendReasoningMessage();
+	let lastFrameAt = 0;
+	let keepalive: ReturnType<typeof setInterval> | undefined;
+	let painting: Promise<unknown> = Promise.resolve();
+
+	// Full-frame repaint: drafts replace, never append — which is what makes
+	// resets and phase switches (thinking → answer) one cheap frame.
+	const paint = (formattable: FormattableString | string) => {
+		lastFrameAt = Date.now();
+		// Serialize frames; a rejected send must not kill the stream loop, and
+		// the next frame repaints fully anyway.
+		painting = painting.then(() =>
+			ctx.bot.api
+				.sendMessageDraft({
+					chat_id: ctx.chat.id,
+					draft_id: draftId,
+					...(ctx.threadId !== undefined
+						? { message_thread_id: ctx.threadId }
+						: {}),
+					text: formattable,
+				})
+				.catch(() => {}),
+		);
+	};
+
+	const frame = () => {
+		// The answer owns the preview as soon as it exists; before that, the
+		// thinking phase does (unless hidden).
+		if (content) paint(markdownToFormattable(content));
+		else if (reasoning && reasoningMode !== "hidden")
+			paint(markdownToFormattable(reasoning));
+	};
+
+	if (drafts) {
+		keepalive = setInterval(() => {
+			if (Date.now() - lastFrameAt >= KEEPALIVE_MS) frame();
+		}, KEEPALIVE_MS);
+	}
+
+	try {
+		for await (const event of events) {
+			if (event.kind === "delta") {
+				const first = content === "";
+				content += event.text;
+				if (drafts && (first || Date.now() - lastFrameAt >= throttle)) {
+					// Answer taking over from thinking: persist the blockquote first
+					// so it lands ABOVE the final answer message.
+					if (first && reasoning && reasoningMode === "message") {
+						await persistReasoning(ctx, reasoning);
+					}
+					frame();
 				}
+			} else if (event.kind === "reasoning") {
+				reasoning += event.text;
+				if (drafts && !content && Date.now() - lastFrameAt >= throttle) frame();
+			} else if (event.kind === "reset") {
+				content = "";
+				reasoning = "";
+				toolCalls.length = 0;
+				if (drafts) paint(""); // empty text = Telegram's "Thinking…" placeholder
+			} else if (event.kind === "tool-call") {
+				toolCalls.push({ toolName: event.toolName, input: event.input });
 			} else {
-				reasoningDirty = true;
-				scheduleReasoningFlush();
+				usage = event.usage;
 			}
-		} else if (chunk.type === "content") {
-			if (!contentStreamer) {
-				// Close out reasoning cleanly before content starts: flush any
-				// pending edit, drop the debounce. The blockquote stays in
-				// the chat as a finished message.
-				if (reasoningTimer) {
-					clearTimeout(reasoningTimer);
-					reasoningTimer = undefined;
-				}
-				if (reasoningDirty) await flushReasoning();
-				contentStreamer = new MarkdownStreamer(
-					{ chat: { id: chatId }, threadId, bot },
-					opts,
-				);
-			}
-			content += chunk.text;
-			await contentStreamer.append(chunk.text);
+		}
+	} finally {
+		if (keepalive) clearInterval(keepalive);
+		await painting.catch(() => {});
+	}
+
+	content = content.trim();
+	reasoning = reasoning.trim();
+
+	// A reasoning-only or tool-call-only turn persists nothing; the ephemeral
+	// draft expires on its own.
+	if (reasoning && reasoningMode === "message" && content === "")
+		await persistReasoning(ctx, reasoning);
+
+	let messages: MessageContext<Bot>[] = [];
+	if (content) {
+		// Collect the entity-correct parts first, then send with params on the
+		// last one — splitMessage's sequential action callback stays the sender
+		// so ordering is preserved.
+		const parts: FormattableString[] = [];
+		await splitMessage(markdownToFormattable(content), (part) => {
+			parts.push(part);
+		});
+		messages = [];
+		for (let i = 0; i < parts.length; i++) {
+			const isLast = i === parts.length - 1;
+			messages.push(
+				await ctx.send(parts[i], isLast ? opts.messageParams : undefined),
+			);
 		}
 	}
 
-	// Trailing reasoning (model emitted reasoning but no content yet).
-	if (reasoningTimer) {
-		clearTimeout(reasoningTimer);
-		reasoningTimer = undefined;
-	}
-	if (reasoningDirty) await flushReasoning();
-	await contentStreamer?.end();
+	return { content, reasoning, toolCalls, usage, messages };
+}
 
-	return { content, reasoning };
-};
+// Reasoning markdown → one expandable-blockquote message. Malformed mid-stream
+// markdown degrades to plain text inside the quote instead of failing the send.
+async function persistReasoning(
+	ctx: MessageContext<Bot>,
+	reasoning: string,
+): Promise<void> {
+	const rendered = expandableBlockquote(markdownToFormattable(reasoning));
+	if (rendered.text.trim().length === 0) return;
+	await ctx.send(rendered).catch(() => {});
+}
 
 // ─── HISTORY: per-thread conversation buffer ───────────────────────
 
@@ -664,6 +266,45 @@ export type ChatMessage = {
 	/** Unix seconds when added — used for retention pruning. */
 	date: number;
 };
+
+/**
+ * Convert stored history into the AI SDK's `ModelMessage` shape for
+ * `llm.stream({ messages })`. Text and image parts map 1:1; `tool` turns are
+ * dropped (tool plumbing belongs to the current request, not replayed
+ * history); an assistant turn's parts flatten to text.
+ */
+export function toModelMessages(
+	history: ReadonlyArray<ChatMessage>,
+): ModelMessage[] {
+	const out: ModelMessage[] = [];
+	for (const m of history) {
+		if (m.role === "tool") continue;
+		if (m.role === "assistant" || m.role === "system") {
+			out.push({ role: m.role, content: flattenText(m.content) });
+		} else {
+			out.push({
+				role: "user",
+				content:
+					typeof m.content === "string"
+						? m.content
+						: m.content.map((part) =>
+								part.type === "text"
+									? ({ type: "text", text: part.text } as const)
+									: ({ type: "image", image: part.image_url.url } as const),
+							),
+			});
+		}
+	}
+	return out;
+}
+
+const flattenText = (content: ChatContent): string =>
+	typeof content === "string"
+		? content
+		: content
+				.map((part) => (part.type === "text" ? part.text : ""))
+				.join("")
+				.trim();
 
 /** Per-thread shards of `ChatMessage`s, persisted in the session. */
 type ChatRecord = {
@@ -723,7 +364,7 @@ export type LLMHistoryFeature = {
 	 * thread" button that BOTH wipes `ctx.llm` for the current
 	 * (user, thread) shard AND calls `deleteForumTopic` to remove the
 	 * Telegram thread (and all its messages) from the chat. Sibling
-	 * threads stay intact. Falls back to Redis-only clear when there is
+	 * threads stay intact. Falls back to history-only clear when there is
 	 * no `threadId` (general/non-threaded chats) or Telegram rejects
 	 * the deletion (e.g. forum supergroup without admin rights).
 	 */
@@ -869,7 +510,7 @@ export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
 				threadId?: number;
 				message?: { threadId?: number; chat?: { id: number } };
 			};
-			// Wipe Redis first — always succeeds and is the source of truth
+			// Wipe the store first — always succeeds and is the source of truth
 			// the LLM consults. If the Telegram-side deletion below fails
 			// (no thread, missing permissions, etc.), the next message in
 			// this thread still starts with a clean context.
@@ -896,7 +537,7 @@ export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
 					threadDeleted = true;
 				} catch (e) {
 					// Thread already gone (404), supergroup-without-admin (400),
-					// chat type doesn't support it, etc. Redis is already
+					// chat type doesn't support it, etc. History is already
 					// cleared so the user has a clean conversation, but we
 					// log so the failure isn't invisible.
 					console.error(
