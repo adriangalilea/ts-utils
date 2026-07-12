@@ -58,6 +58,7 @@ export type ProfileBot = {
 		username?: string;
 		supports_inline_queries?: boolean;
 		supports_guest_queries?: boolean;
+		can_connect_to_business?: boolean;
 	};
 	api: {
 		/** Optional in the type: needs gramio with Bot API 10.1+ types (declaring `photo` on an
@@ -112,7 +113,7 @@ export interface BotProfileOptions {
 	 * BotFather-only capabilities this bot's features assume. Checked against `getMe` on every
 	 * sync; a mismatch WARNS the admins (it can't be fixed over the API, only surfaced).
 	 */
-	expects?: { inline?: boolean; guestQueries?: boolean };
+	expects?: { inline?: boolean; guestQueries?: boolean; secretary?: boolean };
 	/** Admins to DM on an expectation mismatch: a plain array or a live resolver. */
 	adminIds?:
 		| readonly number[]
@@ -281,6 +282,12 @@ async function checkExpectations(
 		drift.push(
 			"Guest Mode is OFF, but this bot's features depend on it.\n" +
 				"Only BotFather can enable it: @BotFather → the bot's settings → Guest Mode.",
+		);
+	}
+	if (opts.expects?.secretary && bot.info?.can_connect_to_business === false) {
+		drift.push(
+			"Secretary Mode is OFF, but this bot's features depend on it (BusinessConnection / business_message).\n" +
+				"Only BotFather can enable it: @BotFather → the bot's settings → Secretary Mode.",
 		);
 	}
 	if (drift.length === 0) return;
