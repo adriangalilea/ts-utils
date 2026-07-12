@@ -44,6 +44,15 @@ const toIds = (v: number | readonly number[]): number[] =>
 		(n) => typeof n === "number" && Number.isFinite(n) && n > 0,
 	);
 
+/** Parse a comma/space-separated id list from an env string ("123, 456 789") into clean
+ *  positive-integer ids — the raw material for an {@link Admins} source. Worker-safe. */
+export function parseIdList(raw: string | undefined): number[] {
+	return (raw ?? "")
+		.split(/[\s,]+/)
+		.map((s) => Number(s.trim()))
+		.filter((n) => Number.isFinite(n) && n > 0);
+}
+
 export const adminContext = (admins: Admins) => {
 	// Normalize every source shape to ONE async resolver. A static source resolves the array once;
 	// a function is called on each update — that liveness is the whole point of the plugin.
