@@ -54,7 +54,11 @@ export type Localized<T> = Record<string, T>;
  *  require specific fields — unassignable (function-parameter contravariance). */
 type Lang = { language_code?: string };
 export type ProfileBot = {
-	info?: { username?: string; supports_inline_queries?: boolean };
+	info?: {
+		username?: string;
+		supports_inline_queries?: boolean;
+		supports_guest_queries?: boolean;
+	};
 	api: {
 		/** Optional in the type: needs gramio with Bot API 10.1+ types (declaring `photo` on an
 		 *  older client logs an error instead of silently doing nothing). */
@@ -108,7 +112,7 @@ export interface BotProfileOptions {
 	 * BotFather-only capabilities this bot's features assume. Checked against `getMe` on every
 	 * sync; a mismatch WARNS the admins (it can't be fixed over the API, only surfaced).
 	 */
-	expects?: { inline?: boolean };
+	expects?: { inline?: boolean; guestQueries?: boolean };
 	/** Admins to DM on an expectation mismatch: a plain array or a live resolver. */
 	adminIds?:
 		| readonly number[]
@@ -217,12 +221,18 @@ export async function syncBotProfile(
 			(async () => {
 				const setPhoto = bot.api.setMyProfilePhoto;
 				if (!setPhoto) {
-					log.error("photo declared but the client lacks setMyProfilePhoto (Bot API 10.1+)");
+					log.error(
+						"photo declared but the client lacks setMyProfilePhoto (Bot API 10.1+)",
+					);
 					return;
 				}
 				if ((await photo.applied.get()) === photo.version) return;
 				const blob = new Blob(
-					[photo.data instanceof Uint8Array ? photo.data : new Uint8Array(photo.data)],
+					[
+						photo.data instanceof Uint8Array
+							? photo.data
+							: new Uint8Array(photo.data),
+					],
 					{ type: "image/jpeg" },
 				);
 				await setPhoto({ photo: { type: "static", photo: blob } });
@@ -245,18 +255,38 @@ export async function syncBotProfile(
 	);
 }
 
-/** The BotFather-drift check: warn the admins when a declared capability is off. */
+/**
+ * The BotFather-drift check: warn the admins when a declared capability is
+ * off. Capability toggles (inline mode, guest mode, group privacy) have NO
+ * Bot API setters — getMe only REPORTS them — so detect-and-DM is the whole
+ * programmatic surface Telegram offers. A `false` from getMe means the toggle
+ * is off; undefined means getMe hasn't run (or predates the field) and stays
+ * silent rather than crying wolf.
+ */
 async function checkExpectations(
 	bot: ProfileBot,
 	opts: BotProfileOptions,
 ): Promise<void> {
-	if (!opts.expects?.inline) return;
-	if (bot.info?.supports_inline_queries !== false) return; // true, or unknown (no getMe yet)
+	const drift: string[] = [];
+	if (opts.expects?.inline && bot.info?.supports_inline_queries === false) {
+		drift.push(
+			"inline mode is OFF, but this bot's features depend on it.\n" +
+				"Only BotFather can enable it: @BotFather → /setinline (and /setinlinefeedback).",
+		);
+	}
+	if (
+		opts.expects?.guestQueries &&
+		bot.info?.supports_guest_queries === false
+	) {
+		drift.push(
+			"Guest Mode is OFF, but this bot's features depend on it.\n" +
+				"Only BotFather can enable it: @BotFather → the bot's settings → Guest Mode.",
+		);
+	}
+	if (drift.length === 0) return;
 
 	const handle = bot.info?.username ? `@${bot.info.username}` : "this bot";
-	log.warn(
-		`inline mode is OFF for ${handle} — the bot's inline features are dead`,
-	);
+	for (const message of drift) log.warn(`${handle}: ${message.split("\n")[0]}`);
 	const ids =
 		typeof opts.adminIds === "function"
 			? await opts.adminIds()
@@ -265,7 +295,6 @@ async function checkExpectations(
 	await notifyAdmins(
 		bot as Parameters<typeof notifyAdmins>[0],
 		ids,
-		`⚠️ ${handle}: inline mode is OFF, but this bot's features depend on it.\n` +
-			"Only BotFather can enable it: @BotFather → /setinline (and /setinlinefeedback).",
+		drift.map((message) => `⚠️ ${handle}: ${message}`).join("\n\n"),
 	);
 }
