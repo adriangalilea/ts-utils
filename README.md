@@ -371,6 +371,21 @@ transform('<h1>Title</h1><ul><li>Point one</li><li>Point two</li></ul>')
 // '<b><u>Title</u></b>\n\n• Point one\n• Point two'
 ```
 
+### Telegram Markdown (`tg-md`)
+
+The MARKDOWN twin of `tg-html`, for the markdown LLMs actually emit (grown in xtldr's bot, moved here verbatim). One opinionated dialect — `_` is NEVER emphasis so `snake_case` survives, every tag balanced by construction so Telegram can't reject a render, pure whole-string functions so full-frame draft repaints (`bot/draft`) degrade malformed mid-stream markdown to literal text — rendered to every shape a bot sends:
+
+```typescript
+import { markdownToRichHtml, markdownToTelegramHtml, toPlainText, tidyRichMarkdown } from '@adriangalilea/utils/tg-md'
+
+markdownToRichHtml(md, coverUrl) // rich-message HTML (Bot API 10.1): real <h1>/<ul>, cover <img> spliced after the title
+markdownToTelegramHtml(md)       // strict parse_mode=HTML subset: bold-underlined title, breathing headings, • bullets, ###### footer stays quiet
+toPlainText(md)                  // last-ditch fallback; quotes keep their > marker
+tidyRichMarkdown(md)             // strip the stray ```fence``` models wrap replies in
+```
+
+Zero dependencies, Worker-safe. Typography (heading air, bullet glyph, title underline) IS the opinion; it gets options when a second consumer needs a different look, not before.
+
 ### Telegram bot plugins (GramIO)
 
 Plugins for personal Telegram bots built on [GramIO](https://gramio.dev). Each plugin lives at its own subpath; peer deps (`gramio`, `@gramio/storage`, `@gramio/session`, `@gramio/format`, `marked`) are **all optional** — install only what you import.
