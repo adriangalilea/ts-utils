@@ -662,10 +662,15 @@ export class Llm {
 // openrouter.ai upgrades to the openrouter provider so legacy configs keep
 // typed cost accounting.
 function dialectOf(provider: ProviderConfig): ProviderConfig["type"] {
-	return provider.type === "openai" &&
-		provider.baseUrl?.includes("openrouter.ai")
-		? "openrouter"
-		: provider.type;
+	if (provider.type !== "openai" || !provider.baseUrl) return provider.type;
+	try {
+		const host = new URL(provider.baseUrl).hostname;
+		return host === "openrouter.ai" || host.endsWith(".openrouter.ai")
+			? "openrouter"
+			: "openai";
+	} catch {
+		return "openai"; // unparsable baseUrl fails loudly at request time, not here
+	}
 }
 
 // 'available' = use/probe now; 'probe-deferred' = past recovery but jitter

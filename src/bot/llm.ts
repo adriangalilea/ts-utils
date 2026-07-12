@@ -77,7 +77,8 @@ export interface StreamChatReplyOptions {
 	 * What happens to a reasoning model's thinking text.
 	 * `preview` (default) — streams into the ephemeral draft, evaporates when
 	 * the answer starts. `message` — additionally persists as an expandable
-	 * blockquote message before the answer. `hidden` — never rendered.
+	 * blockquote message before the answer. `hidden` — never rendered, not
+	 * even in the draft (the answer just takes longer to start).
 	 */
 	reasoning?: "preview" | "message" | "hidden";
 	/** Ms between draft repaints. Default 1000. */

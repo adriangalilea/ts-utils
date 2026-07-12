@@ -42,8 +42,10 @@ export function tidyRichMarkdown(raw: string): string {
  *   `##`..`#####` headings      -> a bold line + blank line after (air between head and body)
  *   `######` footer heading     -> a bold line, no forced air (it's the last line)
  *   bullets   (`- `/`* `/`+ `)  -> a `• ` prefix
- *   blockquote (`> `)           -> `<blockquote>` (consecutive lines merged)
- *   `**bold**`/`*italic*`       -> `<b>`/`<i>`; `` `code` `` -> `<code>`; links -> `<a>`
+ *   blockquote (`> `)           -> `<blockquote>`; `>!` -> `<blockquote expandable>`
+ *   ``` fences                  -> `<pre>` (contents literal; unclosed closes at EOF)
+ *   `**bold**`/`*italic*`       -> `<b>`/`<i>`; `~~strike~~` -> `<s>`; `||spoiler||` -> `<tg-spoiler>`
+ *   `` `code` `` -> `<code>`; links -> `<a>`
  * Only `*`-based emphasis is honored (never `_`), so `snake_case` survives. Every tag
  * is balanced, so Telegram can't reject the message; unmatched markers stay literal.
  * The spacing is the legacy tghtml contract (now @adriangalilea/utils/tg-html): every
@@ -54,20 +56,44 @@ export function markdownToTelegramHtml(markdown: string): string {
 	const lines = tidyRichMarkdown(markdown).split(/\r?\n/);
 	const out: string[] = [];
 	let quote: string[] = [];
+	let quoteExpandable = false;
+	let fence: string[] | null = null;
 
 	const flushQuote = () => {
 		if (quote.length) {
-			out.push(`<blockquote>${quote.join("\n")}</blockquote>`);
+			out.push(
+				`<blockquote${quoteExpandable ? " expandable" : ""}>${quote.join("\n")}</blockquote>`,
+			);
 			quote = [];
 		}
+		quoteExpandable = false;
 	};
 
 	for (const raw of lines) {
 		const line = raw.replace(/\s+$/, "");
 
-		const q = /^\s{0,3}>\s?(.*)$/.exec(line);
+		// Fenced code blocks: contents are literal, emitted as one <pre>. An
+		// unclosed fence still closes at end-of-input (balanced by construction).
+		if (/^\s{0,3}```/.test(line)) {
+			if (fence) {
+				out.push(`<pre>${escapeHtml(fence.join("\n"))}</pre>`);
+				fence = null;
+			} else {
+				flushQuote();
+				fence = [];
+			}
+			continue;
+		}
+		if (fence) {
+			fence.push(raw);
+			continue;
+		}
+
+		// `>!` opens an EXPANDABLE blockquote (collapsed by default client-side).
+		const q = /^\s{0,3}>(!?)\s?(.*)$/.exec(line);
 		if (q) {
-			quote.push(inlineMd(q[1]));
+			if (q[1]) quoteExpandable = true;
+			quote.push(inlineMd(q[2]));
 			continue;
 		}
 		flushQuote();
@@ -98,6 +124,7 @@ export function markdownToTelegramHtml(markdown: string): string {
 		out.push(inlineMd(line));
 	}
 	flushQuote();
+	if (fence) out.push(`<pre>${escapeHtml(fence.join("\n"))}</pre>`);
 
 	return tidyHtml(out.join("\n"));
 }
@@ -108,7 +135,8 @@ export function markdownToTelegramHtml(markdown: string): string {
  * lists survive as real structure instead of flattening:
  *   headings  (`#`..`######`)  -> `<h1>`..`<h6>` (level = count of `#`)
  *   bullets   (`- `/`* `/`+ `)  -> `<ul><li>…</li></ul>` (consecutive items merged)
- *   blockquote (`> `)           -> `<blockquote>` (consecutive lines merged)
+ *   blockquote (`> `)           -> `<blockquote>`; `>!` -> `<blockquote expandable>`
+ *   ``` fences                  -> `<pre>` (contents literal)
  * Inline emphasis/code/links reuse {@link inlineMd}. Every tag is balanced, so Telegram
  * can't reject the message; unmatched markers stay literal.
  *
@@ -124,13 +152,18 @@ export function markdownToRichHtml(
 	const lines = tidyRichMarkdown(markdown).split(/\r?\n/);
 	const out: string[] = [];
 	let quote: string[] = [];
+	let quoteExpandable = false;
 	let bullets: string[] = [];
+	let fence: string[] | null = null;
 
 	const flushQuote = () => {
 		if (quote.length) {
-			out.push(`<blockquote>${quote.join("\n")}</blockquote>`);
+			out.push(
+				`<blockquote${quoteExpandable ? " expandable" : ""}>${quote.join("\n")}</blockquote>`,
+			);
 			quote = [];
 		}
+		quoteExpandable = false;
 	};
 	const flushBullets = () => {
 		if (bullets.length) {
@@ -142,10 +175,30 @@ export function markdownToRichHtml(
 	for (const raw of lines) {
 		const line = raw.replace(/\s+$/, "");
 
-		const q = /^\s{0,3}>\s?(.*)$/.exec(line);
+		// Fenced code blocks: literal contents, one <pre>; an unclosed fence
+		// closes at end-of-input (balanced by construction).
+		if (/^\s{0,3}```/.test(line)) {
+			if (fence) {
+				out.push(`<pre>${escapeHtml(fence.join("\n"))}</pre>`);
+				fence = null;
+			} else {
+				flushQuote();
+				flushBullets();
+				fence = [];
+			}
+			continue;
+		}
+		if (fence) {
+			fence.push(raw);
+			continue;
+		}
+
+		// `>!` opens an EXPANDABLE blockquote (collapsed by default client-side).
+		const q = /^\s{0,3}>(!?)\s?(.*)$/.exec(line);
 		if (q) {
 			flushBullets();
-			quote.push(inlineMd(q[1]));
+			if (q[1]) quoteExpandable = true;
+			quote.push(inlineMd(q[2]));
 			continue;
 		}
 
@@ -175,6 +228,7 @@ export function markdownToRichHtml(
 	}
 	flushQuote();
 	flushBullets();
+	if (fence) out.push(`<pre>${escapeHtml(fence.join("\n"))}</pre>`);
 
 	insertCover(out, coverUrl);
 
@@ -248,6 +302,8 @@ function inlineMd(text: string): string {
 	s = escapeHtml(s);
 	s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>"); // bold before italic so `**` wins over `*`
 	s = s.replace(/(^|[^*])\*(?!\s)([^*]+?)\*/g, "$1<i>$2</i>");
+	s = s.replace(/~~([^~]+)~~/g, "<s>$1</s>");
+	s = s.replace(/\|\|([^|]+)\|\|/g, "<tg-spoiler>$1</tg-spoiler>");
 
 	return s.replace(
 		new RegExp(`${STASH}(\\d+)${STASH}`, "g"),
@@ -285,6 +341,8 @@ export function toPlainText(markdown: string): string {
 		.replace(/(\*\*|__)(.*?)\1/g, "$2") // bold
 		.replace(/(\*|_)(.*?)\1/g, "$2") // italic
 		.replace(/`([^`]*)`/g, "$1") // inline code
+		.replace(/~~([^~]+)~~/g, "$1") // strikethrough
+		.replace(/\|\|([^|]+)\|\|/g, "$1") // spoiler (revealed — plain text has nothing to hide behind)
 		.replace(/\n{3,}/g, "\n\n")
 		.trim();
 }
