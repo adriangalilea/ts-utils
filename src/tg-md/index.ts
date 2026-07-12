@@ -215,11 +215,17 @@ function tidyHtml(html: string): string {
  * first (so their contents aren't escaped twice or treated as emphasis) and stashed;
  * the rest is escaped, `**bold**`/`*italic*` become tags, then the fragments are restored.
  */
+// Placeholder sentinel for stashed fragments: U+F8FF, a private-use codepoint
+// that renders INVISIBLY in most editors — declared here as an escape so the
+// load-bearing character can never be destroyed by a well-meaning hand edit.
+// It cannot occur in model output the way any printable marker could.
+const STASH = "\uf8ff";
+
 function inlineMd(text: string): string {
 	const tokens: string[] = [];
 	const stash = (html: string): string => {
 		tokens.push(html);
-		return `${tokens.length - 1}`;
+		return `${STASH}${tokens.length - 1}${STASH}`;
 	};
 
 	// Code spans first: their contents are literal (no emphasis, no nested links).
@@ -243,7 +249,10 @@ function inlineMd(text: string): string {
 	s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>"); // bold before italic so `**` wins over `*`
 	s = s.replace(/(^|[^*])\*(?!\s)([^*]+?)\*/g, "$1<i>$2</i>");
 
-	return s.replace(/(\d+)/g, (_, i: string) => tokens[Number(i)]);
+	return s.replace(
+		new RegExp(`${STASH}(\\d+)${STASH}`, "g"),
+		(_, i: string) => tokens[Number(i)],
+	);
 }
 
 /** Escape text/code content for Telegram HTML. */
