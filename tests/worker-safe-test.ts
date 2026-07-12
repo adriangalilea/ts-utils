@@ -30,6 +30,7 @@ const SAFE_ENTRIES = [
 	"bot/allow-list.js",
 	"bot/callbacks.js",
 	"bot/coalesce.js",
+	"bot/draft.js",
 	"bot/language.js",
 	"bot/llm.js",
 	"bot/menu.js",
