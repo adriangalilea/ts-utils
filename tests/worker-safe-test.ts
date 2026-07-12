@@ -48,6 +48,7 @@ const SAFE_ENTRIES = [
 	"llm/index.js",
 	"say/index.js",
 	"tg-html/index.js",
+	"tg-md/index.js",
 	"offensive.js",
 	"universal/log.js",
 	"browser.js",
