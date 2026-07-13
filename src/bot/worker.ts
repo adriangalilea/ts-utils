@@ -69,10 +69,47 @@ export type WorkerBot = {
 
 type WaitUntilCtx = { waitUntil(promise: Promise<unknown>): void };
 
+const MESSAGE_KEYS = [
+	"message",
+	"edited_message",
+	"channel_post",
+	"edited_channel_post",
+	"business_message",
+	"edited_business_message",
+] as const;
+
+type EchoCheckMessage = {
+	from?: { id?: number };
+	forward_origin?: { sender_user?: { id?: number } };
+};
+
+/**
+ * True when the update is the bot's own voice: a message it authored, or a forward of one of
+ * its messages (forward_origin type "user" pointing back at it). Replies TO the bot are NOT
+ * echoes — they're the conversation.
+ */
+export function isSelfEcho(update: unknown, selfId: number): boolean {
+	const u = update as Record<string, EchoCheckMessage | undefined> | null;
+	for (const key of MESSAGE_KEYS) {
+		const m = u?.[key];
+		if (!m) continue;
+		if (m.from?.id === selfId) return true;
+		if (m.forward_origin?.sender_user?.id === selfId) return true;
+	}
+	return false;
+}
+
 export type BotWorkerRuntime = {
 	bot: WorkerBot;
 	/** Telegram webhook secret; unset → webhook/setup respond 500 (a misconfigured prod must scream). */
 	webhookSecret?: string;
+	/**
+	 * The bot's own user id (the digits before the token's colon). When set, updates that are
+	 * the bot's OWN VOICE echoed back — a message it authored (channels/business echo their own
+	 * posts) or a FORWARD of one of its messages (a forwarded summary still carries live links) —
+	 * are acked and dropped before dispatch: a bot must never listen to itself, or it loops.
+	 */
+	selfId?: number;
 	/** Bearer for /pause, /resume, /webhook-status; unset → those 404 (surface disabled). */
 	operatorSecret?: string;
 	/** Deployment label echoed in responses/DMs (e.g. the wrangler env name). */
@@ -136,6 +173,10 @@ export function botWorkerFetch<Env>(
 					update = await request.json();
 				} catch {
 					return new Response("Bad Request", { status: 400 });
+				}
+				// The bot never listens to itself (see isSelfEcho): ack and drop.
+				if (rt.selfId !== undefined && isSelfEcho(update, rt.selfId)) {
+					return new Response("OK");
 				}
 				// Ack Telegram immediately, then keep the Worker alive for the slow
 				// work (avoids GramIO's 30s webhook timeout).
