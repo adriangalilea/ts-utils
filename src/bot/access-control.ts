@@ -19,10 +19,18 @@
  * Both can coexist: BotFather's native flag is a hard pre-filter, this
  * plugin is the dynamic UX on top of whoever gets through.
  *
- * **Group adds are a second gate** (`gateGroups: true`, off by default —
- * DMs are the plugin's core; rooms are opt-in). Two different questions,
- * gated separately: the DM gate asks "may this USER talk to the bot", the
- * group gate asks "may the bot serve this ROOM". With it on:
+ * **Each surface has a mode.** `dms` and `groups` are independent
+ * questions — the DM gate asks "may this USER talk to the bot", the room
+ * gate asks "may the bot serve this ROOM" — and each is `"allowlist"`
+ * (unknowns go pending, the admin approves) or `"open"` (unknowns pass;
+ * only an explicit deny blocks — open IS the ban-list mode, written via
+ * `/ban <id>` / the leave button, lifted via `/unban <id>`; a positive id
+ * bans a user, a negative one bans a room and leaves it). Defaults:
+ * `dms: "allowlist"` (the plugin's historic core), `groups: "off"` (no
+ * room machinery at all). The canonical pairings: a private bot runs
+ * allowlist/allowlist; a public bot runs open/open and keeps `/ban`.
+ *
+ * With `groups: "allowlist"`:
  *
  *                bot added to a group / supergroup / channel
  *                       │
@@ -42,10 +50,12 @@
  * its first activity seeds a pending request (throttled DM) — existing
  * rooms surface for review instead of going silently mute forever. The
  * `/access` menu grows a `👥 Groups` view (approve / leave / re-allow).
- * And because the gates are independent, `gateDms: false` runs the room
- * gate WITHOUT the DM gate: unknown DM users pass (`source: 'open'`),
- * while an explicit `/access` deny still holds — a ban list for an
- * otherwise-open bot.
+ *
+ * With `groups: "open"` every add auto-approves QUIETLY (no DM — the
+ * consumer's own join notifications cover it) and rooms the bot already
+ * sits in self-register on first activity, so the Groups view lists the
+ * whole footprint ready to be banned; a banned room is left on sight.
+ *
  * Removal from a group clears its record (a fresh add re-asks) UNLESS it
  * was denied — deny memory survives, that's the anti-re-add-spam. Cost:
  * one storage read per gated group update. Known edge: a group→supergroup
@@ -213,6 +223,13 @@ export type GroupAccessRecord = {
 export type AccessSource = "admin" | "default" | "store" | "group" | "open";
 
 /**
+ * A surface's gate mode. `allowlist`: unknowns land in pending and the
+ * admin approves. `open`: unknowns pass; only an explicit deny (`/ban`,
+ * the leave button) blocks — open IS the ban-list mode.
+ */
+export type GateMode = "allowlist" | "open";
+
+/**
  * What handlers downstream see on `ctx.access`. A discriminated union —
  * use the `allowed` field to narrow.
  *
@@ -265,18 +282,21 @@ export type AccessControlOptions = {
 	/** Min ms between repeat admin notifications for the same user. Default 6h. */
 	notifyThrottleMs?: number;
 	/**
-	 * Gate group / supergroup / channel adds too (see the header). Off by
-	 * default: DM gating is the plugin's core, rooms are opt-in.
+	 * DM surface mode. `"allowlist"` (default — the plugin's historic
+	 * core): unknown DM users land in pending and the admin approves.
+	 * `"open"`: unknown DM users pass (`ctx.access.source === 'open'`);
+	 * an explicit deny (`/ban`, or a leftover deny record) still blocks —
+	 * open mode IS the ban-list mode.
 	 */
-	gateGroups?: boolean;
+	dms?: GateMode;
 	/**
-	 * Pass `false` to run WITHOUT the DM gate: unknown DM users pass
-	 * (`ctx.access.source === 'open'`) instead of landing in pending.
-	 * The two gates are independent questions — this is how a bot gates
-	 * rooms only. Admin/defaults/store sources still resolve normally,
-	 * and the `/access` menu keeps working for whatever records exist.
+	 * Room surface mode (group / supergroup / channel), see the header.
+	 * `"off"` (default): no room machinery at all. `"allowlist"`: adds go
+	 * pending, the admin approves or the bot leaves. `"open"`: every add
+	 * auto-approves quietly (the room shows in `/access` → Groups, ready
+	 * to be banned); a banned room is left on sight.
 	 */
-	gateDms?: boolean;
+	groups?: GateMode | "off";
 	/** Callbacks for your own logging / metrics. */
 	onAccessRequest?: (info: { user: AccessUser; firstMessage?: string }) => void;
 	onApprove?: (info: { userId: number; approvedBy: number }) => void;
@@ -504,6 +524,17 @@ const loadAccess = async (
 	return full.access;
 };
 
+/** Forget the access judgment on a user (other plugins' fields survive). */
+const dropAccess = async (
+	storage: Storage,
+	ctx: BotCtx,
+	userId: number,
+): Promise<void> => {
+	const full = await loadFullRecord(storage, ctx, userId);
+	delete full.access;
+	await storage.set(botStorageKey(ctx, userId), full);
+};
+
 /** Read recipient's stored language (set by bot/language); fallback to en. */
 const langOfUser = async (
 	storage: Storage,
@@ -679,8 +710,11 @@ export const accessControl = (opts: AccessControlOptions) => {
 	const defaults = new Set(opts.defaults ?? []);
 	const silentDeny = opts.silentDeny === true;
 	const throttleMs = opts.notifyThrottleMs ?? DEFAULT_THROTTLE_MS;
-	const gateGroups = opts.gateGroups === true;
-	const gateDms = opts.gateDms !== false;
+	const dmMode: GateMode = opts.dms ?? "allowlist";
+	const groupMode: GateMode | "off" = opts.groups ?? "off";
+	// Internal shorthands the plumbing below reads.
+	const gateGroups = groupMode !== "off";
+	const gateDms = dmMode === "allowlist";
 
 	// Seed (or re-notify) a room's pending request and DM the primary admin,
 	// throttled per record. Called from the add event AND from an unknown
@@ -767,8 +801,9 @@ export const accessControl = (opts: AccessControlOptions) => {
 					};
 				}
 
-				// Group gate: in a gated bot, the ROOM's approval decides for group
-				// chats — approving the room admits the room, every member of it.
+				// Room gate: the ROOM's status decides for group chats. Allowlist:
+				// only an approved room passes (approving the room admits every
+				// member). Open: every room passes except a banned one.
 				if (gateGroups) {
 					const chat = gatedChatOf(
 						ctx as { chat?: { id?: number; type?: string; title?: string } },
@@ -778,6 +813,19 @@ export const accessControl = (opts: AccessControlOptions) => {
 						if (rec?.status === "approved") {
 							return {
 								access: { allowed: true, source: "group" } satisfies AccessInfo,
+							};
+						}
+						if (rec?.status === "denied") {
+							return {
+								access: {
+									allowed: false,
+									reason: "denied",
+								} satisfies AccessInfo,
+							};
+						}
+						if (groupMode === "open") {
+							return {
+								access: { allowed: true, source: "open" } satisfies AccessInfo,
 							};
 						}
 						return {
@@ -854,6 +902,24 @@ export const accessControl = (opts: AccessControlOptions) => {
 							messageCount: (ctx.session.access.messageCount ?? 0) + 1,
 						};
 					}
+					// Open rooms self-register on first activity (quietly approved),
+					// so the /access Groups view lists them ready to be banned —
+					// this also covers rooms the bot sat in before the gate existed.
+					if (groupMode === "open" && ctx.access.source === "open") {
+						const chat = gatedChatOf(
+							ctx as { chat?: { id?: number; type?: string; title?: string } },
+						);
+						if (chat && !(await loadGroup(storage, ctx, chat.id))) {
+							const now = Date.now();
+							await saveGroup(storage, ctx, chat.id, {
+								status: "approved",
+								chat,
+								requestedAt: now,
+								approvedAt: now,
+							});
+							await indexAdd(storage, groupIndexKey(ctx), "approved", chat.id);
+						}
+					}
 					return next();
 				}
 
@@ -869,21 +935,29 @@ export const accessControl = (opts: AccessControlOptions) => {
 				if (!ctx.is("message") && !gatedPost) return;
 
 				if (ctx.chat?.type !== "private") {
-					// Under the group gate an unknown room's first activity seeds a
-					// pending request (throttled DM) — this is how rooms the bot
-					// already sat in when the gate turned on surface for review
-					// (my_chat_member never fires for them).
 					if (gateGroups) {
 						const chat = gatedChatOf(
 							ctx as { chat?: { id?: number; type?: string; title?: string } },
 						);
 						if (chat) {
-							await requestGroupAccess(ctx, chat, undefined);
+							if (ctx.access.reason === "denied") {
+								// A banned room still talking means an earlier leaveChat
+								// failed — retry, drop the update either way.
+								await botApi(ctx)
+									.leaveChat({ chat_id: chat.id })
+									.catch(() => {});
+							} else if (groupMode === "allowlist") {
+								// An unknown room's first activity seeds a pending request
+								// (throttled DM) — how rooms the bot already sat in when
+								// the gate turned on surface for review (my_chat_member
+								// never fires for them).
+								await requestGroupAccess(ctx, chat, undefined);
+							}
 						}
 					}
-					// Without it, access stays a private-DM concern: group messages
-					// from unapproved users drop silently — seeding a request per
-					// posting member would spam the admin.
+					// Without the room gate, access stays a private-DM concern: group
+					// messages from unapproved users drop silently — seeding a request
+					// per posting member would spam the admin.
 					return;
 				}
 				// Only real messages remain (channel posts always took the branch
@@ -1179,9 +1253,108 @@ export const accessControl = (opts: AccessControlOptions) => {
 					);
 					await ctx.send(v.text, { reply_markup: v.keyboard });
 				},
+			)
+			// The ban list's write path: open mode has no pending requests to
+			// deny from, so banning is by id — a positive id is a user, a
+			// negative one a room (banning a room also leaves it). Works in
+			// allowlist mode too (skip the request flow).
+			.command(
+				"ban",
+				{ description: "Admin: ban a user or room id", hide: true },
+				async (ctx) => {
+					if (!ctx.isAdmin) return;
+					const aLang = ctxLang(ctx);
+					const id = Number((ctx.args ?? "").trim());
+					if (!Number.isSafeInteger(id) || id === 0) {
+						await ctx.send(
+							say(
+								{
+									en: "Usage: /ban <user id or room id>",
+									es: "Uso: /ban <id de usuario o sala>",
+								},
+								aLang,
+							),
+						);
+						return;
+					}
+					const now = Date.now();
+					if (id < 0) {
+						const rec = await loadGroup(storage, ctx, id);
+						await saveGroup(storage, ctx, id, {
+							...(rec ?? { chat: { id, type: "group" }, requestedAt: now }),
+							status: "denied",
+							deniedAt: now,
+							deniedBy: ctx.adminId,
+							approvedAt: undefined,
+							approvedBy: undefined,
+						});
+						await indexMove(storage, groupIndexKey(ctx), id, "any", "denied");
+						await botApi(ctx)
+							.leaveChat({ chat_id: id })
+							.catch(() => {});
+						await ctx.send(
+							`🚪 ${say({ en: "Banned room", es: "Sala baneada" }, aLang)} ${formatGroup(rec, id)}`,
+						);
+						opts.onGroupDeny?.({ chatId: id, deniedBy: ctx.adminId });
+					} else {
+						const rec = await loadAccess(storage, ctx, id);
+						await saveAccess(storage, ctx, id, {
+							...(rec ?? {}),
+							status: "denied",
+							user: rec?.user ?? { id },
+							deniedAt: now,
+							deniedBy: ctx.adminId,
+							approvedAt: undefined,
+							approvedBy: undefined,
+						});
+						await indexMove(storage, indexKey(ctx), id, "any", "denied");
+						await ctx.send(
+							`❌ ${say({ en: "Banned", es: "Baneado" }, aLang)} ${formatUser(rec?.user, id)}`,
+						);
+						opts.onDeny?.({ userId: id, deniedBy: ctx.adminId });
+					}
+				},
+			)
+			.command(
+				"unban",
+				{ description: "Admin: lift a ban", hide: true },
+				async (ctx) => {
+					if (!ctx.isAdmin) return;
+					const aLang = ctxLang(ctx);
+					const id = Number((ctx.args ?? "").trim());
+					if (!Number.isSafeInteger(id) || id === 0) {
+						await ctx.send(
+							say(
+								{
+									en: "Usage: /unban <user id or room id>",
+									es: "Uso: /unban <id de usuario o sala>",
+								},
+								aLang,
+							),
+						);
+						return;
+					}
+					// Unban = forget the judgment: an open surface passes again on
+					// sight, an allowlist one re-asks on the next request/add.
+					if (id < 0) {
+						const rec = await loadGroup(storage, ctx, id);
+						await dropGroup(storage, ctx, id);
+						await indexRemove(storage, groupIndexKey(ctx), id);
+						await ctx.send(
+							`✅ ${say({ en: "Unbanned room", es: "Sala desbaneada" }, aLang)} ${formatGroup(rec, id)}`,
+						);
+					} else {
+						const rec = await loadAccess(storage, ctx, id);
+						await dropAccess(storage, ctx, id);
+						await indexRemove(storage, indexKey(ctx), id);
+						await ctx.send(
+							`✅ ${say({ en: "Unbanned", es: "Desbaneado" }, aLang)} ${formatUser(rec?.user, id)}`,
+						);
+					}
+				},
 			);
 
-	// The group gate's handlers register ONLY when it's on, so a DM-only bot
+	// The room gate's handlers register ONLY when it's on, so a DM-only bot
 	// never adds my_chat_member to its allowed_updates.
 	if (!gateGroups) return plugin;
 
@@ -1270,7 +1443,13 @@ export const accessControl = (opts: AccessControlOptions) => {
 								username: c.from.username,
 							}
 						: undefined;
-				if (c.isAdmin || (addedBy && defaults.has(addedBy.id))) {
+				// Open mode auto-approves every add (the room lands in /access ready
+				// to be banned); allowlist auto-approves only an admin/default adder.
+				if (
+					groupMode === "open" ||
+					c.isAdmin ||
+					(addedBy && defaults.has(addedBy.id))
+				) {
 					const now = Date.now();
 					await saveGroup(storage, ctx, chat.id, {
 						status: "approved",
