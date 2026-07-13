@@ -16,6 +16,7 @@ import {
 	urlOf,
 	urlsIn,
 	youtubeThumbnailUrl,
+	youtubeTimestampUrl,
 	youtubeUrl,
 	youtubeVideoId,
 } from "../src/universal/url/index.js";
@@ -229,6 +230,14 @@ assert.equal(youtubeUrl(YT), `https://www.youtube.com/watch?v=${YT}`);
 assert.equal(youtubeUrl("nope"), null);
 assert.equal(youtubeThumbnailUrl(YT), `https://i.ytimg.com/vi/${YT}/hqdefault.jpg`);
 assert.equal(youtubeThumbnailUrl("nope"), null);
+// Timestamp stamping preserves the URL's shape and other params; replaces an existing t
+assert.equal(
+	youtubeTimestampUrl(`https://youtu.be/${YT}?si=x&t=5s`, 90),
+	`https://youtu.be/${YT}?si=x&t=90s`,
+);
+assert.equal(youtubeTimestampUrl(YT, 61), `https://www.youtube.com/watch?v=${YT}&t=61s`);
+assert.equal(youtubeTimestampUrl("https://example.com/a", 30), "https://example.com/a"); // not a video
+assert.equal(youtubeTimestampUrl(`https://youtu.be/${YT}`, Number.NaN), `https://youtu.be/${YT}?t=0s`);
 
 // urlKey collapses every spelling of one video to one identity
 assert.equal(urlKey(`https://youtu.be/${YT}?si=x`), `youtube:${YT}`);

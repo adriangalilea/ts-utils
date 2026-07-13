@@ -121,6 +121,25 @@ export function youtubeThumbnailUrl(idOrUrl: string): string | null {
 	return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null;
 }
 
+/**
+ * Add or replace the playhead offset (`t=90s`) on a YouTube video URL,
+ * preserving the URL's shape and other params. A bare id gets the canonical
+ * watch URL first. Non-video input is returned unchanged.
+ */
+export function youtubeTimestampUrl(idOrUrl: string, seconds: number): string {
+	if (!youtubeVideoId(idOrUrl)) return idOrUrl;
+	const source = YOUTUBE_ID.test(idOrUrl.trim()) ? youtube.canonicalUrl(idOrUrl.trim()) : idOrUrl;
+	const offset = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+	try {
+		const url = new URL(source);
+		if (url.protocol !== "http:" && url.protocol !== "https:") return idOrUrl;
+		url.searchParams.set("t", `${offset}s`);
+		return url.toString();
+	} catch {
+		return idOrUrl;
+	}
+}
+
 // ── the registry ────────────────────────────────────────────────────────────
 
 export const SITES: readonly SiteAdapter[] = [youtube];

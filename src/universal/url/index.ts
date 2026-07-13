@@ -44,7 +44,15 @@ import { TIDY_RULES, type TrackingProvider } from "./tidy-rules.js";
 
 export { TIDY_RULES, TIDY_VERSION, type TrackingProvider } from "./tidy-rules.js";
 export { OVERLAY_RULES } from "./overlay.js";
-export { SITES, siteFor, youtubeThumbnailUrl, youtubeUrl, youtubeVideoId, type SiteAdapter } from "./sites.js";
+export {
+	SITES,
+	siteFor,
+	youtubeThumbnailUrl,
+	youtubeTimestampUrl,
+	youtubeUrl,
+	youtubeVideoId,
+	type SiteAdapter,
+} from "./sites.js";
 
 export interface StripOptions {
 	/** Extra param names to strip (compared lowercased), for app-specific junk. */
