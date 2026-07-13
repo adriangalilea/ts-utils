@@ -7,7 +7,7 @@
  *   pnpm test:url
  */
 import { strict as assert } from "node:assert";
-import { cleanUrl, isTrackingParam, urlKey } from "../src/universal/url/index.js";
+import { asHttpUrl, cleanUrl, findUrls, hostMatches, hostOf, isTrackingParam, urlKey } from "../src/universal/url/index.js";
 
 // ── cleanUrl: global trackers gone, everything else intact ──────────────────
 
@@ -134,4 +134,49 @@ assert.equal(isTrackingParam("go", "open.spotify.com"), false);
 assert.equal(cleanUrl("https://example.com/a?session=x&id=1", { strip: ["session"] }), "https://example.com/a?id=1");
 assert.equal(urlKey("https://example.com/a?Session=x&id=1", { strip: ["session"] }), "example.com/a?id=1");
 
-console.log("✓ url-test: cleanUrl/urlKey/isTrackingParam hold");
+// ── findUrls: URLs out of free text, in order, cleaned ──────────────────────
+
+{
+	const found = findUrls("check https://a.com/x?utm_source=t and also example.com/y thanks");
+	assert.deepEqual(
+		found.map((f) => [f.url, f.hadScheme]),
+		[
+			["https://a.com/x", true],
+			["https://example.com/y", false], // scheme-less coerces to https
+		],
+	);
+	// Spans point at the raw matches (usable to cut links out of a message)
+	assert.equal("check https://a.com/x?utm_source=t and also example.com/y thanks".slice(found[0].start, found[0].end), "https://a.com/x?utm_source=t");
+}
+// The scanner owns text boundaries: brackets and trailing punctuation stay out
+assert.deepEqual(
+	findUrls("(see <https://a.com/x>, or https://b.com/y.)").map((f) => f.url),
+	["https://a.com/x", "https://b.com/y"],
+);
+// Emails are not URLs; bare words and unknown TLDs don't match
+assert.deepEqual(findUrls("mail a@b.com or ping foo.invalidtld"), []);
+// requireScheme drops scheme-less matches (the bot's bare-link trigger semantics)
+assert.deepEqual(
+	findUrls("https://a.com/x and example.com/y", { requireScheme: true }).map((f) => f.url),
+	["https://a.com/x"],
+);
+
+// ── asHttpUrl: one pasted token → one clean URL ─────────────────────────────
+
+assert.equal(asHttpUrl("https://example.com/a?utm_source=x"), "https://example.com/a");
+assert.equal(asHttpUrl("<https://example.com/a>,"), "https://example.com/a");
+assert.equal(asHttpUrl("example.com/a"), "https://example.com/a");
+assert.equal(asHttpUrl("example.com/a", { requireScheme: true }), null);
+assert.equal(asHttpUrl("a@b.com"), null);
+assert.equal(asHttpUrl("hello"), null);
+
+// ── hostOf / hostMatches ────────────────────────────────────────────────────
+
+assert.equal(hostOf("https://www.theverge.com/a/b"), "theverge.com");
+assert.equal(hostOf("not a url"), "not a url");
+assert.equal(hostMatches("music.youtube.com", "youtube.com"), true);
+assert.equal(hostMatches("www.youtube.com", "youtube.com"), true);
+assert.equal(hostMatches("youtube.com", "youtube.com"), true);
+assert.equal(hostMatches("notyoutube.com", "youtube.com"), false);
+
+console.log("✓ url-test: cleanUrl/urlKey/findUrls/asHttpUrl/host helpers hold");

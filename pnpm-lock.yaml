@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      linkifyjs:
+        specifier: ^4.3.3
+        version: 4.3.3
     devDependencies:
       '@ai-sdk/anthropic':
         specifier: ^4.0.12
@@ -427,6 +431,9 @@ packages:
   json-schema@0.4.0:
     resolution: {integrity: sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA==}
 
+  linkifyjs@4.3.3:
+    resolution: {integrity: sha512-P8aEP5U/D1/IlTY2OeYsErdwh9bGuLE30NcXtKEjgdHcahveQoQwM2yZNsioQHsWFz0P7KKudisbrzCgR0sDHg==}
+
   marked@15.0.12:
     resolution: {integrity: sha512-8dD6FusOQSrpv9Z1rdNMdlSgQOIP880DHqnohobOmYLElGEqAL/JvxvuxZO16r4HtjTlfPRDC1hbvxC9dPN2nA==}
     engines: {node: '>= 18'}
@@ -738,6 +745,8 @@ snapshots:
   inspectable@3.0.2: {}
 
   json-schema@0.4.0: {}
+
+  linkifyjs@4.3.3: {}
 
   marked@15.0.12: {}
 

@@ -101,21 +101,35 @@ money(100, 'EUR')   // "€100.00"
 
 ### URL (`url`)
 
-Tracking-parameter stripping and canonical cache keys, on the WHATWG URL API.
-The knowledge of WHICH params are tracking is vendored from
+Everything between "text someone typed" and "a URL you can use": detection,
+tracking-parameter stripping, canonical cache keys, host questions. Each
+concern rides its state of the art instead of hand-rolls — detection is
+[linkifyjs](https://linkify.js.org) (scanner-based, TLD-aware); parsing is the
+WHATWG URL API, never regexes; the knowledge of WHICH params are tracking is
+vendored from
 [@protontech/tidy-url](https://www.npmjs.com/package/@protontech/tidy-url)
 (Proton's maintained fork of DrKain/tidy-url, MIT; refresh with
-`pnpm update-url-rules`) plus a small tested overlay: global rules only for
-unambiguous trackers (utm_*, fbclid, gclid, …), ambiguous names per-host —
+`pnpm update-url-rules`) plus a small tested overlay. Global rules only for
+unambiguous trackers (utm_*, fbclid, gclid, …); ambiguous names stay per-host —
 `si` is junk on YouTube/Spotify but `ref` on GitHub names a branch and
-survives. Two verbs for two jobs:
+survives.
 
 ```typescript
-import { cleanUrl, urlKey } from '@adriangalilea/utils/url'
+import { findUrls, asHttpUrl, cleanUrl, urlKey, hostOf, hostMatches } from '@adriangalilea/utils/url'
+
+// Every http(s) URL in free text, in order, cleaned — with spans and
+// whether the user typed the scheme (requireScheme drops bare domains).
+findUrls('check https://a.com/x?utm_source=t and example.com/y')
+// [{ url: 'https://a.com/x', start: 6, end: 34, hadScheme: true },
+//  { url: 'https://example.com/y', start: 39, end: 52, hadScheme: false }]
+
+// One pasted token → one clean URL (or null). Punctuation, brackets,
+// emails-are-not-URLs: the scanner's problem, not yours.
+asHttpUrl('<https://example.com/a?utm_source=x>,')  // 'https://example.com/a'
 
 // The SAME resource minus tracking — safe to fetch, share, display.
 // Keeps scheme, www., param order, and the fragment (a real anchor).
-cleanUrl('https://www.youtube.com/watch?v=abc&t=120s&si=junk&utm_source=x')
+cleanUrl('https://www.youtube.com/watch?v=abc&t=120s&si=junk')
 // 'https://www.youtube.com/watch?v=abc&t=120s'
 
 // The resource's IDENTITY — for cache keys and dedupe. Scheme-agnostic,
@@ -123,6 +137,10 @@ cleanUrl('https://www.youtube.com/watch?v=abc&t=120s&si=junk&utm_source=x')
 // fragment dropped: every spelling of one page collides, different pages never do.
 urlKey('https://www.theverge.com/2026/1/1/story/?utm_source=twitter#comments')
 // 'theverge.com/2026/1/1/story'
+
+hostOf('https://www.theverge.com/a')          // 'theverge.com'
+hostMatches('music.youtube.com', 'youtube.com') // true (RFC 6265 domain-match)
+hostMatches('notyoutube.com', 'youtube.com')    // false
 
 // App-specific junk rides along per call
 urlKey(url, { strip: ['session_id'] })

@@ -12,16 +12,23 @@
  *    fragment dropped. Two spellings of one page collide; two different
  *    pages never do.
  *
- * The knowledge of WHICH params are tracking is not ours: it's vendored from
- * @protontech/tidy-url (Proton's maintained fork of DrKain/tidy-url, MIT; see
- * tidy-rules.ts, refresh with `pnpm update-url-rules`) plus a small tested
- * overlay for gaps (overlay.ts). URLs are parsed with the WHATWG URL API,
- * never regexes; the dataset's per-provider matchers select which rules apply
- * to a host, and param names are compared literally (lowercased).
+ * Plus the text side: `findUrls(text)` / `asHttpUrl(token)` pull clean URLs
+ * out of what a user typed, and `hostOf` / `hostMatches` (RFC 6265 domain-
+ * matching) answer host questions.
+ *
+ * Each concern rides its state of the art instead of hand-rolls:
+ *  - detection in free text: linkifyjs (scanner-based, TLD-aware, MIT);
+ *  - parsing/serialization: the WHATWG URL API, never regexes;
+ *  - which params are tracking: vendored from @protontech/tidy-url (Proton's
+ *    maintained fork of DrKain/tidy-url, MIT; see tidy-rules.ts, refresh with
+ *    `pnpm update-url-rules`) plus a small tested overlay (overlay.ts) —
+ *    param names compare literally (lowercased), per host;
+ *  - `urlKey` is ours: no standard exists for cache identity.
  *
  * Unparseable or non-http(s) input passes through unchanged: these are hygiene
  * functions over user-pasted text, not validators.
  */
+import { find } from "linkifyjs";
 import { OVERLAY_RULES } from "./overlay.js";
 import { TIDY_RULES, type TrackingProvider } from "./tidy-rules.js";
 
@@ -31,6 +38,73 @@ export { OVERLAY_RULES } from "./overlay.js";
 export interface StripOptions {
 	/** Extra param names to strip (compared lowercased), for app-specific junk. */
 	strip?: readonly string[];
+}
+
+export interface FindUrlsOptions extends StripOptions {
+	/** Drop scheme-less matches (`example.com/x`) instead of coercing them to https://. */
+	requireScheme?: boolean;
+}
+
+/** One URL found in free text by {@link findUrls}. */
+export interface FoundUrl {
+	/** The cleaned http(s) URL (https:// coerced onto scheme-less matches). */
+	url: string;
+	/** Span of the raw match in the input text. */
+	start: number;
+	end: number;
+	/** False for scheme-less matches the scanner inferred from a known TLD. */
+	hadScheme: boolean;
+}
+
+/**
+ * Every http(s) URL in free text, in order, cleaned. Detection is linkifyjs —
+ * a real scanner, TLD-aware for scheme-less domains, and it owns the messy
+ * text-boundary problems (trailing punctuation, brackets, emails-are-not-URLs)
+ * — then each match goes through the URL parser and tracking-param stripping.
+ * Scheme-less matches coerce to https:// (drop them with `requireScheme`).
+ */
+export function findUrls(text: string, opts?: FindUrlsOptions): FoundUrl[] {
+	const out: FoundUrl[] = [];
+	for (const link of find(text, "url", { defaultProtocol: "https" })) {
+		// href === value exactly when the text already carried a scheme; otherwise
+		// the scanner built href by prepending defaultProtocol onto the bare match.
+		const hadScheme = link.href === link.value;
+		if (!hadScheme && opts?.requireScheme) continue;
+		const u = parseHttp(link.href);
+		if (!u) continue; // a non-http scheme the scanner knows; not our job
+		deleteTracking(u, opts);
+		out.push({ url: u.toString(), start: link.start, end: link.end, hadScheme });
+	}
+	return out;
+}
+
+/**
+ * A user-pasted token as one CLEAN http(s) URL, or null: {@link findUrls}
+ * over the token, first match. The one verb between "text someone typed"
+ * and "a URL you can use".
+ */
+export function asHttpUrl(token: string, opts?: FindUrlsOptions): string | null {
+	return findUrls(token, opts)[0]?.url ?? null;
+}
+
+/** A URL's host without a leading www., or the input unchanged if it won't parse. */
+export function hostOf(url: string): string {
+	try {
+		return new URL(url).hostname.replace(/^www\./, "");
+	} catch {
+		return url;
+	}
+}
+
+/**
+ * True if `host` IS `domain` or a subdomain of it — never a lookalike suffix
+ * (`notyoutube.com` doesn't match `youtube.com`). RFC 6265 §5.1.3 domain-
+ * matching semantics, the same rule cookies use.
+ */
+export function hostMatches(host: string, domain: string): boolean {
+	const h = host.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+	const d = domain.toLowerCase();
+	return h === d || h.endsWith(`.${d}`);
 }
 
 /**
