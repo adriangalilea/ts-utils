@@ -48,8 +48,10 @@
  *
  * A group the bot already sits in when the gate turns on has no record;
  * its first activity seeds a pending request (throttled DM) — existing
- * rooms surface for review instead of going silently mute forever. The
- * `/access` menu grows a `👥 Groups` view (approve / leave / re-allow).
+ * rooms surface for review instead of going silently mute forever. In the
+ * `/access` menu STATUS is the only navigation axis: one Approved / one
+ * Pending / one Denied list, each mixing 👤 users and 👥 rooms with the
+ * right actions per row (approve/deny/revoke vs approve/leave/allow).
  *
  * With `groups: "open"` every add auto-approves QUIETLY (no DM — the
  * consumer's own join notifications cover it) and rooms the bot already
@@ -340,7 +342,7 @@ const acDeny = new CallbackData("acD")
 	.number("uid")
 	.string("v", { optional: true });
 const acRevoke = new CallbackData("acR").number("uid");
-const acView = new CallbackData("acV").string("v"); // main | approved | pending | denied | groups
+const acView = new CallbackData("acV").string("v"); // main | approved | pending | denied
 const acClose = new CallbackData("acC");
 // Group gate: `v` marks a tap from the groups list view (refresh it after);
 // absent = the original add notification (edit it inline).
@@ -1247,9 +1249,9 @@ export const accessControl = (opts: AccessControlOptions) => {
 					const aLang = ctxLang(ctx);
 					const v = mainView(
 						await loadIndex(storage, indexKey(ctx)),
+						gateGroups ? await loadIndex(storage, groupIndexKey(ctx)) : null,
 						defaults,
 						aLang,
-						gateGroups ? await loadIndex(storage, groupIndexKey(ctx)) : null,
 					);
 					await ctx.send(v.text, { reply_markup: v.keyboard });
 				},
@@ -1507,7 +1509,14 @@ export const accessControl = (opts: AccessControlOptions) => {
 					text: say({ en: "✅ Approved", es: "✅ Aprobado" }, aLang),
 				});
 				if (ctx.queryData.v) {
-					await renderView(ctx, storage, defaults, "groups", aLang, gateGroups);
+					await renderView(
+						ctx,
+						storage,
+						defaults,
+						ctx.queryData.v,
+						aLang,
+						gateGroups,
+					);
 				} else {
 					try {
 						await ctx.editText(
@@ -1544,7 +1553,14 @@ export const accessControl = (opts: AccessControlOptions) => {
 					text: say({ en: "🚪 Left", es: "🚪 Fuera" }, aLang),
 				});
 				if (ctx.queryData.v) {
-					await renderView(ctx, storage, defaults, "groups", aLang, gateGroups);
+					await renderView(
+						ctx,
+						storage,
+						defaults,
+						ctx.queryData.v,
+						aLang,
+						gateGroups,
+					);
 				} else {
 					try {
 						await ctx.editText(
@@ -1585,17 +1601,11 @@ const renderView = async (
 	gateGroups = false,
 ): Promise<void> => {
 	const idx = await loadIndex(storage, indexKey(ctx));
+	const gIdx = gateGroups ? await loadIndex(storage, groupIndexKey(ctx)) : null;
 	const v =
 		view === "approved" || view === "pending" || view === "denied"
-			? await listView(storage, ctx, idx, view, defaults, lang)
-			: view === "groups" && gateGroups
-				? await groupsView(storage, ctx, lang)
-				: mainView(
-						idx,
-						defaults,
-						lang,
-						gateGroups ? await loadIndex(storage, groupIndexKey(ctx)) : null,
-					);
+			? await listView(storage, ctx, idx, gIdx, view, defaults, lang)
+			: mainView(idx, gIdx, defaults, lang);
 	try {
 		await ctx.editText(v.text, { reply_markup: v.keyboard });
 	} catch {
@@ -1605,47 +1615,35 @@ const renderView = async (
 
 const mainView = (
 	idx: AccessIndex,
+	gIdx: AccessIndex | null,
 	defaults: ReadonlySet<number>,
 	lang: string,
-	groupIdx: AccessIndex | null = null,
 ) => {
+	// STATUS is the only navigation axis — one bucket holds users AND rooms
+	// (the row's 👤/👥 mark carries the kind, inside the list).
+	const count = (b: keyof AccessIndex) =>
+		idx[b].length + (gIdx?.[b].length ?? 0);
 	const approved = say(statusLabel.approved, lang);
 	const pending = say(statusLabel.pending, lang);
 	const denied = say(statusLabel.denied, lang);
 
-	const lines = [
+	const text = [
 		say({ en: "🔐 Access Control", es: "🔐 Access Control" }, lang),
 		"",
-		`✅ ${approved}: ${idx.approved.length}`,
-		`⏳ ${pending}: ${idx.pending.length}`,
-		`❌ ${denied}: ${idx.denied.length}`,
+		`✅ ${approved}: ${count("approved")}`,
+		`⏳ ${pending}: ${count("pending")}`,
+		`❌ ${denied}: ${count("denied")}`,
 		`👑 ${say({ en: "Defaults", es: "Defaults" }, lang)}: ${defaults.size} (hardcoded)`,
-	];
-	if (groupIdx) {
-		lines.push(
-			`👥 ${say({ en: "Groups", es: "Grupos" }, lang)}: ${groupIdx.approved.length} ✅ · ${groupIdx.pending.length} ⏳ · ${groupIdx.denied.length} 🚪`,
-		);
-	}
-	const text = lines.join("\n");
+	].join("\n");
 
 	const keyboard = new InlineKeyboard()
 		.text(
-			`✅ ${approved} (${idx.approved.length})`,
+			`✅ ${approved} (${count("approved")})`,
 			acView.pack({ v: "approved" }),
 		)
-		.text(
-			`⏳ ${pending} (${idx.pending.length})`,
-			acView.pack({ v: "pending" }),
-		)
+		.text(`⏳ ${pending} (${count("pending")})`, acView.pack({ v: "pending" }))
 		.row()
-		.text(`❌ ${denied} (${idx.denied.length})`, acView.pack({ v: "denied" }));
-	if (groupIdx) {
-		keyboard.text(
-			`👥 ${say({ en: "Groups", es: "Grupos" }, lang)} (${groupIdx.approved.length + groupIdx.pending.length})`,
-			acView.pack({ v: "groups" }),
-		);
-	}
-	keyboard
+		.text(`❌ ${denied} (${count("denied")})`, acView.pack({ v: "denied" }))
 		.row()
 		.text(
 			say({ en: "🔄 Refresh", es: "🔄 Refresh" }, lang),
@@ -1656,31 +1654,29 @@ const mainView = (
 	return { text, keyboard };
 };
 
+// ONE list per status, users and rooms together — the row's 👤/👥 mark is
+// the kind; the buttons dispatch per kind (approve/deny vs approve/leave).
 const listView = async (
 	storage: Storage,
 	ctx: BotCtx,
 	idx: AccessIndex,
+	gIdx: AccessIndex | null,
 	filter: "pending" | "approved" | "denied",
 	defaults: ReadonlySet<number>,
 	lang: string,
 ) => {
-	const ids = idx[filter];
-	// Cap at 20 to keep callback_data + rendering sane.
-	const shownIds = ids.slice(0, 20);
-	const records = await Promise.all(
-		shownIds.map(async (id) => ({
-			id,
-			rec: await loadAccess(storage, ctx, id),
-		})),
-	);
+	// Cap each kind at 20 to keep callback_data + rendering sane.
+	const userIds = idx[filter].slice(0, 20);
+	const roomIds = (gIdx?.[filter] ?? []).slice(0, 20);
+	const total = idx[filter].length + (gIdx?.[filter].length ?? 0);
+	const shown = userIds.length + roomIds.length;
 
 	const headerEmoji =
 		filter === "approved" ? "✅" : filter === "pending" ? "⏳" : "❌";
 	const headerLabel = say(statusLabel[filter], lang);
-
 	const back = say({ en: "⬅️ Back", es: "⬅️ Volver" }, lang);
 
-	if (ids.length === 0) {
+	if (total === 0) {
 		const text =
 			`${headerEmoji} ${headerLabel} (0)\n\n` +
 			say({ en: "(empty)", es: "(vacío)" }, lang);
@@ -1691,45 +1687,48 @@ const listView = async (
 		return { text, keyboard };
 	}
 
-	const lines: string[] = [`${headerEmoji} ${headerLabel} (${ids.length})`, ""];
+	const lines: string[] = [`${headerEmoji} ${headerLabel} (${total})`, ""];
 	const keyboard = new InlineKeyboard();
+	const ago = say({ en: "ago", es: "hace" }, lang);
+	let n = 0;
 
-	for (let i = 0; i < records.length; i++) {
-		const { id, rec } = records[i];
+	for (const id of userIds) {
+		n += 1;
+		const rec = await loadAccess(storage, ctx, id);
 		if (!rec) {
 			// index referenced a missing record — show as placeholder
 			lines.push(
-				`${i + 1}. id ${id} ${say({ en: "(data lost)", es: "(datos perdidos)" }, lang)}`,
+				`${n}. 👤 id ${id} ${say({ en: "(data lost)", es: "(datos perdidos)" }, lang)}`,
 			);
 			continue;
 		}
 		const ageRef =
 			rec.approvedAt ?? rec.deniedAt ?? rec.requestedAt ?? Date.now();
 		lines.push(
-			`${i + 1}. ${formatUser(rec.user, id)} · ${say({ en: "ago", es: "hace" }, lang)} ${fmtAge(Date.now() - ageRef)}` +
+			`${n}. 👤 ${formatUser(rec.user, id)} · ${ago} ${fmtAge(Date.now() - ageRef)}` +
 				(rec.messageCount ? ` · ${rec.messageCount} msgs` : ""),
 		);
 		if (filter === "pending") {
 			keyboard
-				.text(`✅ ${i + 1}`, acApprove.pack({ uid: id, v: "pending" }), {
+				.text(`✅ ${n}`, acApprove.pack({ uid: id, v: "pending" }), {
 					style: "success",
 				})
-				.text(`❌ ${i + 1}`, acDeny.pack({ uid: id, v: "pending" }), {
+				.text(`❌ ${n}`, acDeny.pack({ uid: id, v: "pending" }), {
 					style: "danger",
 				})
 				.row();
 		} else if (filter === "approved") {
 			keyboard
 				.text(
-					`${say({ en: "↩️ Revoke", es: "↩️ Revocar" }, lang)} #${i + 1}`,
+					`${say({ en: "↩️ Revoke", es: "↩️ Revocar" }, lang)} #${n}`,
 					acRevoke.pack({ uid: id }),
 					{ style: "danger" },
 				)
 				.row();
-		} else if (filter === "denied") {
+		} else {
 			keyboard
 				.text(
-					`${say({ en: "✅ Reapprove", es: "✅ Reaprobar" }, lang)} #${i + 1}`,
+					`${say({ en: "✅ Reapprove", es: "✅ Reaprobar" }, lang)} #${n}`,
 					acApprove.pack({ uid: id, v: "denied" }),
 					{ style: "success" },
 				)
@@ -1737,82 +1736,52 @@ const listView = async (
 		}
 	}
 
-	if (ids.length > shownIds.length) {
+	for (const id of roomIds) {
+		n += 1;
+		const rec = await loadGroup(storage, ctx, id);
+		const ageRef =
+			rec?.approvedAt ?? rec?.deniedAt ?? rec?.requestedAt ?? Date.now();
+		lines.push(
+			`${n}. 👥 ${formatGroup(rec, id)} · ${ago} ${fmtAge(Date.now() - ageRef)}`,
+		);
+		if (filter === "pending") {
+			keyboard
+				.text(`✅ ${n}`, acGroupApprove.pack({ gid: id, v: "pending" }), {
+					style: "success",
+				})
+				.text(`🚪 ${n}`, acGroupLeave.pack({ gid: id, v: "pending" }), {
+					style: "danger",
+				})
+				.row();
+		} else if (filter === "approved") {
+			keyboard
+				.text(
+					`${say({ en: "🚪 Leave", es: "🚪 Salir" }, lang)} #${n}`,
+					acGroupLeave.pack({ gid: id, v: "approved" }),
+					{ style: "danger" },
+				)
+				.row();
+		} else {
+			// The bot already left a denied room — allowing just welcomes the next add.
+			keyboard
+				.text(
+					`${say({ en: "✅ Allow", es: "✅ Permitir" }, lang)} #${n}`,
+					acGroupApprove.pack({ gid: id, v: "denied" }),
+					{ style: "success" },
+				)
+				.row();
+		}
+	}
+
+	if (total > shown) {
 		lines.push(
 			"",
-			`(+${ids.length - shownIds.length} ${say({ en: "more, not shown", es: "más, no mostrados" }, lang)})`,
+			`(+${total - shown} ${say({ en: "more, not shown", es: "más, no mostrados" }, lang)})`,
 		);
 	}
 	if (filter === "approved" && defaults.size > 0) {
 		lines.push("", `+ ${defaults.size} hardcoded defaults`);
 	}
-
-	keyboard.text(back, acView.pack({ v: "main" }));
-	return { text: lines.join("\n"), keyboard };
-};
-
-// One combined rooms view (group counts stay small): approved rooms can be
-// left, pending ones approved or left, denied ones re-allowed (the bot has
-// already left those — re-allowing just welcomes the next add).
-const groupsView = async (storage: Storage, ctx: BotCtx, lang: string) => {
-	const idx = await loadIndex(storage, groupIndexKey(ctx));
-	const back = say({ en: "⬅️ Back", es: "⬅️ Volver" }, lang);
-	const lines: string[] = [say({ en: "👥 Groups", es: "👥 Grupos" }, lang)];
-	const keyboard = new InlineKeyboard();
-	let n = 0;
-
-	const buckets: Array<{
-		filter: keyof AccessIndex;
-		header: string;
-	}> = [
-		{ filter: "approved", header: `✅ ${say(statusLabel.approved, lang)}` },
-		{ filter: "pending", header: `⏳ ${say(statusLabel.pending, lang)}` },
-		{
-			filter: "denied",
-			header: `🚪 ${say({ en: "Left/denied", es: "Fuera/denegados" }, lang)}`,
-		},
-	];
-	for (const { filter, header } of buckets) {
-		const ids = idx[filter].slice(0, 20);
-		if (ids.length === 0) continue;
-		lines.push("", `${header} (${idx[filter].length})`);
-		for (const id of ids) {
-			n += 1;
-			const rec = await loadGroup(storage, ctx, id);
-			const ageRef =
-				rec?.approvedAt ?? rec?.deniedAt ?? rec?.requestedAt ?? Date.now();
-			lines.push(
-				`${n}. ${formatGroup(rec, id)} · ${say({ en: "ago", es: "hace" }, lang)} ${fmtAge(Date.now() - ageRef)}`,
-			);
-			if (filter === "approved") {
-				keyboard
-					.text(
-						`${say({ en: "🚪 Leave", es: "🚪 Salir" }, lang)} #${n}`,
-						acGroupLeave.pack({ gid: id, v: "groups" }),
-						{ style: "danger" },
-					)
-					.row();
-			} else if (filter === "pending") {
-				keyboard
-					.text(`✅ ${n}`, acGroupApprove.pack({ gid: id, v: "groups" }), {
-						style: "success",
-					})
-					.text(`🚪 ${n}`, acGroupLeave.pack({ gid: id, v: "groups" }), {
-						style: "danger",
-					})
-					.row();
-			} else {
-				keyboard
-					.text(
-						`${say({ en: "✅ Allow", es: "✅ Permitir" }, lang)} #${n}`,
-						acGroupApprove.pack({ gid: id, v: "groups" }),
-						{ style: "success" },
-					)
-					.row();
-			}
-		}
-	}
-	if (n === 0) lines.push("", say({ en: "(empty)", es: "(vacío)" }, lang));
 
 	keyboard.text(back, acView.pack({ v: "main" }));
 	return { text: lines.join("\n"), keyboard };
