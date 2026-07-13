@@ -55,6 +55,7 @@ const SAFE_ENTRIES = [
 	"offensive.js",
 	"universal/log.js",
 	"universal/url/index.js",
+	"universal/url/sites.js",
 	"browser.js",
 ];
 

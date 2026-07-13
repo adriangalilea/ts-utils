@@ -9,6 +9,11 @@
  * Extraction is WHATWG-URL based, nested-redirect aware, and percent-decode
  * tolerant — no regex URL parsing. Adding a service (spotify, vimeo, …) is
  * one more adapter entry.
+ *
+ * Also exported standalone as `@adriangalilea/utils/url/sites`: this module
+ * is dependency-free (no linkifyjs, no tracking dataset), so libraries that
+ * only need content identity (a video id from any URL spelling) can import
+ * it without pulling the full url module's weight.
  */
 
 export interface SiteAdapter {
