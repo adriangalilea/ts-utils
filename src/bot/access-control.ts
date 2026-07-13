@@ -42,6 +42,10 @@
  * its first activity seeds a pending request (throttled DM) — existing
  * rooms surface for review instead of going silently mute forever. The
  * `/access` menu grows a `👥 Groups` view (approve / leave / re-allow).
+ * And because the gates are independent, `gateDms: false` runs the room
+ * gate WITHOUT the DM gate: unknown DM users pass (`source: 'open'`),
+ * while an explicit `/access` deny still holds — a ban list for an
+ * otherwise-open bot.
  * Removal from a group clears its record (a fresh add re-asks) UNLESS it
  * was denied — deny memory survives, that's the anti-re-add-spam. Cost:
  * one storage read per gated group update. Known edge: a group→supergroup
@@ -206,7 +210,7 @@ export type GroupAccessRecord = {
 	lastNotifiedAt?: number;
 };
 
-export type AccessSource = "admin" | "default" | "store" | "group";
+export type AccessSource = "admin" | "default" | "store" | "group" | "open";
 
 /**
  * What handlers downstream see on `ctx.access`. A discriminated union —
@@ -265,6 +269,14 @@ export type AccessControlOptions = {
 	 * default: DM gating is the plugin's core, rooms are opt-in.
 	 */
 	gateGroups?: boolean;
+	/**
+	 * Pass `false` to run WITHOUT the DM gate: unknown DM users pass
+	 * (`ctx.access.source === 'open'`) instead of landing in pending.
+	 * The two gates are independent questions — this is how a bot gates
+	 * rooms only. Admin/defaults/store sources still resolve normally,
+	 * and the `/access` menu keeps working for whatever records exist.
+	 */
+	gateDms?: boolean;
 	/** Callbacks for your own logging / metrics. */
 	onAccessRequest?: (info: { user: AccessUser; firstMessage?: string }) => void;
 	onApprove?: (info: { userId: number; approvedBy: number }) => void;
@@ -668,6 +680,7 @@ export const accessControl = (opts: AccessControlOptions) => {
 	const silentDeny = opts.silentDeny === true;
 	const throttleMs = opts.notifyThrottleMs ?? DEFAULT_THROTTLE_MS;
 	const gateGroups = opts.gateGroups === true;
+	const gateDms = opts.gateDms !== false;
 
 	// Seed (or re-notify) a room's pending request and DM the primary admin,
 	// throttled per record. Called from the add event AND from an unknown
@@ -796,6 +809,14 @@ export const accessControl = (opts: AccessControlOptions) => {
 							source: "store",
 							record: rec,
 						} satisfies AccessInfo,
+					};
+				}
+				// No DM gate: whoever isn't otherwise classified simply passes —
+				// EXCEPT an explicit deny, which holds in open mode too (that's
+				// what makes /access deny a ban list for an otherwise-open bot).
+				if (!gateDms && rec.status !== "denied") {
+					return {
+						access: { allowed: true, source: "open" } satisfies AccessInfo,
 					};
 				}
 				return {
