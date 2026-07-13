@@ -38,7 +38,10 @@ export interface ReactionStateSpec {
 	rank: number;
 }
 
-/** The context surface needed: the message identity plus gramio's react(). */
+/** The context surface read off the ctx: the message identity plus gramio's react().
+ *  `for()` takes `unknown` and narrows structurally (gramio's react() param is an
+ *  emoji-literal union, which no portable signature satisfies in strict variance) —
+ *  a ctx without a callable react() screams instead of silently not reacting. */
 export interface ReactionCtx {
 	id?: number;
 	chatId?: number;
@@ -67,7 +70,9 @@ export function reactionPolicy<S extends Record<string, ReactionStateSpec>>(stat
 
 	return {
 		/** The arbitrated handle for THIS ctx's message (keyed chat:message). */
-		for(ctx: ReactionCtx): ReactionHandle<keyof S & string> {
+		for(context: unknown): ReactionHandle<keyof S & string> {
+			const ctx = context as ReactionCtx;
+			if (typeof ctx.react !== "function") throw new Error("reactionPolicy.for: ctx has no react()");
 			const chat = ctx.chatId ?? ctx.chat?.id;
 			const key = `${chat}:${ctx.id}`;
 			return {
