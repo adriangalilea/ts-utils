@@ -101,44 +101,56 @@ money(100, 'EUR')   // "€100.00"
 
 ### URL (`url`)
 
-Everything between "text someone typed" and "a URL you can use": detection,
-tracking-parameter stripping, canonical cache keys, host questions. Each
-concern rides its state of the art instead of hand-rolls — detection is
-[linkifyjs](https://linkify.js.org) (scanner-based, TLD-aware); parsing is the
-WHATWG URL API, never regexes; the knowledge of WHICH params are tracking is
-vendored from
+URLs, from user-typed text to cache identity. The whole funnel — *is there a
+URL? which resource? whose content? what identity?* — answered once, on one
+object. Each concern rides its state of the art instead of hand-rolls:
+detection is [linkifyjs](https://linkify.js.org) (scanner-based, TLD-aware);
+parsing is the WHATWG URL API, never regexes; the knowledge of WHICH params
+are tracking is vendored from
 [@protontech/tidy-url](https://www.npmjs.com/package/@protontech/tidy-url)
 (Proton's maintained fork of DrKain/tidy-url, MIT; refresh with
-`pnpm update-url-rules`) plus a small tested overlay. Global rules only for
+`pnpm update-url-rules`) plus a small tested overlay; per-site content
+identity is an adapter registry (YouTube built in). Global rules only for
 unambiguous trackers (utm_*, fbclid, gclid, …); ambiguous names stay per-host —
 `si` is junk on YouTube/Spotify but `ref` on GitHub names a branch and
 survives.
 
 ```typescript
-import { findUrls, asHttpUrl, cleanUrl, urlKey, hostOf, hostMatches } from '@adriangalilea/utils/url'
+import { urlsIn, urlOf, cleanUrl, urlKey, hostOf, hostMatches,
+         youtubeVideoId, youtubeUrl, youtubeThumbnailUrl } from '@adriangalilea/utils/url'
 
-// Every http(s) URL in free text, in order, cleaned — with spans and
-// whether the user typed the scheme (requireScheme drops bare domains).
-findUrls('check https://a.com/x?utm_source=t and example.com/y')
-// [{ url: 'https://a.com/x', start: 6, end: 34, hadScheme: true },
-//  { url: 'https://example.com/y', start: 39, end: 52, hadScheme: false }]
+// Every http(s) URL in free text, in order, fully resolved:
+urlsIn('watch youtu.be/dQw4w9WgXcQ?si=junk and https://a.com/x?utm_source=t')
+// [{ raw: 'youtu.be/dQw4w9WgXcQ?si=junk', start: 6, end: 34, hadScheme: false,
+//    href: 'https://youtu.be/dQw4w9WgXcQ',          // cleaned — fetch/share this
+//    host: 'youtu.be', site: 'youtube', id: 'dQw4w9WgXcQ',
+//    key:  'youtube:dQw4w9WgXcQ' },                  // THE cache/dedupe identity
+//  { …, href: 'https://a.com/x', site: null, id: null, key: 'a.com/x' }]
 
-// One pasted token → one clean URL (or null). Punctuation, brackets,
+// One pasted token → one resolved Url (or null). Punctuation, brackets,
 // emails-are-not-URLs: the scanner's problem, not yours.
-asHttpUrl('<https://example.com/a?utm_source=x>,')  // 'https://example.com/a'
+urlOf('<https://example.com/a?utm_source=x>,')?.href  // 'https://example.com/a'
+urlOf('example.com/a', { requireScheme: true })       // null (bare domains opt-out)
 
-// The SAME resource minus tracking — safe to fetch, share, display.
-// Keeps scheme, www., param order, and the fragment (a real anchor).
+// `key` is the point: every spelling of one resource collides.
+// Recognized sites collapse to their native content id —
+urlKey('https://music.youtube.com/watch?v=dQw4w9WgXcQ&si=x')  // 'youtube:dQw4w9WgXcQ'
+urlKey('https://www.youtube.com/shorts/dQw4w9WgXcQ')          // 'youtube:dQw4w9WgXcQ'
+// — everything else canonicalizes generically:
+urlKey('https://www.theverge.com/2026/story/?utm_source=x#c') // 'theverge.com/2026/story'
+
+// The SAME resource minus tracking — keeps scheme, www., order, fragment.
 cleanUrl('https://www.youtube.com/watch?v=abc&t=120s&si=junk')
 // 'https://www.youtube.com/watch?v=abc&t=120s'
 
-// The resource's IDENTITY — for cache keys and dedupe. Scheme-agnostic,
-// www-less lowercase host, no trailing slash, params stripped + sorted,
-// fragment dropped: every spelling of one page collides, different pages never do.
-urlKey('https://www.theverge.com/2026/1/1/story/?utm_source=twitter#comments')
-// 'theverge.com/2026/1/1/story'
+// YouTube identity from ANY spelling (watch, youtu.be, shorts, live, embed,
+// music., nocookie, redirect wrappers, bare 11-char id):
+youtubeVideoId('https://www.youtube.com/attribution_link?u=%2Fwatch%3Fv%3DdQw4w9WgXcQ')
+// 'dQw4w9WgXcQ'
+youtubeUrl('dQw4w9WgXcQ')           // 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+youtubeThumbnailUrl('dQw4w9WgXcQ')  // 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg'
 
-hostOf('https://www.theverge.com/a')          // 'theverge.com'
+hostOf('https://www.theverge.com/a')            // 'theverge.com'
 hostMatches('music.youtube.com', 'youtube.com') // true (RFC 6265 domain-match)
 hostMatches('notyoutube.com', 'youtube.com')    // false
 

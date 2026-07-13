@@ -1,70 +1,88 @@
 /**
- * URL hygiene: tracking-parameter stripping and canonical cache keys.
- * Pure and dependency-free — safe in Node, Workers, and browsers.
+ * URLs, from user-typed text to cache identity. Safe in Node, Workers, and
+ * browsers. The whole funnel every consumer walks — is there a URL? which
+ * resource? whose content? what identity? — answered ONCE, on one object:
  *
- * Two verbs for two jobs:
- *  - `cleanUrl(url)`: the SAME resource, minus tracking params. Safe to fetch,
- *    share, and display. Keeps scheme, www., remaining param order, and the
- *    fragment (a fragment can be a real anchor).
- *  - `urlKey(url)`: the resource's IDENTITY, for cache keys and dedupe.
- *    Scheme-agnostic, lowercase host without www. or a trailing dot, no
- *    trailing slash, tracking params stripped, surviving params sorted,
- *    fragment dropped. Two spellings of one page collide; two different
- *    pages never do.
+ *   Url {
+ *     raw, start, end   what they typed, and where in the text
+ *     hadScheme         typed https:// vs inferred from a bare domain
+ *     href              cleaned absolute URL — fetch, share, display this
+ *     host              www-less host
+ *     site              recognized service ("youtube") or null
+ *     id                the service's native content id, or null
+ *     key               canonical identity for caches/dedupe:
+ *                       "youtube:dQw4w9WgXcQ" | "theverge.com/2026/story"
+ *   }
  *
- * Plus the text side: `findUrls(text)` / `asHttpUrl(token)` pull clean URLs
- * out of what a user typed, and `hostOf` / `hostMatches` (RFC 6265 domain-
- * matching) answer host questions.
+ * Two verbs, one per input shape:
+ *   urlsIn(text)  → Url[]        every URL in free text, in order, with spans
+ *   urlOf(token)  → Url | null   one pasted token / URL string
+ *
+ * The `key` is the point: every spelling of one resource collides (scheme,
+ * www., trailing slash, tracking params, and for recognized sites every URL
+ * shape of the same content id), and two different resources never do.
  *
  * Each concern rides its state of the art instead of hand-rolls:
- *  - detection in free text: linkifyjs (scanner-based, TLD-aware, MIT);
+ *  - detection in free text: linkifyjs (scanner-based, TLD-aware, MIT) — it
+ *    owns the messy boundaries (trailing punctuation, brackets, emails);
  *  - parsing/serialization: the WHATWG URL API, never regexes;
  *  - which params are tracking: vendored from @protontech/tidy-url (Proton's
  *    maintained fork of DrKain/tidy-url, MIT; see tidy-rules.ts, refresh with
  *    `pnpm update-url-rules`) plus a small tested overlay (overlay.ts) —
  *    param names compare literally (lowercased), per host;
- *  - `urlKey` is ours: no standard exists for cache identity.
+ *  - per-site content identity: the adapter registry (sites.ts).
  *
- * Unparseable or non-http(s) input passes through unchanged: these are hygiene
- * functions over user-pasted text, not validators.
+ * The low-level verbs (`cleanUrl`, `urlKey`, `hostOf`, `hostMatches`,
+ * `isTrackingParam`, the youtube helpers) stay exported for surgical use.
+ * Unparseable or non-http(s) input passes through unchanged: these are
+ * hygiene functions over user-pasted text, not validators.
  */
 import { find } from "linkifyjs";
 import { OVERLAY_RULES } from "./overlay.js";
+import { siteFor } from "./sites.js";
 import { TIDY_RULES, type TrackingProvider } from "./tidy-rules.js";
 
 export { TIDY_RULES, TIDY_VERSION, type TrackingProvider } from "./tidy-rules.js";
 export { OVERLAY_RULES } from "./overlay.js";
+export { SITES, siteFor, youtubeThumbnailUrl, youtubeUrl, youtubeVideoId, type SiteAdapter } from "./sites.js";
 
 export interface StripOptions {
 	/** Extra param names to strip (compared lowercased), for app-specific junk. */
 	strip?: readonly string[];
 }
 
-export interface FindUrlsOptions extends StripOptions {
+export interface UrlsInOptions extends StripOptions {
 	/** Drop scheme-less matches (`example.com/x`) instead of coercing them to https://. */
 	requireScheme?: boolean;
 }
 
-/** One URL found in free text by {@link findUrls}. */
-export interface FoundUrl {
-	/** The cleaned http(s) URL (https:// coerced onto scheme-less matches). */
-	url: string;
-	/** Span of the raw match in the input text. */
+/** One URL resolved from text: every layer of the funnel, answered once. */
+export interface Url {
+	/** Exactly the text that matched (punctuation and tracking still on it). */
+	raw: string;
+	/** Span of the raw match in the input text (cut links out of a message). */
 	start: number;
 	end: number;
-	/** False for scheme-less matches the scanner inferred from a known TLD. */
+	/** False when the scanner inferred the link from a bare domain (`example.com/x`). */
 	hadScheme: boolean;
+	/** The cleaned absolute URL — fetch, share, and display this. */
+	href: string;
+	/** The www-less host. */
+	host: string;
+	/** The recognized service owning the host ("youtube"), or null. */
+	site: string | null;
+	/** The service's native content id (a YouTube video id), or null. */
+	id: string | null;
+	/** Canonical identity for caches/dedupe: every spelling of one resource collides. */
+	key: string;
 }
 
 /**
- * Every http(s) URL in free text, in order, cleaned. Detection is linkifyjs —
- * a real scanner, TLD-aware for scheme-less domains, and it owns the messy
- * text-boundary problems (trailing punctuation, brackets, emails-are-not-URLs)
- * — then each match goes through the URL parser and tracking-param stripping.
- * Scheme-less matches coerce to https:// (drop them with `requireScheme`).
+ * Every http(s) URL in free text, in order, fully resolved. Duplicate
+ * spellings are kept (spans matter); dedupe is one line on `key`.
  */
-export function findUrls(text: string, opts?: FindUrlsOptions): FoundUrl[] {
-	const out: FoundUrl[] = [];
+export function urlsIn(text: string, opts?: UrlsInOptions): Url[] {
+	const out: Url[] = [];
 	for (const link of find(text, "url", { defaultProtocol: "https" })) {
 		// href === value exactly when the text already carried a scheme; otherwise
 		// the scanner built href by prepending defaultProtocol onto the bare match.
@@ -73,18 +91,14 @@ export function findUrls(text: string, opts?: FindUrlsOptions): FoundUrl[] {
 		const u = parseHttp(link.href);
 		if (!u) continue; // a non-http scheme the scanner knows; not our job
 		deleteTracking(u, opts);
-		out.push({ url: u.toString(), start: link.start, end: link.end, hadScheme });
+		out.push(resolveUrl(u, { raw: link.value, start: link.start, end: link.end, hadScheme }));
 	}
 	return out;
 }
 
-/**
- * A user-pasted token as one CLEAN http(s) URL, or null: {@link findUrls}
- * over the token, first match. The one verb between "text someone typed"
- * and "a URL you can use".
- */
-export function asHttpUrl(token: string, opts?: FindUrlsOptions): string | null {
-	return findUrls(token, opts)[0]?.url ?? null;
+/** One pasted token / URL string as a resolved {@link Url}, or null. */
+export function urlOf(token: string, opts?: UrlsInOptions): Url | null {
+	return urlsIn(token, opts)[0] ?? null;
 }
 
 /** A URL's host without a leading www., or the input unchanged if it won't parse. */
@@ -119,20 +133,25 @@ export function cleanUrl(url: string, opts?: StripOptions): string {
 }
 
 /**
- * A canonical identity for the resource behind `url` — `host/path?sortedQuery`
- * — for cache keys and dedupe. Unparseable or non-http(s) input is returned
- * unchanged so it still keys consistently.
+ * A canonical identity for the resource behind `url`, for cache keys and
+ * dedupe. A recognized site's content collapses to its native id
+ * ("youtube:dQw4w9WgXcQ" — watch, youtu.be, shorts, live, embed, all one
+ * key); everything else canonicalizes to `host/path?sortedQuery`,
+ * scheme-agnostic, www-less, tracking-stripped, fragment-free. Unparseable
+ * or non-http(s) input is returned unchanged so it still keys consistently.
  */
 export function urlKey(url: string, opts?: StripOptions): string {
 	const u = parseHttp(url);
 	if (!u) return url;
+	const site = siteFor(normalizedHost(u));
+	const id = site?.id(u);
+	if (site && id) return site.key(id);
 	deleteTracking(u, opts);
 	u.searchParams.sort();
-	const host = u.hostname.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
 	const port = u.port ? `:${u.port}` : ""; // default ports never survive URL parsing
 	const path = u.pathname.replace(/\/+$/, "") || "/";
 	const query = u.searchParams.toString();
-	return `${host}${port}${path}${query ? `?${query}` : ""}`;
+	return `${normalizedHost(u)}${port}${path}${query ? `?${query}` : ""}`;
 }
 
 /**
@@ -153,6 +172,26 @@ export function isTrackingParam(name: string, host = ""): boolean {
 }
 
 // ── internals ───────────────────────────────────────────────────────────────
+
+/** Assemble a {@link Url} from an already-cleaned parsed URL + its text facts. */
+function resolveUrl(u: URL, text: { raw: string; start: number; end: number; hadScheme: boolean }): Url {
+	const host = normalizedHost(u);
+	const site = siteFor(host);
+	const id = site?.id(u) ?? null;
+	return {
+		...text,
+		href: u.toString(),
+		host,
+		site: site?.name ?? null,
+		id,
+		key: site && id ? site.key(id) : urlKey(u.toString()),
+	};
+}
+
+/** Lowercased hostname without a leading www. or a trailing dot. */
+function normalizedHost(u: URL): string {
+	return u.hostname.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+}
 
 interface CompiledProvider {
 	provider: TrackingProvider;
