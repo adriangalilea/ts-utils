@@ -497,17 +497,9 @@ Cloudflare is one adapter, not the architecture: `bot/worker` and `bot/storage-d
 - **Forget actually forgets.** `personalData.onForget` runs inside the same try as the session delete: your message logs/metrics/credit rows get wiped too, or the user is told it failed — never a partial erasure reading as success.
 - **The composer owns instance wiring.** Features still compose manually (below) when you need full control, but every "same instance" contract has one home.
 
-#### Threaded Mode — pin the `@gramio/contexts` fork
+#### Threaded Mode
 
-Telegram added [Threaded Mode](https://telegram.org/blog/threaded-conversations) for private chats (BotFather → Bot Settings → Threaded Mode). gramio's `SendMixin` skips auto-threading there, and `CallbackQueryContext` doesn't expose `threadId` at all. Fixes [PR'd upstream](https://github.com/gramiojs/contexts/pull/4); until merged, pin the fork in **your bot project's** workspace root (pnpm only honors overrides at the root, not transitively — and pnpm ≥11 reads them from `pnpm-workspace.yaml`, not `package.json`):
-
-```yaml
-# pnpm-workspace.yaml
-overrides:
-  "@gramio/contexts": "github:adriangalilea/contexts#local-build/auto-thread-private-chat-threaded-mode"
-```
-
-Then `pnpm install`. Every `ctx.send` / `ctx.sendDocument` / `ctx.reply` / etc. — including from callback handlers — will auto-forward `message_thread_id` and stay in the thread the message came from. If you don't use Threaded Mode, skip this.
+Telegram's [Threaded Mode](https://telegram.org/blog/threaded-conversations) for private chats (BotFather → Bot Settings → Threaded Mode) auto-threads out of the box: `@gramio/contexts` ≥0.9 (what gramio ≥0.12 resolves) forwards `message_thread_id` on every `ctx.send` / `ctx.sendDocument` / `ctx.reply` — including from callback handlers, which carry `threadId` too. No fork, no override.
 
 **Runs on Cloudflare Workers / bun / anywhere.** Every bot subpath below is import-safe off Node — no filesystem access, no `node:*` modules, no import-time side effects anywhere in its graph — **except `bot/kit`**, which deliberately owns the Node-only pieces (process signal handling in `gracefulStart`, kev-backed env reading in `adminContext`). `pnpm test:worker-safe` walks every graph and screams on regression.
 

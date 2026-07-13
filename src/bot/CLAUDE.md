@@ -113,12 +113,10 @@ gramio's `SendMixin` auto-forwards `message_thread_id` on every
 `ctx.threadId` is set — covers both flavours. No helper needed; just
 call `ctx.send(text)` and the reply lands in the right thread.
 
-> Until [gramiojs/contexts#4](https://github.com/gramiojs/contexts/pull/4)
-> is merged upstream, this repo pins `@gramio/contexts` to our fork
-> via `pnpm.overrides`. The fork drops the `isTopicMessage()` guard
-> that was previously preventing auto-thread under Threaded Mode,
-> and adds a missing `threadId` getter to `CallbackQueryContext`
-> (so callbacks tapped inside a thread also auto-route correctly).
+Threaded Mode auto-thread and `threadId`/`isTopicMessage()` on
+`CallbackQueryContext` are upstream since `@gramio/contexts` 0.9 (what
+gramio 0.12 resolves) — plain npm installs get both; no fork, no
+override.
 
 `bot/llm`'s `streamChatReply` calls `bot.api.sendMessageDraft` directly
 (drafts have no SendMixin helper for full-frame repaints), forwarding
@@ -747,8 +745,6 @@ final architecture.
   `acApprove`/`acDeny`/menu's `navCb`/etc. breaks inline buttons cached in
   old chat history. Stick to "add optional fields at the end" per gramio's
   [callback-data migration guide](https://gramio.dev/triggers/callback-query.html#schema-migrations).
-- **Drop the `@gramio/contexts` fork override** when
-  [PR #4](https://github.com/gramiojs/contexts/pull/4) merges upstream.
 
 ---
 
