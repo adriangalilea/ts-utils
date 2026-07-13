@@ -42,6 +42,7 @@ const SAFE_ENTRIES = [
 	"bot/inline-feedback.js",
 	"bot/user.js",
 	"bot/urls.js",
+	"bot/reactions.js",
 	"bot/session.js",
 	"bot/storage.js",
 	"bot/storage-d1.js",
