@@ -99,6 +99,38 @@ btc(0.00001234)     // "0.00001234 ₿"
 money(100, 'EUR')   // "€100.00"
 ```
 
+### URL (`url`)
+
+Tracking-parameter stripping and canonical cache keys, on the WHATWG URL API.
+The knowledge of WHICH params are tracking is vendored from
+[@protontech/tidy-url](https://www.npmjs.com/package/@protontech/tidy-url)
+(Proton's maintained fork of DrKain/tidy-url, MIT; refresh with
+`pnpm update-url-rules`) plus a small tested overlay: global rules only for
+unambiguous trackers (utm_*, fbclid, gclid, …), ambiguous names per-host —
+`si` is junk on YouTube/Spotify but `ref` on GitHub names a branch and
+survives. Two verbs for two jobs:
+
+```typescript
+import { cleanUrl, urlKey } from '@adriangalilea/utils/url'
+
+// The SAME resource minus tracking — safe to fetch, share, display.
+// Keeps scheme, www., param order, and the fragment (a real anchor).
+cleanUrl('https://www.youtube.com/watch?v=abc&t=120s&si=junk&utm_source=x')
+// 'https://www.youtube.com/watch?v=abc&t=120s'
+
+// The resource's IDENTITY — for cache keys and dedupe. Scheme-agnostic,
+// www-less lowercase host, no trailing slash, params stripped + sorted,
+// fragment dropped: every spelling of one page collides, different pages never do.
+urlKey('https://www.theverge.com/2026/1/1/story/?utm_source=twitter#comments')
+// 'theverge.com/2026/1/1/story'
+
+// App-specific junk rides along per call
+urlKey(url, { strip: ['session_id'] })
+```
+
+Unparseable or non-http(s) input passes through unchanged — these are hygiene
+functions over user-pasted text, not validators.
+
 ### CLI presentation (`cli`)
 
 Terminal output: aligned tables, key/value blocks, trees, and a semantic color

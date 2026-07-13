@@ -15,6 +15,7 @@ export * from "./universal/currency/index.js";
 export * from "./universal/format.js";
 // Universal utilities that work in browser
 export * from "./universal/log.js";
+export * from "./universal/url/index.js";
 
 // Note: file, dir, path, project, and kev are NOT exported here
 // because they depend on Node.js file system APIs

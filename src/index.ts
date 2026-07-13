@@ -23,3 +23,4 @@ export * from "./universal/currency/index.js";
 export * from "./universal/format.js";
 // Universal utilities - work everywhere
 export * from "./universal/log.js";
+export * from "./universal/url/index.js";

@@ -1,6 +1,6 @@
 {
 	"name": "@adriangalilea/utils",
-	"version": "2.9.0",
+	"version": "2.10.0",
 	"description": "TypeScript utilities - logger, currency, formatter, GramIO bot plugins, and more",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -23,6 +23,10 @@
 		"./format": {
 			"types": "./dist/universal/format.d.ts",
 			"default": "./dist/universal/format.js"
+		},
+		"./url": {
+			"types": "./dist/universal/url/index.d.ts",
+			"default": "./dist/universal/url/index.js"
 		},
 		"./log": {
 			"types": "./dist/universal/log.d.ts",
@@ -169,6 +173,7 @@
 		"test:browser": "open tests/browser-test.html",
 		"example": "tsx tests/example.ts",
 		"update-crypto": "tsx src/universal/currency/download-crypto-list.ts",
+		"update-url-rules": "tsx src/universal/url/update-rules.ts",
 		"type-check": "tsc --noEmit",
 		"lint": "biome lint",
 		"format": "biome format",
@@ -185,7 +190,8 @@
 		"test:language-picker": "tsx tests/language-picker-test.ts",
 		"test:llm": "tsx tests/llm-live-test.ts",
 		"test:tg-md": "tsx tests/tg-md-test.ts",
-		"test:self-echo": "tsx tests/self-echo-test.ts"
+		"test:self-echo": "tsx tests/self-echo-test.ts",
+		"test:url": "tsx tests/url-test.ts"
 	},
 	"keywords": [
 		"typescript",

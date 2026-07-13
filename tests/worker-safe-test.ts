@@ -53,6 +53,7 @@ const SAFE_ENTRIES = [
 	"tg-md/index.js",
 	"offensive.js",
 	"universal/log.js",
+	"universal/url/index.js",
 	"browser.js",
 ];
 
