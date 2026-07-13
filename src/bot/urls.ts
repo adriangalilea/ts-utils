@@ -28,12 +28,15 @@ export interface EntityLike {
 	url?: string;
 }
 
-/** The slice of a Telegram message this module reads: text or caption, with its entities. */
+/** The slice of a Telegram message this module reads: text or caption, with its entities,
+ *  plus the link-preview attachment (both gramio's camelCase and the raw API's snake_case). */
 export interface MessageLike {
 	text?: string;
 	caption?: string;
 	entities?: readonly EntityLike[];
 	captionEntities?: readonly EntityLike[];
+	linkPreviewOptions?: { url?: string };
+	link_preview_options?: { url?: string };
 }
 
 /** The message's text (or media caption), with the entity set that indexes it. */
@@ -64,6 +67,17 @@ export function urlsInMessage(message: MessageLike, opts?: UrlsInOptions): Url[]
 			start: entity.offset,
 			end: entity.offset + entity.length,
 		});
+	}
+	// Third platform-parsed container: the link-preview attachment. Some messages (forwarded
+	// channel posts especially) carry their URL ONLY here — no text, no entities. It has no
+	// span in the text, so it gets a zero-width span at the end: span-cutting consumers are
+	// untouched, and identity consumers dedupe it against a text twin by `key`.
+	const preview = message.linkPreviewOptions?.url ?? message.link_preview_options?.url;
+	if (preview) {
+		const resolved = urlOf(preview, opts);
+		if (resolved && !out.some((u) => u.key === resolved.key)) {
+			out.push({ ...resolved, raw: preview, start: text.length, end: text.length });
+		}
 	}
 	return out.sort((a, b) => a.start - b.start);
 }

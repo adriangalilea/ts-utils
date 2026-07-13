@@ -55,6 +55,17 @@ assert.equal(
 	});
 	assert.equal(u.raw, "this");
 }
+// The link-preview attachment is a URL source of its own (forwarded channel posts often
+// carry the URL ONLY there) — zero-width span, deduped by key against a text twin.
+{
+	const urls = urlsInMessage({ text: "check my latest post", linkPreviewOptions: { url: "https://a.com/post?utm_source=x" } });
+	assert.deepEqual(urls.map((u) => [u.href, u.start, u.end]), [["https://a.com/post", 20, 20]]);
+}
+assert.equal(
+	urlsInMessage({ text: "https://a.com/post", link_preview_options: { url: "https://a.com/post/" } }).length,
+	1, // preview twin of the visible url dedupes by key
+);
+
 // Non-link entities are ignored; a plain message scans as before
 assert.deepEqual(
 	urlsInMessage({ text: "just https://a.com/x", entities: [{ type: "bold", offset: 0, length: 4 }] }).map((u) => u.href),
