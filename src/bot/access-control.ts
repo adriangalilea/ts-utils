@@ -1636,11 +1636,13 @@ const mainView = (
 		`👑 ${say({ en: "Defaults", es: "Defaults" }, lang)}: ${defaults.size} (hardcoded)`,
 	].join("\n");
 
+	// One bucket per row scans better; only the meta pair (refresh/close) shares one.
 	const keyboard = new InlineKeyboard()
 		.text(
 			`✅ ${approved} (${count("approved")})`,
 			acView.pack({ v: "approved" }),
 		)
+		.row()
 		.text(`⏳ ${pending} (${count("pending")})`, acView.pack({ v: "pending" }))
 		.row()
 		.text(`❌ ${denied} (${count("denied")})`, acView.pack({ v: "denied" }))
