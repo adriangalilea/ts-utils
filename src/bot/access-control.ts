@@ -1363,7 +1363,11 @@ export const accessControl = (opts: AccessControlOptions) => {
 			// The add event: approve on the spot when an admin/default did the
 			// adding; leave on sight when the room was denied; else go pending
 			// and ask. Removal clears the record — deny memory survives.
-			.on("my_chat_member", async (ctx) => {
+			// gramio .on handlers are middleware: this one passes the event
+			// THROUGH (next) on every path except the denied leave-on-sight,
+			// so the consumer's own my_chat_member handler (group registry,
+			// join notifications) keeps running.
+			.on("my_chat_member", async (ctx, next) => {
 				const c = ctx as unknown as {
 					chat?: { id?: number; type?: string; title?: string };
 					from?: {
@@ -1379,7 +1383,7 @@ export const accessControl = (opts: AccessControlOptions) => {
 					bot: unknown;
 				};
 				const chat = gatedChatOf(c);
-				if (!chat) return;
+				if (!chat) return next();
 				const inRoom = (s: string | undefined) =>
 					s === "member" || s === "administrator" || s === "restricted";
 				const wasIn = inRoom(c.oldChatMember?.status);
@@ -1395,9 +1399,9 @@ export const accessControl = (opts: AccessControlOptions) => {
 						await dropGroup(storage, ctx, chat.id);
 						await indexRemove(storage, groupIndexKey(ctx), chat.id);
 					}
-					return;
+					return next();
 				}
-				if (!nowIn || wasIn) return; // a rights change, not an add
+				if (!nowIn || wasIn) return next(); // a rights change, not an add
 
 				if (rec?.status === "denied") {
 					// Re-added while denied: leave on sight, tell the admin (throttled).
@@ -1430,9 +1434,11 @@ export const accessControl = (opts: AccessControlOptions) => {
 							})
 							.catch(() => {});
 					}
+					// The ONE path that swallows the event: the add was rejected,
+					// downstream must not greet a room the bot is leaving.
 					return;
 				}
-				if (rec?.status === "approved") return;
+				if (rec?.status === "approved") return next();
 
 				const addedBy: AccessUser | undefined =
 					c.from?.id !== undefined
@@ -1470,13 +1476,14 @@ export const accessControl = (opts: AccessControlOptions) => {
 						chatId: chat.id,
 						approvedBy: addedBy?.id ?? 0,
 					});
-					return;
+					return next();
 				}
 				await requestGroupAccess(
 					ctx as unknown as BotCtx & { adminId: number },
 					chat,
 					addedBy,
 				);
+				return next();
 			})
 			.callbackQuery(acGroupApprove, async (ctx) => {
 				const aLang = await adminGuard(ctx);
