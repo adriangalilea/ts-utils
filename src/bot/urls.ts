@@ -88,6 +88,28 @@ export function isCommandMessage(message: MessageLike): boolean {
 	return entities.some((e) => e.type === "bot_command" && e.offset === 0);
 }
 
+/** The visible command token of a leading `bot_command` entity, without any `@botname` suffix
+ *  (`/summary@my_bot …` → `/summary`). Null for ordinary text. */
+export function commandToken(message: MessageLike): string | null {
+	const { text, entities } = messageTextAndEntities(message);
+	const entity = entities.find((e) => e.type === "bot_command" && e.offset === 0);
+	if (!entity) return null;
+	const token = text.slice(0, entity.length).split("@", 1)[0];
+	return token || "/?";
+}
+
+/** The bot a leading command is explicitly addressed to (`/cmd@BotName` → `botname`), or null for
+ *  a bare `/cmd`. Lowercased — Telegram usernames are case-insensitive. This is the addressing
+ *  gate for command replies in groups: a bare command may belong to any bot in the room, and one
+ *  addressed elsewhere never concerns yours — answering it is spam. */
+export function commandAddressee(message: MessageLike): string | null {
+	const { text, entities } = messageTextAndEntities(message);
+	const entity = entities.find((e) => e.type === "bot_command" && e.offset === 0);
+	if (!entity) return null;
+	const addressee = text.slice(0, entity.length).split("@", 2)[1];
+	return addressee ? addressee.toLowerCase() : null;
+}
+
 /**
  * The message text with the entity spans `shouldCut` selects replaced by a
  * space (offsets are honored exactly, so nested/adjacent formatting never

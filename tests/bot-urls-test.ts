@@ -7,7 +7,14 @@
  *   pnpm test:bot-urls
  */
 import { strict as assert } from "node:assert";
-import { cutEntities, isCommandMessage, messageTextAndEntities, urlsInMessage } from "../src/bot/urls.js";
+import {
+	commandAddressee,
+	commandToken,
+	cutEntities,
+	isCommandMessage,
+	messageTextAndEntities,
+	urlsInMessage,
+} from "../src/bot/urls.js";
 
 // ── urlsInMessage: visible text + hidden text_link hrefs, one Url shape ─────
 
@@ -108,4 +115,33 @@ assert.deepEqual(messageTextAndEntities({ text: "a", entities: [{ type: "bold", 
 assert.equal(messageTextAndEntities({ caption: "c" }).text, "c");
 assert.equal(messageTextAndEntities({}).text, "");
 
-console.log("✓ bot-urls-test: urlsInMessage/isCommandMessage/cutEntities hold");
+// ── commandToken / commandAddressee: token and @addressee off the entity, never regex ──
+
+{
+	// Bare command: token, no addressee.
+	const bare = { text: "/ch", entities: [{ type: "bot_command", offset: 0, length: 3 }] };
+	assert.equal(commandToken(bare), "/ch");
+	assert.equal(commandAddressee(bare), null);
+}
+{
+	// Addressed to another bot: the addressee names it, lowercased (usernames are case-insensitive).
+	const other = { text: "/ch@CryptoWhaleBot", entities: [{ type: "bot_command", offset: 0, length: 18 }] };
+	assert.equal(commandToken(other), "/ch");
+	assert.equal(commandAddressee(other), "cryptowhalebot");
+}
+{
+	// Addressed with trailing payload: the entity bounds the split, the payload never leaks in.
+	const addressed = { text: "/clean@my_bot payload", entities: [{ type: "bot_command", offset: 0, length: 13 }] };
+	assert.equal(commandToken(addressed), "/clean");
+	assert.equal(commandAddressee(addressed), "my_bot");
+}
+{
+	// Ordinary text, and a command NOT at offset 0: neither parses as a leading command.
+	assert.equal(commandToken({ text: "hola", entities: [] }), null);
+	assert.equal(commandAddressee({ text: "hola", entities: [] }), null);
+	const mid = { text: "try /help later", entities: [{ type: "bot_command", offset: 4, length: 5 }] };
+	assert.equal(commandToken(mid), null);
+	assert.equal(commandAddressee(mid), null);
+}
+
+console.log("✓ bot-urls-test: urlsInMessage/isCommandMessage/commandToken/commandAddressee/cutEntities hold");
