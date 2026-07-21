@@ -37,7 +37,7 @@ import { renderAnnouncement, renderAnnouncementBodies, section } from "../src/bo
 			"",
 			"- Less error spam in groups",
 			"",
-			"_Questions? Feedback? Feel free to reach out!_",
+			"*Questions? Feedback? Feel free to reach out!*",
 			"",
 			"· @example",
 		].join("\n"),

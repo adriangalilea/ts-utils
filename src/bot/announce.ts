@@ -2,7 +2,7 @@
  * The house announcement ("news") template for bot mass messages, as a first-class structure:
  * compose an {@link Announcement} once, render it per language, and hand the bodies to a
  * polyglot broadcast engine. The render targets the common Telegram-markdown subset
- * (`# heading` → bold, `- ` bullets, `_…_` italics) most bot pipelines already convert to
+ * (`# heading` → bold, `- ` bullets, `*…*` italics) most bot pipelines already convert to
  * Telegram HTML — no parse_mode assumptions live here.
  *
  * Shape (each section optional, order preserved):
@@ -59,7 +59,7 @@ export function renderAnnouncement(a: Announcement): string {
 		blocks.push(`${s.emoji} **${s.title}**`);
 		blocks.push(s.items.map((i) => `- ${i}`).join("\n"));
 	}
-	if (a.closer) blocks.push(`_${a.closer}_`);
+	if (a.closer) blocks.push(`*${a.closer}*`);
 	if (a.signature) blocks.push(`· ${a.signature}`);
 	return blocks.join("\n\n");
 }
