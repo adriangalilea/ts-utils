@@ -419,7 +419,9 @@ export function addLanguageRows(
 		kb.text(
 			labelFor(code),
 			opts.pack(code),
-			code === opts.active ? { style: opts.activeStyle ?? "primary" } : undefined,
+			code === opts.active
+				? { style: opts.activeStyle ?? "primary" }
+				: undefined,
 		);
 	});
 	return kb;

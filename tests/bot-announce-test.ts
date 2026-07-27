@@ -6,7 +6,11 @@
  *   pnpm test:bot-announce
  */
 import { strict as assert } from "node:assert";
-import { renderAnnouncement, renderAnnouncementBodies, section } from "../src/bot/announce.js";
+import {
+	renderAnnouncement,
+	renderAnnouncementBodies,
+	section,
+} from "../src/bot/announce.js";
 
 {
 	const md = renderAnnouncement({
@@ -57,7 +61,9 @@ import { renderAnnouncement, renderAnnouncementBodies, section } from "../src/bo
 		es: { banner: "Noticias", sections: [section.info(["hola"])] },
 	});
 	assert.ok(bodies.en.includes("hi") && bodies.es.includes("hola"));
-	assert.throws(() => renderAnnouncementBodies({ es: { banner: "x", sections: [] } }));
+	assert.throws(() =>
+		renderAnnouncementBodies({ es: { banner: "x", sections: [] } }),
+	);
 }
 
 console.log("✓ bot-announce-test: the news template holds its shape");

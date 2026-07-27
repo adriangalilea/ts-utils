@@ -21,17 +21,44 @@ function fakeServer(ids: number[], { webhookUrl = "" } = {}) {
 		const params = JSON.parse(String(init?.body ?? "{}"));
 		if (method === "getWebhookInfo") {
 			events.push("webhookInfo");
-			return new Response(JSON.stringify({ ok: true, result: { url: webhookUrl, pending_update_count: queue.length } }));
+			return new Response(
+				JSON.stringify({
+					ok: true,
+					result: { url: webhookUrl, pending_update_count: queue.length },
+				}),
+			);
 		}
 		if (method === "getUpdates") {
 			if (webhookUrl) {
-				return new Response(JSON.stringify({ ok: false, description: "terminated by setWebhook", error_code: 409 }));
+				return new Response(
+					JSON.stringify({
+						ok: false,
+						description: "terminated by setWebhook",
+						error_code: 409,
+					}),
+				);
 			}
-			if (params.offset !== undefined) queue = queue.filter((u) => u.update_id >= params.offset);
-			events.push(params.offset === undefined ? "getUpdates(no offset)" : `getUpdates(offset=${params.offset})`);
-			return new Response(JSON.stringify({ ok: true, result: queue.slice(0, params.limit ?? 100) }));
+			if (params.offset !== undefined)
+				queue = queue.filter((u) => u.update_id >= params.offset);
+			events.push(
+				params.offset === undefined
+					? "getUpdates(no offset)"
+					: `getUpdates(offset=${params.offset})`,
+			);
+			return new Response(
+				JSON.stringify({
+					ok: true,
+					result: queue.slice(0, params.limit ?? 100),
+				}),
+			);
 		}
-		return new Response(JSON.stringify({ ok: false, description: "unknown method", error_code: 400 }));
+		return new Response(
+			JSON.stringify({
+				ok: false,
+				description: "unknown method",
+				error_code: 400,
+			}),
+		);
 	}) as typeof fetch;
 	return { fetchImpl, events, size: () => queue.length };
 }
@@ -54,7 +81,9 @@ function fakeServer(ids: number[], { webhookUrl = "" } = {}) {
 // ── peek with a webhook registered: count still reported, head empty, no 409 ─
 
 {
-	const server = fakeServer([1, 2], { webhookUrl: "https://example.invalid/hook" });
+	const server = fakeServer([1, 2], {
+		webhookUrl: "https://example.invalid/hook",
+	});
 	const q = updateQueue({ token: "T", fetch: server.fetchImpl });
 	const peeked = await q.peek();
 	assert.equal(peeked.webhookUrl, "https://example.invalid/hook");
@@ -105,7 +134,12 @@ function fakeServer(ids: number[], { webhookUrl = "" } = {}) {
 	);
 	assert.deepEqual(persisted, [1]);
 	assert.equal(server.size(), 1); // update 2 was never confirmed — still server-side
-	await q.drain({ limit: 1, timeoutS: 0, quietPolls: 1, onBatch: (batch) => persisted.push(...batch.map((u) => u.update_id)) });
+	await q.drain({
+		limit: 1,
+		timeoutS: 0,
+		quietPolls: 1,
+		onBatch: (batch) => persisted.push(...batch.map((u) => u.update_id)),
+	});
 	assert.deepEqual(persisted, [1, 2]); // nothing lost across the crash
 }
 
@@ -114,19 +148,33 @@ function fakeServer(ids: number[], { webhookUrl = "" } = {}) {
 {
 	const server = fakeServer([]);
 	const q = updateQueue({ token: "T", fetch: server.fetchImpl });
-	await q.drain({ timeoutS: 0, quietPolls: 3, onBatch: () => assert.fail("no batches exist") });
-	assert.equal(server.events.filter((e) => e === "getUpdates(no offset)").length, 3);
+	await q.drain({
+		timeoutS: 0,
+		quietPolls: 3,
+		onBatch: () => assert.fail("no batches exist"),
+	});
+	assert.equal(
+		server.events.filter((e) => e === "getUpdates(no offset)").length,
+		3,
+	);
 }
 
 // ── 409 (webhook or competing poller) is a typed error, never a silent retry ─
 
 {
-	const server = fakeServer([1], { webhookUrl: "https://example.invalid/hook" });
+	const server = fakeServer([1], {
+		webhookUrl: "https://example.invalid/hook",
+	});
 	const q = updateQueue({ token: "T", fetch: server.fetchImpl });
 	await assert.rejects(
 		q.drain({ timeoutS: 0, onBatch: () => {} }),
-		(err: unknown) => err instanceof SourcedError && err.status === 409 && err.source === "telegram",
+		(err: unknown) =>
+			err instanceof SourcedError &&
+			err.status === 409 &&
+			err.source === "telegram",
 	);
 }
 
-console.log("✓ bot-updates-test: peek is free, drain is write-before-confirm, silence and 409 behave");
+console.log(
+	"✓ bot-updates-test: peek is free, drain is write-before-confirm, silence and 409 behave",
+);

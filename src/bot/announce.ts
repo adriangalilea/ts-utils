@@ -46,9 +46,21 @@ export interface Announcement {
 
 /** The three canonical sections, so every announcement wears the same iconography. */
 export const section = {
-	info: (items: string[], title = "Info"): AnnouncementSection => ({ emoji: "💬", title, items }),
-	features: (items: string[], title = "New Features"): AnnouncementSection => ({ emoji: "✨", title, items }),
-	fixes: (items: string[], title = "Fixes"): AnnouncementSection => ({ emoji: "🐛", title, items }),
+	info: (items: string[], title = "Info"): AnnouncementSection => ({
+		emoji: "💬",
+		title,
+		items,
+	}),
+	features: (items: string[], title = "New Features"): AnnouncementSection => ({
+		emoji: "✨",
+		title,
+		items,
+	}),
+	fixes: (items: string[], title = "Fixes"): AnnouncementSection => ({
+		emoji: "🐛",
+		title,
+		items,
+	}),
 };
 
 /** Render one language's announcement to the Telegram-markdown subset. */
@@ -71,9 +83,13 @@ export function renderAnnouncement(a: Announcement): string {
 export type AnnouncementBodies = Record<string, string>;
 
 /** Render a per-language map of announcements into broadcast bodies. Throws without "en". */
-export function renderAnnouncementBodies(byLanguage: Record<string, Announcement>): AnnouncementBodies {
-	if (!byLanguage.en) throw new Error("announcement bodies need an 'en' fallback");
+export function renderAnnouncementBodies(
+	byLanguage: Record<string, Announcement>,
+): AnnouncementBodies {
+	if (!byLanguage.en)
+		throw new Error("announcement bodies need an 'en' fallback");
 	const bodies: AnnouncementBodies = {};
-	for (const [lang, a] of Object.entries(byLanguage)) bodies[lang] = renderAnnouncement(a);
+	for (const [lang, a] of Object.entries(byLanguage))
+		bodies[lang] = renderAnnouncement(a);
 	return bodies;
 }

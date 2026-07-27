@@ -65,14 +65,17 @@ export interface ReactionHandle<S extends string> {
 const MAX_TRACKED_MESSAGES = 512;
 
 /** Declare the reaction vocabulary once; get per-message arbitrated handles. */
-export function reactionPolicy<S extends Record<string, ReactionStateSpec>>(states: S) {
+export function reactionPolicy<S extends Record<string, ReactionStateSpec>>(
+	states: S,
+) {
 	const current = new Map<string, keyof S & string>();
 
 	return {
 		/** The arbitrated handle for THIS ctx's message (keyed chat:message). */
 		for(context: unknown): ReactionHandle<keyof S & string> {
 			const ctx = context as ReactionCtx;
-			if (typeof ctx.react !== "function") throw new Error("reactionPolicy.for: ctx has no react()");
+			if (typeof ctx.react !== "function")
+				throw new Error("reactionPolicy.for: ctx has no react()");
 			const chat = ctx.chatId ?? ctx.chat?.id;
 			const key = `${chat}:${ctx.id}`;
 			return {
@@ -83,10 +86,12 @@ export function reactionPolicy<S extends Record<string, ReactionStateSpec>>(stat
 					const prev = current.get(key);
 					if (prev === next) return true; // idempotent
 					if (prev !== undefined && spec.rank < states[prev].rank) return false; // outranked
-					if (!current.has(key) && current.size >= MAX_TRACKED_MESSAGES) current.clear();
+					if (!current.has(key) && current.size >= MAX_TRACKED_MESSAGES)
+						current.clear();
 					current.set(key, next);
 					// Same emoji under a new state: bookkeeping only — no API call, no flicker.
-					if (prev !== undefined && states[prev].emoji === spec.emoji) return true;
+					if (prev !== undefined && states[prev].emoji === spec.emoji)
+						return true;
 					await ctx.react(spec.emoji).catch(() => {});
 					return true;
 				},

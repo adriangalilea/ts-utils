@@ -55,7 +55,9 @@ function youtubeIdFromUrl(url: URL): string | null {
 	}
 	if (!isYouTubeHost(host)) return null;
 
-	const queryId = validYouTubeId(url.searchParams.get("v") ?? url.searchParams.get("video_id"));
+	const queryId = validYouTubeId(
+		url.searchParams.get("v") ?? url.searchParams.get("video_id"),
+	);
 	if (queryId) return queryId;
 
 	const [kind, id] = url.pathname.split("/").filter(Boolean);
@@ -133,8 +135,12 @@ export function youtubeThumbnailUrl(idOrUrl: string): string | null {
  */
 export function youtubeTimestampUrl(idOrUrl: string, seconds: number): string {
 	if (!youtubeVideoId(idOrUrl)) return idOrUrl;
-	const source = YOUTUBE_ID.test(idOrUrl.trim()) ? youtube.canonicalUrl(idOrUrl.trim()) : idOrUrl;
-	const offset = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+	const source = YOUTUBE_ID.test(idOrUrl.trim())
+		? youtube.canonicalUrl(idOrUrl.trim())
+		: idOrUrl;
+	const offset = Number.isFinite(seconds)
+		? Math.max(0, Math.floor(seconds))
+		: 0;
 	try {
 		const url = new URL(source);
 		if (url.protocol !== "http:" && url.protocol !== "https:") return idOrUrl;

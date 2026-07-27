@@ -6,7 +6,12 @@
 		"useIgnoreFile": true
 	},
 	"files": {
-		"includes": ["**", "!!**/dist"]
+		"includes": [
+			"**",
+			"!**/dist",
+			"!src/universal/url/tidy-rules.ts",
+			"!src/universal/currency/crypto-symbols-data.ts"
+		]
 	},
 	"formatter": {
 		"enabled": true,

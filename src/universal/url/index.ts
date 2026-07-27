@@ -42,17 +42,21 @@ import { OVERLAY_RULES } from "./overlay.js";
 import { siteFor } from "./sites.js";
 import { TIDY_RULES, type TrackingProvider } from "./tidy-rules.js";
 
-export { TIDY_RULES, TIDY_VERSION, type TrackingProvider } from "./tidy-rules.js";
 export { OVERLAY_RULES } from "./overlay.js";
 export {
 	SITES,
+	type SiteAdapter,
 	siteFor,
 	youtubeThumbnailUrl,
 	youtubeTimestampUrl,
 	youtubeUrl,
 	youtubeVideoId,
-	type SiteAdapter,
 } from "./sites.js";
+export {
+	TIDY_RULES,
+	TIDY_VERSION,
+	type TrackingProvider,
+} from "./tidy-rules.js";
 
 export interface StripOptions {
 	/** Extra param names to strip (compared lowercased), for app-specific junk. */
@@ -99,7 +103,14 @@ export function urlsIn(text: string, opts?: UrlsInOptions): Url[] {
 		const u = parseHttp(link.href);
 		if (!u) continue; // a non-http scheme the scanner knows; not our job
 		deleteTracking(u, opts);
-		out.push(resolveUrl(u, { raw: link.value, start: link.start, end: link.end, hadScheme }));
+		out.push(
+			resolveUrl(u, {
+				raw: link.value,
+				start: link.start,
+				end: link.end,
+				hadScheme,
+			}),
+		);
 	}
 	return out;
 }
@@ -124,7 +135,10 @@ export function hostOf(url: string): string {
  * matching semantics, the same rule cookies use.
  */
 export function hostMatches(host: string, domain: string): boolean {
-	const h = host.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+	const h = host
+		.toLowerCase()
+		.replace(/^www\./, "")
+		.replace(/\.$/, "");
 	const d = domain.toLowerCase();
 	return h === d || h.endsWith(`.${d}`);
 }
@@ -182,7 +196,10 @@ export function isTrackingParam(name: string, host = ""): boolean {
 // ── internals ───────────────────────────────────────────────────────────────
 
 /** Assemble a {@link Url} from an already-cleaned parsed URL + its text facts. */
-function resolveUrl(u: URL, text: { raw: string; start: number; end: number; hadScheme: boolean }): Url {
+function resolveUrl(
+	u: URL,
+	text: { raw: string; start: number; end: number; hadScheme: boolean },
+): Url {
 	const host = normalizedHost(u);
 	const site = siteFor(host);
 	const id = site?.id(u) ?? null;
@@ -198,7 +215,10 @@ function resolveUrl(u: URL, text: { raw: string; start: number; end: number; had
 
 /** Lowercased hostname without a leading www. or a trailing dot. */
 function normalizedHost(u: URL): string {
-	return u.hostname.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+	return u.hostname
+		.toLowerCase()
+		.replace(/^www\./, "")
+		.replace(/\.$/, "");
 }
 
 interface CompiledProvider {
@@ -231,7 +251,11 @@ function parseHttp(url: string): URL | null {
 }
 
 /** Fold one provider's rules/allow into the doomed/allowed sets (lowercased). */
-function collect(provider: TrackingProvider, doomed: Set<string>, allowed: Set<string>): void {
+function collect(
+	provider: TrackingProvider,
+	doomed: Set<string>,
+	allowed: Set<string>,
+): void {
 	for (const r of provider.rules) doomed.add(r.toLowerCase());
 	for (const a of provider.allow ?? []) allowed.add(a.toLowerCase());
 }

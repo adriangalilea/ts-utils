@@ -16,7 +16,12 @@
  * {@link EntityLike} structurally (type/offset/length/url getters), as does
  * the raw Bot API object.
  */
-import { type Url, type UrlsInOptions, urlOf, urlsIn } from "../universal/url/index.js";
+import {
+	type Url,
+	type UrlsInOptions,
+	urlOf,
+	urlsIn,
+} from "../universal/url/index.js";
 
 /** The slice of a Telegram MessageEntity this module reads (raw API object or gramio class alike). */
 export interface EntityLike {
@@ -40,7 +45,10 @@ export interface MessageLike {
 }
 
 /** The message's text (or media caption), with the entity set that indexes it. */
-export function messageTextAndEntities(message: MessageLike): { text: string; entities: readonly EntityLike[] } {
+export function messageTextAndEntities(message: MessageLike): {
+	text: string;
+	entities: readonly EntityLike[];
+} {
 	return message.text !== undefined
 		? { text: message.text, entities: message.entities ?? [] }
 		: { text: message.caption ?? "", entities: message.captionEntities ?? [] };
@@ -54,7 +62,10 @@ export function messageTextAndEntities(message: MessageLike): { text: string; en
  * the link, not as the user's own words. text_link URLs always carry a
  * scheme, so `requireScheme` never drops them.
  */
-export function urlsInMessage(message: MessageLike, opts?: UrlsInOptions): Url[] {
+export function urlsInMessage(
+	message: MessageLike,
+	opts?: UrlsInOptions,
+): Url[] {
 	const { text, entities } = messageTextAndEntities(message);
 	const out = urlsIn(text, opts);
 	for (const entity of entities) {
@@ -72,11 +83,17 @@ export function urlsInMessage(message: MessageLike, opts?: UrlsInOptions): Url[]
 	// channel posts especially) carry their URL ONLY here — no text, no entities. It has no
 	// span in the text, so it gets a zero-width span at the end: span-cutting consumers are
 	// untouched, and identity consumers dedupe it against a text twin by `key`.
-	const preview = message.linkPreviewOptions?.url ?? message.link_preview_options?.url;
+	const preview =
+		message.linkPreviewOptions?.url ?? message.link_preview_options?.url;
 	if (preview) {
 		const resolved = urlOf(preview, opts);
 		if (resolved && !out.some((u) => u.key === resolved.key)) {
-			out.push({ ...resolved, raw: preview, start: text.length, end: text.length });
+			out.push({
+				...resolved,
+				raw: preview,
+				start: text.length,
+				end: text.length,
+			});
 		}
 	}
 	return out.sort((a, b) => a.start - b.start);
@@ -92,7 +109,9 @@ export function isCommandMessage(message: MessageLike): boolean {
  *  (`/summary@my_bot …` → `/summary`). Null for ordinary text. */
 export function commandToken(message: MessageLike): string | null {
 	const { text, entities } = messageTextAndEntities(message);
-	const entity = entities.find((e) => e.type === "bot_command" && e.offset === 0);
+	const entity = entities.find(
+		(e) => e.type === "bot_command" && e.offset === 0,
+	);
 	if (!entity) return null;
 	const token = text.slice(0, entity.length).split("@", 1)[0];
 	return token || "/?";
@@ -104,7 +123,9 @@ export function commandToken(message: MessageLike): string | null {
  *  addressed elsewhere never concerns yours — answering it is spam. */
 export function commandAddressee(message: MessageLike): string | null {
 	const { text, entities } = messageTextAndEntities(message);
-	const entity = entities.find((e) => e.type === "bot_command" && e.offset === 0);
+	const entity = entities.find(
+		(e) => e.type === "bot_command" && e.offset === 0,
+	);
 	if (!entity) return null;
 	const addressee = text.slice(0, entity.length).split("@", 2)[1];
 	return addressee ? addressee.toLowerCase() : null;

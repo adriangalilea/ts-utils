@@ -55,13 +55,21 @@ export function updateQueue(options: UpdateQueueOptions) {
 	const doFetch = options.fetch ?? globalThis.fetch;
 	const root = options.apiRoot ?? "https://api.telegram.org";
 
-	const call = async <T>(method: string, params?: Record<string, unknown>): Promise<T> => {
+	const call = async <T>(
+		method: string,
+		params?: Record<string, unknown>,
+	): Promise<T> => {
 		const res = await doFetch(`${root}/bot${options.token}/${method}`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify(params ?? {}),
 		});
-		const body = (await res.json()) as { ok: boolean; result?: T; description?: string; error_code?: number };
+		const body = (await res.json()) as {
+			ok: boolean;
+			result?: T;
+			description?: string;
+			error_code?: number;
+		};
 		if (!body.ok) {
 			throw new SourcedError({
 				source: "telegram",
@@ -84,17 +92,23 @@ export function updateQueue(options: UpdateQueueOptions) {
 
 		/** Updates waiting server-side, without touching any of them. */
 		async count(): Promise<number> {
-			const info = await call<{ pending_update_count?: number }>("getWebhookInfo");
+			const info = await call<{ pending_update_count?: number }>(
+				"getWebhookInfo",
+			);
 			return info.pending_update_count ?? 0;
 		},
 
 		/** Non-destructive look: webhook state, pending count, and the first `limit` updates,
 		 *  verbatim. Confirms NOTHING — repeat as often as you like. */
 		async peek({ limit = 1 }: { limit?: number } = {}): Promise<QueuePeek> {
-			const info = await call<{ url?: string; pending_update_count?: number }>("getWebhookInfo");
+			const info = await call<{ url?: string; pending_update_count?: number }>(
+				"getWebhookInfo",
+			);
 			const webhookUrl = info.url ? info.url : null;
 			// With a webhook registered getUpdates would 409; the count already tells the story.
-			const head = webhookUrl ? [] : await call<TelegramUpdate[]>("getUpdates", { limit, timeout: 0 });
+			const head = webhookUrl
+				? []
+				: await call<TelegramUpdate[]>("getUpdates", { limit, timeout: 0 });
 			return { webhookUrl, pending: info.pending_update_count ?? 0, head };
 		},
 
@@ -122,7 +136,11 @@ export function updateQueue(options: UpdateQueueOptions) {
 			let lastUpdateId: number | undefined;
 			let quiet = 0;
 			while (quiet < quietPolls) {
-				const batch = await call<TelegramUpdate[]>("getUpdates", { offset, limit, timeout: timeoutS });
+				const batch = await call<TelegramUpdate[]>("getUpdates", {
+					offset,
+					limit,
+					timeout: timeoutS,
+				});
 				if (batch.length === 0) {
 					quiet += 1;
 					continue;

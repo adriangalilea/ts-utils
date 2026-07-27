@@ -31,31 +31,52 @@ interface UpstreamRule {
 	exclude?: RegExp[];
 }
 
-function fetchUpstream(): { rules: UpstreamRule[]; version: string; license: string } {
+function fetchUpstream(): {
+	rules: UpstreamRule[];
+	version: string;
+	license: string;
+} {
 	const dir = mkdtempSync(join(tmpdir(), "tidy-url-"));
 	console.log(`Packing ${PACKAGE}@latest ...`);
-	const tarball = execSync(`npm pack ${PACKAGE}@latest --pack-destination ${JSON.stringify(dir)}`, {
-		encoding: "utf8",
-	})
+	const tarball = execSync(
+		`npm pack ${PACKAGE}@latest --pack-destination ${JSON.stringify(dir)}`,
+		{
+			encoding: "utf8",
+		},
+	)
 		.trim()
 		.split("\n")
 		.at(-1);
 	if (!tarball) throw new Error("npm pack produced no tarball name");
-	execSync(`tar xzf ${JSON.stringify(join(dir, tarball))} -C ${JSON.stringify(dir)}`);
+	execSync(
+		`tar xzf ${JSON.stringify(join(dir, tarball))} -C ${JSON.stringify(dir)}`,
+	);
 
-	const pkg = JSON.parse(readFileSync(join(dir, "package/package.json"), "utf8")) as {
+	const pkg = JSON.parse(
+		readFileSync(join(dir, "package/package.json"), "utf8"),
+	) as {
 		version: string;
 		license: string;
 	};
 	// data/rules.js is CommonJS (`module.exports = [...]`) with RegExp literals;
 	// requiring it yields real RegExp objects — no parsing of our own.
-	const rules = createRequire(import.meta.url)(join(dir, "package/data/rules.js")) as UpstreamRule[];
+	const rules = createRequire(import.meta.url)(
+		join(dir, "package/data/rules.js"),
+	) as UpstreamRule[];
 	const copyright = readFileSync(join(dir, "package/LICENSE"), "utf8")
 		.split("\n")
 		.find((l) => l.startsWith("Copyright"));
-	if (!Array.isArray(rules) || rules.length === 0) throw new Error("upstream rules did not load");
-	if (pkg.license !== "MIT") throw new Error(`upstream license changed to ${pkg.license} — review before vendoring`);
-	return { rules, version: pkg.version, license: `${pkg.license} — ${copyright ?? ""}`.trim() };
+	if (!Array.isArray(rules) || rules.length === 0)
+		throw new Error("upstream rules did not load");
+	if (pkg.license !== "MIT")
+		throw new Error(
+			`upstream license changed to ${pkg.license} — review before vendoring`,
+		);
+	return {
+		rules,
+		version: pkg.version,
+		license: `${pkg.license} — ${copyright ?? ""}`.trim(),
+	};
 }
 
 /** A regex serialized for the generated file; `g`/`y` are dropped (statefulness). */
@@ -65,7 +86,8 @@ function serializeRegex(re: RegExp): { match: string; flags: string } {
 
 function assertStrings(list: unknown[], where: string): string[] {
 	for (const item of list) {
-		if (typeof item !== "string") throw new Error(`non-string entry in ${where}: ${JSON.stringify(item)}`);
+		if (typeof item !== "string")
+			throw new Error(`non-string entry in ${where}: ${JSON.stringify(item)}`);
 	}
 	return list as string[];
 }
@@ -84,8 +106,12 @@ function generate(): void {
 				...serializeRegex(r.match),
 				...(r.match_href === true ? { matchHref: true } : {}),
 				rules: assertStrings(r.rules ?? [], r.name),
-				...(r.allow?.length ? { allow: assertStrings(r.allow, `${r.name}.allow`) } : {}),
-				...(r.exclude?.length ? { exclude: r.exclude.map(serializeRegex) } : {}),
+				...(r.allow?.length
+					? { allow: assertStrings(r.allow, `${r.name}.allow`) }
+					: {}),
+				...(r.exclude?.length
+					? { exclude: r.exclude.map(serializeRegex) }
+					: {}),
 			};
 		});
 
@@ -125,7 +151,9 @@ ${body}
 ];
 `;
 	writeFileSync(OUT, file);
-	console.log(`Wrote ${kept.length} providers (${dropped} dropped) from ${PACKAGE}@${version} → ${OUT}`);
+	console.log(
+		`Wrote ${kept.length} providers (${dropped} dropped) from ${PACKAGE}@${version} → ${OUT}`,
+	);
 }
 
 generate();

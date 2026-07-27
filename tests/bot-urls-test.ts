@@ -23,7 +23,14 @@ import {
 	const text = "read this and https://a.com/x?utm_source=t";
 	const msg = {
 		text,
-		entities: [{ type: "text_link", offset: 5, length: 4, url: "https://www.theverge.com/2026/story?utm_source=tg" }],
+		entities: [
+			{
+				type: "text_link",
+				offset: 5,
+				length: 4,
+				url: "https://www.theverge.com/2026/story?utm_source=tg",
+			},
+		],
 	};
 	const urls = urlsInMessage(msg);
 	assert.deepEqual(
@@ -40,7 +47,14 @@ import {
 {
 	const [u] = urlsInMessage({
 		text: "watch",
-		entities: [{ type: "text_link", offset: 0, length: 5, url: "https://youtu.be/dQw4w9WgXcQ?si=x" }],
+		entities: [
+			{
+				type: "text_link",
+				offset: 0,
+				length: 5,
+				url: "https://youtu.be/dQw4w9WgXcQ?si=x",
+			},
+		],
 	});
 	assert.equal(u.site, "youtube");
 	assert.equal(u.key, "youtube:dQw4w9WgXcQ");
@@ -49,7 +63,9 @@ import {
 assert.equal(
 	urlsInMessage({
 		caption: "look",
-		captionEntities: [{ type: "text_link", offset: 0, length: 4, url: "https://a.com/b" }],
+		captionEntities: [
+			{ type: "text_link", offset: 0, length: 4, url: "https://a.com/b" },
+		],
 	})[0]?.href,
 	"https://a.com/b",
 );
@@ -58,34 +74,60 @@ assert.equal(
 	const text = "🎬 watch this";
 	const [u] = urlsInMessage({
 		text,
-		entities: [{ type: "text_link", offset: 9, length: 4, url: "https://a.com/v" }],
+		entities: [
+			{ type: "text_link", offset: 9, length: 4, url: "https://a.com/v" },
+		],
 	});
 	assert.equal(u.raw, "this");
 }
 // The link-preview attachment is a URL source of its own (forwarded channel posts often
 // carry the URL ONLY there) — zero-width span, deduped by key against a text twin.
 {
-	const urls = urlsInMessage({ text: "check my latest post", linkPreviewOptions: { url: "https://a.com/post?utm_source=x" } });
-	assert.deepEqual(urls.map((u) => [u.href, u.start, u.end]), [["https://a.com/post", 20, 20]]);
+	const urls = urlsInMessage({
+		text: "check my latest post",
+		linkPreviewOptions: { url: "https://a.com/post?utm_source=x" },
+	});
+	assert.deepEqual(
+		urls.map((u) => [u.href, u.start, u.end]),
+		[["https://a.com/post", 20, 20]],
+	);
 }
 assert.equal(
-	urlsInMessage({ text: "https://a.com/post", link_preview_options: { url: "https://a.com/post/" } }).length,
+	urlsInMessage({
+		text: "https://a.com/post",
+		link_preview_options: { url: "https://a.com/post/" },
+	}).length,
 	1, // preview twin of the visible url dedupes by key
 );
 
 // Non-link entities are ignored; a plain message scans as before
 assert.deepEqual(
-	urlsInMessage({ text: "just https://a.com/x", entities: [{ type: "bold", offset: 0, length: 4 }] }).map((u) => u.href),
+	urlsInMessage({
+		text: "just https://a.com/x",
+		entities: [{ type: "bold", offset: 0, length: 4 }],
+	}).map((u) => u.href),
 	["https://a.com/x"],
 );
 
 // ── isCommandMessage: the bot_command entity, not startsWith ────────────────
 
-assert.equal(isCommandMessage({ text: "/summary https://a.com", entities: [{ type: "bot_command", offset: 0, length: 8 }] }), true);
+assert.equal(
+	isCommandMessage({
+		text: "/summary https://a.com",
+		entities: [{ type: "bot_command", offset: 0, length: 8 }],
+	}),
+	true,
+);
 // "/" text without the entity is NOT a command (e.g. a pasted path)
 assert.equal(isCommandMessage({ text: "/etc/hosts is a file" }), false);
 // A mid-message command mention is not "this message is a command"
-assert.equal(isCommandMessage({ text: "try /help sometime", entities: [{ type: "bot_command", offset: 4, length: 5 }] }), false);
+assert.equal(
+	isCommandMessage({
+		text: "try /help sometime",
+		entities: [{ type: "bot_command", offset: 4, length: 5 }],
+	}),
+	false,
+);
 
 // ── cutEntities: exact span surgery ─────────────────────────────────────────
 
@@ -105,13 +147,26 @@ assert.equal(isCommandMessage({ text: "try /help sometime", entities: [{ type: "
 		{ type: "mention", offset: 0, length: 7 },
 		{ type: "mention", offset: 23, length: 10 },
 	];
-	const cut = cutEntities(text, entities, (e, slice) => e.type === "mention" && slice === "@my_bot");
-	assert.equal(cut.replace(/\s+/g, " ").trim(), "summarize, ask @other_bot too");
+	const cut = cutEntities(
+		text,
+		entities,
+		(e, slice) => e.type === "mention" && slice === "@my_bot",
+	);
+	assert.equal(
+		cut.replace(/\s+/g, " ").trim(),
+		"summarize, ask @other_bot too",
+	);
 }
 
 // ── messageTextAndEntities: text wins, caption falls back with ITS entities ──
 
-assert.deepEqual(messageTextAndEntities({ text: "a", entities: [{ type: "bold", offset: 0, length: 1 }] }).entities.length, 1);
+assert.deepEqual(
+	messageTextAndEntities({
+		text: "a",
+		entities: [{ type: "bold", offset: 0, length: 1 }],
+	}).entities.length,
+	1,
+);
 assert.equal(messageTextAndEntities({ caption: "c" }).text, "c");
 assert.equal(messageTextAndEntities({}).text, "");
 
@@ -119,19 +174,28 @@ assert.equal(messageTextAndEntities({}).text, "");
 
 {
 	// Bare command: token, no addressee.
-	const bare = { text: "/ch", entities: [{ type: "bot_command", offset: 0, length: 3 }] };
+	const bare = {
+		text: "/ch",
+		entities: [{ type: "bot_command", offset: 0, length: 3 }],
+	};
 	assert.equal(commandToken(bare), "/ch");
 	assert.equal(commandAddressee(bare), null);
 }
 {
 	// Addressed to another bot: the addressee names it, lowercased (usernames are case-insensitive).
-	const other = { text: "/ch@CryptoWhaleBot", entities: [{ type: "bot_command", offset: 0, length: 18 }] };
+	const other = {
+		text: "/ch@CryptoWhaleBot",
+		entities: [{ type: "bot_command", offset: 0, length: 18 }],
+	};
 	assert.equal(commandToken(other), "/ch");
 	assert.equal(commandAddressee(other), "cryptowhalebot");
 }
 {
 	// Addressed with trailing payload: the entity bounds the split, the payload never leaks in.
-	const addressed = { text: "/clean@my_bot payload", entities: [{ type: "bot_command", offset: 0, length: 13 }] };
+	const addressed = {
+		text: "/clean@my_bot payload",
+		entities: [{ type: "bot_command", offset: 0, length: 13 }],
+	};
 	assert.equal(commandToken(addressed), "/clean");
 	assert.equal(commandAddressee(addressed), "my_bot");
 }
@@ -139,9 +203,14 @@ assert.equal(messageTextAndEntities({}).text, "");
 	// Ordinary text, and a command NOT at offset 0: neither parses as a leading command.
 	assert.equal(commandToken({ text: "hola", entities: [] }), null);
 	assert.equal(commandAddressee({ text: "hola", entities: [] }), null);
-	const mid = { text: "try /help later", entities: [{ type: "bot_command", offset: 4, length: 5 }] };
+	const mid = {
+		text: "try /help later",
+		entities: [{ type: "bot_command", offset: 4, length: 5 }],
+	};
 	assert.equal(commandToken(mid), null);
 	assert.equal(commandAddressee(mid), null);
 }
 
-console.log("✓ bot-urls-test: urlsInMessage/isCommandMessage/commandToken/commandAddressee/cutEntities hold");
+console.log(
+	"✓ bot-urls-test: urlsInMessage/isCommandMessage/commandToken/commandAddressee/cutEntities hold",
+);

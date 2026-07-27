@@ -54,7 +54,7 @@
  * await flags.set(ctx, 'richText', false)   // live override
  * await flags.set(ctx, 'richText', null)    // clear → back to the code default
  */
-import { SourcedError, panic } from "../offensive.js";
+import { panic, SourcedError } from "../offensive.js";
 
 // ─── spec ────────────────────────────────────────────────────────────
 
@@ -203,15 +203,21 @@ export type FlagConstraints = {
  * instead of restating it. Constraints apply at WRITE time only — reads keep shape-checking
  * so tightening a bound later never bricks an already-stored value.
  */
-export const flagValueError = (spec: FlagConstraints, v: unknown): string | null => {
-	if (!flagValueOk(spec.kind, v)) return `not a ${spec.kind} (or a tier map of them)`;
+export const flagValueError = (
+	spec: FlagConstraints,
+	v: unknown,
+): string | null => {
+	if (!flagValueOk(spec.kind, v))
+		return `not a ${spec.kind} (or a tier map of them)`;
 	const scalars = isTierMap(v) ? Object.values(v) : [v];
 	for (const s of scalars) {
 		if (spec.kind === "number") {
 			const n = s as number;
 			if (!Number.isFinite(n)) return "not a finite number";
-			if (spec.min !== undefined && n < spec.min) return `below the minimum (${spec.min})`;
-			if (spec.max !== undefined && n > spec.max) return `above the maximum (${spec.max})`;
+			if (spec.min !== undefined && n < spec.min)
+				return `below the minimum (${spec.min})`;
+			if (spec.max !== undefined && n > spec.max)
+				return `above the maximum (${spec.max})`;
 		}
 		if (spec.choices && !spec.choices.includes(s as string)) {
 			return `must be one of: ${spec.choices.join(" · ")}`;
@@ -225,7 +231,10 @@ export const flagValueError = (spec: FlagConstraints, v: unknown): string | null
  * a staged rollout an in-bot menu rotates through on tap. `off` gates everyone,
  * `admins` opens it to operators/testers, `all` ships it.
  */
-export const audienceAllows = (value: string, opts: { admin: boolean }): boolean => {
+export const audienceAllows = (
+	value: string,
+	opts: { admin: boolean },
+): boolean => {
 	if (value === "all") return true;
 	if (value === "admins") return opts.admin;
 	return false;
@@ -240,7 +249,8 @@ export function defineFlags<Spec extends Record<string, FlagSpec>>(
 	for (const [key, s] of Object.entries(spec)) {
 		if (RESERVED.has(key)) panic(`flags: "${key}" is a reserved name`);
 		const reason = flagValueError(s, s.default);
-		if (reason !== null) panic(`flags: "${key}" default rejected: ${reason}`, s.default);
+		if (reason !== null)
+			panic(`flags: "${key}" default rejected: ${reason}`, s.default);
 	}
 
 	// One config read per update: multiple flag reads on the same ctx share
@@ -258,7 +268,8 @@ export function defineFlags<Spec extends Record<string, FlagSpec>>(
 	const resolve = async (ctx: unknown, key: string): Promise<unknown> => {
 		const s = spec[key];
 		const stored = (await configFor(ctx))[key];
-		const declared = stored !== undefined && stored !== null ? stored : s.default;
+		const declared =
+			stored !== undefined && stored !== null ? stored : s.default;
 		if (!flagValueOk(s.kind, declared))
 			throw new SourcedError({
 				source: "flags",
@@ -312,7 +323,8 @@ export function defineFlags<Spec extends Record<string, FlagSpec>>(
 	} as Flags<Spec>;
 
 	for (const key of Object.keys(spec)) {
-		(flags as Record<string, unknown>)[key] = (ctx: unknown) => resolve(ctx, key);
+		(flags as Record<string, unknown>)[key] = (ctx: unknown) =>
+			resolve(ctx, key);
 	}
 
 	return flags;

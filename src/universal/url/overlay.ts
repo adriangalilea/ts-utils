@@ -43,7 +43,16 @@ export const OVERLAY_RULES: readonly TrackingProvider[] = [
 		name: "overlay:youtube.com",
 		match: "(^|\\.)youtube\\.com$",
 		flags: "i",
-		rules: ["si", "pp", "ab_channel", "kw", "feature", "app", "embeds_referring_euri", "embeds_referring_origin"],
+		rules: [
+			"si",
+			"pp",
+			"ab_channel",
+			"kw",
+			"feature",
+			"app",
+			"embeds_referring_euri",
+			"embeds_referring_origin",
+		],
 	},
 	{
 		name: "overlay:youtu.be",

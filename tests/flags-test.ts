@@ -2,7 +2,13 @@
 // tier-ladder lookup, kind screaming, set/clear round-trips, per-ctx read
 // coalescing. Run: pnpm test:flags
 import assert from "node:assert/strict";
-import { audienceAllows, defineFlags, flagValueError, flagValueOk, isTierMap } from "../src/bot/flags.js";
+import {
+	audienceAllows,
+	defineFlags,
+	flagValueError,
+	flagValueOk,
+	isTierMap,
+} from "../src/bot/flags.js";
 import { SourcedError } from "../src/offensive.js";
 
 let pass = 0;
@@ -70,10 +76,13 @@ await ok("tiered default: bare vip covers every rung", async () => {
 	assert.equal(await flags.maxInputChars(ctxVip(2)), 250_000);
 });
 
-await ok("ladder walks down: vip.1 inherits free when only vip.2 is set", async () => {
-	assert.equal(await flags.model(ctxVip(1)), "flash");
-	assert.equal(await flags.model(ctxVip(2)), "sonnet");
-});
+await ok(
+	"ladder walks down: vip.1 inherits free when only vip.2 is set",
+	async () => {
+		assert.equal(await flags.model(ctxVip(1)), "flash");
+		assert.equal(await flags.model(ctxVip(2)), "sonnet");
+	},
+);
 
 await ok("no payments ctx resolves as free", async () => {
 	assert.equal(await flags.maxInputChars({}), 50_000);
@@ -86,11 +95,14 @@ await ok("override beats default; clear restores it", async () => {
 	assert.equal(await flags.richText(ctxFree()), true);
 });
 
-await ok("scalar override flattens a tiered default for every tier", async () => {
-	await flags.set(ctxFree(), "maxInputChars", 111);
-	assert.equal(await flags.maxInputChars(ctxVip(2)), 111);
-	await flags.set(ctxFree(), "maxInputChars", null);
-});
+await ok(
+	"scalar override flattens a tiered default for every tier",
+	async () => {
+		await flags.set(ctxFree(), "maxInputChars", 111);
+		assert.equal(await flags.maxInputChars(ctxVip(2)), 111);
+		await flags.set(ctxFree(), "maxInputChars", null);
+	},
+);
 
 await ok("tiered override on a scalar default", async () => {
 	await flags.set(ctxFree(), "model", { free: "flash", "vip.1": "pro" });
@@ -138,7 +150,11 @@ await ok("overrides() lists only real overrides", async () => {
 await ok("reads coalesce per ctx", async () => {
 	const before = backend.reads();
 	const ctx = ctxFree();
-	await Promise.all([flags.richText(ctx), flags.maxInputChars(ctx), flags.model(ctx)]);
+	await Promise.all([
+		flags.richText(ctx),
+		flags.maxInputChars(ctx),
+		flags.model(ctx),
+	]);
 	assert.equal(backend.reads() - before, 1);
 });
 
@@ -155,34 +171,66 @@ await ok("get() resolves by runtime key, panics on unknown", async () => {
 	assert.throws(() => void flags.get(ctxFree(), "nope" as never));
 });
 
-await ok("flagValueOk is the exported write rule external writers share", () => {
-	assert.equal(flagValueOk("number", 5), true);
-	assert.equal(flagValueOk("number", { free: 5, "vip.2": 9 }), true);
-	assert.equal(flagValueOk("number", { free: 5, vip: "nope" }), false);
-	assert.equal(flagValueOk("bool", "true"), false);
-	assert.equal(isTierMap({ free: 1 }), true);
-	assert.equal(isTierMap(1), false);
-});
+await ok(
+	"flagValueOk is the exported write rule external writers share",
+	() => {
+		assert.equal(flagValueOk("number", 5), true);
+		assert.equal(flagValueOk("number", { free: 5, "vip.2": 9 }), true);
+		assert.equal(flagValueOk("number", { free: 5, vip: "nope" }), false);
+		assert.equal(flagValueOk("bool", "true"), false);
+		assert.equal(isTierMap({ free: 1 }), true);
+		assert.equal(isTierMap(1), false);
+	},
+);
 
 await ok("flagValueError: bounds and choices are the write rule", () => {
 	assert.equal(flagValueError({ kind: "number", min: 0, max: 100 }, 50), null);
-	assert.equal(flagValueError({ kind: "number", min: 0, max: 100 }, -1), "below the minimum (0)");
-	assert.equal(flagValueError({ kind: "number", max: 100 }, { free: 10, vip: 500 }), "above the maximum (100)");
-	assert.equal(flagValueError({ kind: "string", choices: ["off", "admins", "all"] }, "admins"), null);
-	assert.ok(flagValueError({ kind: "string", choices: ["off", "admins", "all"] }, "everyone"));
+	assert.equal(
+		flagValueError({ kind: "number", min: 0, max: 100 }, -1),
+		"below the minimum (0)",
+	);
+	assert.equal(
+		flagValueError({ kind: "number", max: 100 }, { free: 10, vip: 500 }),
+		"above the maximum (100)",
+	);
+	assert.equal(
+		flagValueError(
+			{ kind: "string", choices: ["off", "admins", "all"] },
+			"admins",
+		),
+		null,
+	);
+	assert.ok(
+		flagValueError(
+			{ kind: "string", choices: ["off", "admins", "all"] },
+			"everyone",
+		),
+	);
 	assert.ok(flagValueError({ kind: "number" }, "5"));
 });
 
-await ok("set enforces bounds; construction rejects a default outside them", async () => {
-	const b = makeBackend();
-	const f = defineFlags({ cap: { kind: "number", label: "cap", min: 1, max: 10, default: 5 } }, b);
-	await assert.rejects(() => f.set(ctxFree(), "cap", 11), /above the maximum/);
-	await f.set(ctxFree(), "cap", 10);
-	assert.equal(await f.cap(ctxFree()), 10);
-	assert.throws(() =>
-		defineFlags({ bad: { kind: "number", label: "bad", min: 1, default: 0 } }, b),
-	);
-});
+await ok(
+	"set enforces bounds; construction rejects a default outside them",
+	async () => {
+		const b = makeBackend();
+		const f = defineFlags(
+			{ cap: { kind: "number", label: "cap", min: 1, max: 10, default: 5 } },
+			b,
+		);
+		await assert.rejects(
+			() => f.set(ctxFree(), "cap", 11),
+			/above the maximum/,
+		);
+		await f.set(ctxFree(), "cap", 10);
+		assert.equal(await f.cap(ctxFree()), 10);
+		assert.throws(() =>
+			defineFlags(
+				{ bad: { kind: "number", label: "bad", min: 1, default: 0 } },
+				b,
+			),
+		);
+	},
+);
 
 await ok("audienceAllows: the off → admins → all convention", () => {
 	assert.equal(audienceAllows("off", { admin: true }), false);
@@ -193,14 +241,19 @@ await ok("audienceAllows: the off → admins → all convention", () => {
 
 await ok("reserved names panic at construction", () => {
 	assert.throws(() =>
-		defineFlags({ describe: { kind: "bool", label: "x", default: true } }, backend),
+		defineFlags(
+			{ describe: { kind: "bool", label: "x", default: true } },
+			backend,
+		),
 	);
 });
 
 await ok("bad default panics at construction", () => {
 	assert.throws(() =>
 		defineFlags(
-			{ x: { kind: "number", label: "x", default: "nope" as unknown as number } },
+			{
+				x: { kind: "number", label: "x", default: "nope" as unknown as number },
+			},
 			backend,
 		),
 	);

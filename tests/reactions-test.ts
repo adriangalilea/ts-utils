@@ -8,7 +8,10 @@
 import { strict as assert } from "node:assert";
 import { type ReactionCtx, reactionPolicy } from "../src/bot/reactions.js";
 
-function fakeCtx(chatId: number, id: number): ReactionCtx & { calls: string[] } {
+function fakeCtx(
+	chatId: number,
+	id: number,
+): ReactionCtx & { calls: string[] } {
 	const calls: string[] = [];
 	return {
 		chatId,
@@ -86,7 +89,11 @@ const policy = () =>
 // react() failures are swallowed and the state still advances.
 {
 	const p = policy();
-	const ctx: ReactionCtx = { chatId: 1, id: 15, react: () => Promise.reject(new Error("boom")) };
+	const ctx: ReactionCtx = {
+		chatId: 1,
+		id: 15,
+		react: () => Promise.reject(new Error("boom")),
+	};
 	const r = p.for(ctx);
 	assert.equal(await r.set("failed"), true);
 	assert.equal(r.state(), "failed");
@@ -95,7 +102,12 @@ const policy = () =>
 // Unknown states scream (a typo must not silently no-op).
 {
 	const p = policy();
-	await assert.rejects(() => p.for(fakeCtx(1, 16)).set("nope" as never), /unknown reaction state/);
+	await assert.rejects(
+		() => p.for(fakeCtx(1, 16)).set("nope" as never),
+		/unknown reaction state/,
+	);
 }
 
-console.log("✓ reactions-test: arbitration, idempotency, no-flicker, isolation hold");
+console.log(
+	"✓ reactions-test: arbitration, idempotency, no-flicker, isolation hold",
+);
