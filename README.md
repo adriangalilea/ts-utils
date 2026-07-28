@@ -82,12 +82,13 @@ Pure number formatting — named exports, tree-shakeable, zero currency baggage
 knowledge and its crypto-symbol dataset):
 
 Every Intl call pins `en` — SSR apps hydrate identically on server and client
-(no React #418 from a runtime-default locale).
+(no React #418 from a runtime-default locale). Every formatter accepts
+`null | undefined` and renders `"—"`, so DB fields pass straight through.
 
 ```typescript
-import { compact, percentage, withCommas, bytes, bitsPerSec } from '@adriangalilea/utils/format'
+import { compact, percentage, fixed, withCommas, bytes, bitsPerSec } from '@adriangalilea/utils/format'
 
-withCommas(1234567)     // "1,234,567"
+withCommas(1234567)     // "1,234,567" (bigint-safe)
 withCommas(1234.567, 2) // "1,234.57"
 compact(1234567)        // "1.2M"
 compact(1234)           // "1.2K"
@@ -96,21 +97,25 @@ percentage(0.05)        // "0.05%"
 percentage(123.456)     // "123%"
 percentage(2.41, { sign: true })    // "+2.4%" (deltas: 24h change, diffs)
 percentage(2.4126, { decimals: 2 }) // "2.41%" (fixed decimals)
+fixed(1.234)            // "1.23" (plain toFixed, no grouping)
 bytes(12.7e12)          // "12.7 TB" (decimal SI, like drive specs / df -h)
 bitsPerSec(2.5e9)       // "2.5 Gbps"
+percentage(null)        // "—" (every formatter)
+```
 
-// USD — lives in format (dataset-free): printing dollars must not drag the
-// 133KB crypto-symbol dataset into a client bundle. Also re-exported from
-// currency for the namespace.
-import { usd, usdIntlOptions } from '@adriangalilea/utils/format'
-usd(1234.56)                  // "$1,234.56" (grouped)
+Money lives in `currency`, which is split by dependency weight so the barrel
+tree-shakes at file granularity: the 133KB crypto-symbol dataset is imported
+only by its classify module, so `import { usd } from '…/currency'` ships
+dollars, not 13k tickers.
+
+```typescript
+import { usd, usdIntlOptions, btc, money } from '@adriangalilea/utils/currency'
+
+usd(1234.56)                  // "$1,234.56" (grouped; dataset-free import)
 usd(4.3387e-7)                // "$0.00000043" (sub-cent keeps 2 significant digits)
 usd(0.43387, { decimals: 4 }) // "$0.4339" (policy override)
 usd(60892283, { compact: true }) // "$60.9M" (market-cap scale)
-
-// Symbol-aware money — from currency (owns the symbol/decimals knowledge):
-import { btc, money } from '@adriangalilea/utils/currency'
-btc(0.00001234)     // "0.00001234 ₿"
+btc(0.00001234)     // "0.000012340 ₿" (dataset via optimal decimals)
 money(100, 'EUR')   // "€100.00"
 
 // The decimals policy as Intl.NumberFormatOptions — for consumers that format
