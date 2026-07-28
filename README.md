@@ -81,22 +81,36 @@ Pure number formatting — named exports, tree-shakeable, zero currency baggage
 (money formatting lives in the currency module, which owns the symbol/decimals
 knowledge and its crypto-symbol dataset):
 
+Every Intl call pins `en` — SSR apps hydrate identically on server and client
+(no React #418 from a runtime-default locale).
+
 ```typescript
-import { compact, percentage, withCommas } from '@adriangalilea/utils/format'
+import { compact, percentage, withCommas, bytes, bitsPerSec } from '@adriangalilea/utils/format'
 
 withCommas(1234567)     // "1,234,567"
 withCommas(1234.567, 2) // "1,234.57"
 compact(1234567)        // "1.2M"
 compact(1234)           // "1.2K"
-percentage(12.3456)     // "12.3%"
+percentage(12.3456)     // "12.3%" (smart decimals)
 percentage(0.05)        // "0.05%"
 percentage(123.456)     // "123%"
+percentage(2.41, { sign: true })    // "+2.4%" (deltas: 24h change, diffs)
+percentage(2.4126, { decimals: 2 }) // "2.41%" (fixed decimals)
+bytes(12.7e12)          // "12.7 TB" (decimal SI, like drive specs / df -h)
+bitsPerSec(2.5e9)       // "2.5 Gbps"
 
 // Money — from currency, not format:
-import { usd, btc, money } from '@adriangalilea/utils/currency'
-usd(1234.56)        // "$1234.56"
+import { usd, usdIntlOptions, btc, money } from '@adriangalilea/utils/currency'
+usd(1234.56)                  // "$1,234.56" (grouped)
+usd(4.3387e-7)                // "$0.00000043" (sub-cent keeps 2 significant digits)
+usd(0.43387, { decimals: 4 }) // "$0.4339" (policy override)
+usd(60892283, { compact: true }) // "$60.9M" (market-cap scale)
 btc(0.00001234)     // "0.00001234 ₿"
 money(100, 'EUR')   // "€100.00"
+
+// The decimals policy as Intl.NumberFormatOptions — for consumers that format
+// internally (NumberFlow-style animated numbers, chart axes):
+usdIntlOptions(0.43387) // { style: 'currency', currency: 'USD', minimumFractionDigits: 3, ... }
 ```
 
 ### URL (`url`)

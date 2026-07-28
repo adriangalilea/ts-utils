@@ -34,6 +34,16 @@ export function getSymbol(code: string): string {
 	return CurrencySymbols[code as keyof typeof CurrencySymbols] || code;
 }
 
+/**
+ * Decimals that keep 2 significant digits of a sub-cent value, capped at 10.
+ * The fix for fixed-decimal erasure: a micro-priced asset (1 QUBIC ≈ $4.3e-7)
+ * under a fixed 6-decimal floor renders "$0.000000" — the price vanishes.
+ * 4.3e-7 → 8 decimals → "$0.00000043".
+ */
+function sigDecimals(absValue: number): number {
+	return Math.min(10, 1 - Math.floor(Math.log10(absValue)));
+}
+
 export function getOptimalDecimals(
 	value: number,
 	currencyCode: string,
@@ -67,7 +77,7 @@ export function getOptimalDecimals(
 		case "USDC":
 		case "DAI":
 		case "BUSD":
-			if (absValue < 0.01) return 6;
+			if (absValue < 0.01) return sigDecimals(absValue);
 			else if (absValue < 0.1) return 4;
 			else if (absValue < 1) return 3;
 			else return 2;
@@ -88,7 +98,7 @@ export function getOptimalDecimals(
 	}
 
 	if (isCrypto(currencyCode)) {
-		if (absValue < 0.00001) return 8;
+		if (absValue < 0.00001) return sigDecimals(absValue);
 		else if (absValue < 0.0001) return 6;
 		else if (absValue < 0.001) return 5;
 		else if (absValue < 0.01) return 4;
@@ -96,7 +106,7 @@ export function getOptimalDecimals(
 		else if (absValue < 1) return 3;
 		else return 2;
 	} else {
-		if (absValue < 0.01) return 4;
+		if (absValue < 0.01) return sigDecimals(absValue);
 		else if (absValue < 0.1) return 3;
 		else if (absValue < 1000) return 2;
 		else return 0;
@@ -303,11 +313,49 @@ export function formatBasisPoints(bps: number): string {
 // optimal-decimals knowledge (and, transitively, the crypto dataset), and the
 // pure format module must stay free of that weight.
 
-/** $1234.56 with optimal decimals; sign before the $. */
-export function usd(value: number): string {
-	const decimals = getOptimalDecimals(value, "USD");
-	const formatted = Math.abs(value).toFixed(decimals);
-	return value < 0 ? `-$${formatted}` : `$${formatted}`;
+export interface UsdOptions {
+	/** Fixed decimal places, overriding the optimal-decimals policy. */
+	decimals?: number;
+	/** Compact notation for market-cap-scale money: $60.9M. */
+	compact?: boolean;
+}
+
+/**
+ * The USD decimals POLICY as Intl.NumberFormatOptions, for consumers that
+ * format internally — animated numbers (NumberFlow), chart axes, table cell
+ * renderers. One policy serves strings and widgets alike; `usd()` below is
+ * just this policy applied. Value-dependent: recompute when the value moves.
+ */
+export function usdIntlOptions(
+	value: number,
+	opts: UsdOptions = {},
+): Intl.NumberFormatOptions {
+	if (opts.compact) {
+		return {
+			style: "currency",
+			currency: "USD",
+			notation: "compact",
+			maximumFractionDigits: 1,
+		};
+	}
+	const decimals = opts.decimals ?? getOptimalDecimals(value, "USD");
+	return {
+		style: "currency",
+		currency: "USD",
+		minimumFractionDigits: decimals,
+		maximumFractionDigits: decimals,
+	};
+}
+
+/**
+ * $1,234.56 with optimal decimals (grouped, en-pinned — SSR-hydration-safe);
+ * sub-cent values keep 2 significant digits ($0.00000043) instead of rounding
+ * to $0.000000. `{compact: true}` → $60.9M; `{decimals}` overrides the policy.
+ */
+export function usd(value: number, opts: UsdOptions = {}): string {
+	return new Intl.NumberFormat("en-US", usdIntlOptions(value, opts)).format(
+		value,
+	);
 }
 
 /** Bitcoin with optimal decimals: 0.00001234 ₿ */
@@ -322,12 +370,16 @@ export function eth(value: number): string {
 
 /**
  * Format a value in any currency: symbol before for fiat/stablecoins
- * (`$12.34`), after for crypto (`0.5 ₿`), optimal decimals either way.
+ * (`$12.34`), after for crypto (`0.5 ₿`), optimal decimals + thousands
+ * grouping either way (en-pinned — SSR-hydration-safe).
  */
 export function money(value: number, currencyCode: string): string {
 	const decimals = getOptimalDecimals(value, currencyCode);
 	const symbol = getSymbol(currencyCode);
-	const formatted = Math.abs(value).toFixed(decimals);
+	const formatted = new Intl.NumberFormat("en-US", {
+		minimumFractionDigits: decimals,
+		maximumFractionDigits: decimals,
+	}).format(Math.abs(value));
 	if (isFiat(currencyCode) || isStablecoin(currencyCode)) {
 		return value < 0 ? `-${symbol}${formatted}` : `${symbol}${formatted}`;
 	}
@@ -350,6 +402,7 @@ export const currency = {
 	percentToBasisPoints,
 	formatBasisPoints,
 	usd,
+	usdIntlOptions,
 	btc,
 	eth,
 	money,
