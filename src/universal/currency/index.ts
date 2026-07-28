@@ -34,16 +34,6 @@ export function getSymbol(code: string): string {
 	return CurrencySymbols[code as keyof typeof CurrencySymbols] || code;
 }
 
-/**
- * Decimals that keep 2 significant digits of a sub-cent value, capped at 10.
- * The fix for fixed-decimal erasure: a micro-priced asset (1 QUBIC ≈ $4.3e-7)
- * under a fixed 6-decimal floor renders "$0.000000" — the price vanishes.
- * 4.3e-7 → 8 decimals → "$0.00000043".
- */
-function sigDecimals(absValue: number): number {
-	return Math.min(10, 1 - Math.floor(Math.log10(absValue)));
-}
-
 export function getOptimalDecimals(
 	value: number,
 	currencyCode: string,
@@ -77,10 +67,7 @@ export function getOptimalDecimals(
 		case "USDC":
 		case "DAI":
 		case "BUSD":
-			if (absValue < 0.01) return sigDecimals(absValue);
-			else if (absValue < 0.1) return 4;
-			else if (absValue < 1) return 3;
-			else return 2;
+			return usdDecimals(value);
 
 		case "EUR":
 		case "GBP":
@@ -113,6 +100,7 @@ export function getOptimalDecimals(
 	}
 }
 
+import { sigDecimals, usd, usdDecimals, usdIntlOptions } from "../format.js";
 import { isCryptoSymbol } from "./crypto-symbols.js";
 
 // Alternative ticker mappings (some exchanges use different symbols)
@@ -313,50 +301,10 @@ export function formatBasisPoints(bps: number): string {
 // optimal-decimals knowledge (and, transitively, the crypto dataset), and the
 // pure format module must stay free of that weight.
 
-export interface UsdOptions {
-	/** Fixed decimal places, overriding the optimal-decimals policy. */
-	decimals?: number;
-	/** Compact notation for market-cap-scale money: $60.9M. */
-	compact?: boolean;
-}
-
-/**
- * The USD decimals POLICY as Intl.NumberFormatOptions, for consumers that
- * format internally — animated numbers (NumberFlow), chart axes, table cell
- * renderers. One policy serves strings and widgets alike; `usd()` below is
- * just this policy applied. Value-dependent: recompute when the value moves.
- */
-export function usdIntlOptions(
-	value: number,
-	opts: UsdOptions = {},
-): Intl.NumberFormatOptions {
-	if (opts.compact) {
-		return {
-			style: "currency",
-			currency: "USD",
-			notation: "compact",
-			maximumFractionDigits: 1,
-		};
-	}
-	const decimals = opts.decimals ?? getOptimalDecimals(value, "USD");
-	return {
-		style: "currency",
-		currency: "USD",
-		minimumFractionDigits: decimals,
-		maximumFractionDigits: decimals,
-	};
-}
-
-/**
- * $1,234.56 with optimal decimals (grouped, en-pinned — SSR-hydration-safe);
- * sub-cent values keep 2 significant digits ($0.00000043) instead of rounding
- * to $0.000000. `{compact: true}` → $60.9M; `{decimals}` overrides the policy.
- */
-export function usd(value: number, opts: UsdOptions = {}): string {
-	return new Intl.NumberFormat("en-US", usdIntlOptions(value, opts)).format(
-		value,
-	);
-}
+export type { UsdOptions } from "../format.js";
+// usd/usdIntlOptions live in ../format (dataset-free — see the note there);
+// re-exported here so `currency.usd` and the /currency import path keep working.
+export { usd, usdIntlOptions };
 
 /** Bitcoin with optimal decimals: 0.00001234 ₿ */
 export function btc(value: number): string {

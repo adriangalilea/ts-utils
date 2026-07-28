@@ -99,12 +99,17 @@ percentage(2.4126, { decimals: 2 }) // "2.41%" (fixed decimals)
 bytes(12.7e12)          // "12.7 TB" (decimal SI, like drive specs / df -h)
 bitsPerSec(2.5e9)       // "2.5 Gbps"
 
-// Money — from currency, not format:
-import { usd, usdIntlOptions, btc, money } from '@adriangalilea/utils/currency'
+// USD — lives in format (dataset-free): printing dollars must not drag the
+// 133KB crypto-symbol dataset into a client bundle. Also re-exported from
+// currency for the namespace.
+import { usd, usdIntlOptions } from '@adriangalilea/utils/format'
 usd(1234.56)                  // "$1,234.56" (grouped)
 usd(4.3387e-7)                // "$0.00000043" (sub-cent keeps 2 significant digits)
 usd(0.43387, { decimals: 4 }) // "$0.4339" (policy override)
 usd(60892283, { compact: true }) // "$60.9M" (market-cap scale)
+
+// Symbol-aware money — from currency (owns the symbol/decimals knowledge):
+import { btc, money } from '@adriangalilea/utils/currency'
 btc(0.00001234)     // "0.00001234 ₿"
 money(100, 'EUR')   // "€100.00"
 
