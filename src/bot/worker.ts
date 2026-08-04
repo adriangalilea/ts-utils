@@ -9,6 +9,12 @@
  *   POST /                webhook — `X-Telegram-Bot-Api-Secret-Token` checked,
  *                         acked immediately; the update (+ storage flush) rides
  *                         `ctx.waitUntil`, errors DM the admins (throttled).
+ *                         With `durableUpdates` set, the update is instead
+ *                         PERSISTED into a per-conversation TelegramUpdateRunner
+ *                         Durable Object BEFORE the ack, and a DO alarm owns the
+ *                         full update: slow transcript/LLM work is not cancelled
+ *                         ~30s after Telegram receives its acknowledgement, and
+ *                         a non-2xx (nothing persisted) makes Telegram retry.
  *   POST /setup           registers the webhook with `allowed_updates` DERIVED
  *                         from the bot's handlers (a new handler type never
  *                         fires until /setup reruns — deploys should end here).
@@ -47,6 +53,10 @@ import {
 	alertThrottle,
 	notifyAdmins,
 } from "./notify.js";
+import {
+	telegramUpdateId,
+	telegramUpdatePartition,
+} from "./update-identity.js";
 
 const log = createLogger("bot/worker");
 
@@ -99,6 +109,26 @@ export function isSelfEcho(update: unknown, selfId: number): boolean {
 	return false;
 }
 
+/** The slice of a Durable Object namespace binding the durable ingress touches. */
+export type UpdateRunnerNamespace = {
+	idFromName(name: string): unknown;
+	get(id: unknown): {
+		fetch(input: string, init?: RequestInit): Promise<Response>;
+	};
+};
+
+export type DurableUpdates = {
+	/** The namespace bound to the class built by {@link telegramUpdateRunner}. */
+	namespace: UpdateRunnerNamespace;
+	/**
+	 * Route SELECTED updates outside their conversation queue — for a time-critical
+	 * callback that must not wait behind slow work already running for its chat.
+	 * Return a partition name, or null/undefined for the default
+	 * `telegramUpdatePartition` (one Durable Object per conversation).
+	 */
+	partition?: (update: unknown) => string | null | undefined;
+};
+
 export type BotWorkerRuntime = {
 	bot: WorkerBot;
 	/** Telegram webhook secret; unset → webhook/setup respond 500 (a misconfigured prod must scream). */
@@ -128,6 +158,8 @@ export type BotWorkerRuntime = {
 	) => Promise<Response | null> | Response | null;
 	/** Error-alert throttle (share one to share its budget). Default: own 60s window. */
 	errorThrottle?: AlertThrottle;
+	/** Durable webhook ingress: persist-before-ack into per-conversation runner DOs. */
+	durableUpdates?: DurableUpdates;
 };
 
 /**
@@ -177,6 +209,38 @@ export function botWorkerFetch<Env>(
 				// The bot never listens to itself (see isSelfEcho): ack and drop.
 				if (rt.selfId !== undefined && isSelfEcho(update, rt.selfId)) {
 					return new Response("OK");
+				}
+				// Durable ingress: persist into the partition's runner DO, THEN ack.
+				// A non-2xx tells Telegram to retry; never acknowledge an update
+				// that was not persisted.
+				if (rt.durableUpdates) {
+					const partition =
+						rt.durableUpdates.partition?.(update) ??
+						telegramUpdatePartition(update);
+					if (!partition) return new Response("Bad Request", { status: 400 });
+					const { namespace } = rt.durableUpdates;
+					try {
+						const queued = await namespace
+							.get(namespace.idFromName(partition))
+							.fetch("https://telegram-update-runner/enqueue", {
+								method: "POST",
+								headers: { "content-type": "application/json" },
+								body: JSON.stringify(update),
+							});
+						if (!queued.ok) {
+							log.error(`update enqueue failed · ${queued.status}`);
+							return new Response("update queue unavailable", {
+								status: 503,
+							});
+						}
+						return new Response("OK");
+					} catch (error) {
+						log.error(
+							"update enqueue failed:",
+							error instanceof Error ? error.message : error,
+						);
+						return new Response("update queue unavailable", { status: 503 });
+					}
 				}
 				// Ack Telegram immediately, then keep the Worker alive for the slow
 				// work (avoids GramIO's 30s webhook timeout).
@@ -408,4 +472,219 @@ function etaSeconds(meta: unknown): number | null {
 // Local minimal escaper; graduates to bot/format when that module lands.
 function escapeHtml(s: string): string {
 	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// ─── durable per-conversation update runner ─────────────────────────────────
+
+/** The slice of a Durable Object storage transaction the runner touches. */
+type RunnerTxn = {
+	get<T>(key: string): Promise<T | undefined>;
+	put(key: string, value: unknown): Promise<void>;
+	delete(key: string | string[]): Promise<unknown>;
+};
+
+/** The slice of DurableObjectState the runner touches — satisfied by the real binding. */
+export type UpdateRunnerState = {
+	storage: RunnerTxn & {
+		getAlarm(): Promise<number | null>;
+		setAlarm(time: number): Promise<void>;
+		transaction<T>(fn: (txn: RunnerTxn) => Promise<T>): Promise<T>;
+	};
+};
+
+interface UpdateJob {
+	updateId: number;
+	update: unknown;
+	attempts: number;
+	enqueuedAt: number;
+}
+
+export interface UpdateRunnerOptions {
+	/** Application retries per update before it is dropped as completed. Default 3. */
+	maxAttempts?: number;
+	/** Backoff (ms) before retry N+1; one entry per non-final attempt. Default [5s, 30s]. */
+	retryMs?: readonly number[];
+	/** Completed update ids retained for webhook de-duplication. Default 512. */
+	dedupeLimit?: number;
+}
+
+const runnerLog = createLogger("bot/update-runner");
+
+/** The Durable Object surface the factory-built runner class exposes. */
+export type TelegramUpdateRunnerClass<Env> = new (
+	state: UpdateRunnerState,
+	env: Env,
+) => {
+	fetch(request: Request): Promise<Response>;
+	alarm(): Promise<void>;
+};
+
+const HEAD_KEY = "head";
+const TAIL_KEY = "tail";
+const DONE_KEY = "done";
+const jobKey = (sequence: number) =>
+	`job:${sequence.toString().padStart(16, "0")}`;
+const dedupeKey = (updateId: number) => `update:${updateId}`;
+
+/**
+ * Build the durable, per-conversation Telegram update runner class — bind it in
+ * wrangler and hand its namespace to the runtime's `durableUpdates`. The webhook
+ * ingress only persists a job and sets an alarm; each alarm handles ONE update
+ * and checkpoints before scheduling the next. Unlike an HTTP waitUntil tail, an
+ * alarm handler owns its full invocation, so slow transcript/LLM work is not
+ * cancelled ~30 seconds after Telegram receives its acknowledgement.
+ *
+ * `resolve` is the same (memoized) runtime loader given to `botWorkerFetch`:
+ *
+ *   const loadRuntime = async (env: Env) => ({ bot: await getBot(env), ... })
+ *   export class TelegramUpdateRunner extends telegramUpdateRunner(loadRuntime) {}
+ *   export default { fetch: botWorkerFetch(loadRuntime) }
+ */
+export function telegramUpdateRunner<Env>(
+	resolve: (env: Env) => Promise<BotWorkerRuntime> | BotWorkerRuntime,
+	options: UpdateRunnerOptions = {},
+): TelegramUpdateRunnerClass<Env> {
+	const maxAttempts = options.maxAttempts ?? 3;
+	const retryMs = options.retryMs ?? [5_000, 30_000];
+	const dedupeLimit = options.dedupeLimit ?? 512;
+	const fallbackThrottle = alertThrottle();
+
+	return class TelegramUpdateRunner {
+		constructor(
+			private readonly state: UpdateRunnerState,
+			private readonly env: Env,
+		) {}
+
+		async fetch(request: Request): Promise<Response> {
+			if (
+				request.method !== "POST" ||
+				new URL(request.url).pathname !== "/enqueue"
+			) {
+				return new Response("not found", { status: 404 });
+			}
+			const update = await request.json().catch(() => null);
+			const updateId = telegramUpdateId(update);
+			if (updateId === null)
+				return new Response("invalid Telegram update", { status: 400 });
+
+			const enqueued = await this.state.storage.transaction(async (txn) => {
+				if (await txn.get(dedupeKey(updateId))) return false;
+				const tail = ((await txn.get<number>(TAIL_KEY)) ?? 0) + 1;
+				const head = await txn.get<number>(HEAD_KEY);
+				await txn.put(jobKey(tail), {
+					updateId,
+					update,
+					attempts: 0,
+					enqueuedAt: Date.now(),
+				} satisfies UpdateJob);
+				await txn.put(TAIL_KEY, tail);
+				if (head === undefined) await txn.put(HEAD_KEY, tail);
+				await txn.put(dedupeKey(updateId), "queued");
+				return true;
+			});
+			// A duplicate delivery is also a recovery kick: if the first attempt
+			// committed the job but failed while arming its alarm, Telegram's retry
+			// must repair that gap before we acknowledge it.
+			if (
+				(await this.state.storage.get<number>(HEAD_KEY)) !== undefined &&
+				(await this.state.storage.getAlarm()) === null
+			) {
+				await this.state.storage.setAlarm(Date.now());
+			}
+			return new Response(JSON.stringify({ enqueued, duplicate: !enqueued }), {
+				headers: { "content-type": "application/json" },
+			});
+		}
+
+		async alarm(): Promise<void> {
+			const sequence = await this.state.storage.get<number>(HEAD_KEY);
+			if (sequence === undefined) return;
+			const key = jobKey(sequence);
+			const job = await this.state.storage.get<UpdateJob>(key);
+			if (!job) {
+				await this.finish(sequence, null);
+				await this.scheduleNext();
+				return;
+			}
+
+			let rt: BotWorkerRuntime | undefined;
+			try {
+				rt = await resolve(this.env);
+				await rt.bot.updates.handleUpdate(job.update);
+				if (rt.flush) await rt.flush();
+			} catch (error) {
+				job.attempts += 1;
+				runnerLog.error(
+					`queued update ${job.updateId} failed · attempt ${job.attempts}/${maxAttempts}:`,
+					error instanceof Error ? error.message : error,
+				);
+				if (rt) {
+					const runtime = rt;
+					await (runtime.adminIds?.() ?? Promise.resolve([]))
+						.then((ids) =>
+							alertAdminError(
+								runtime.bot,
+								ids,
+								`queued Telegram update ${job.updateId} failed`,
+								error,
+								runtime.errorThrottle ?? fallbackThrottle,
+							),
+						)
+						.catch(() => {});
+				}
+				if (job.attempts >= maxAttempts) {
+					await this.finish(sequence, job.updateId);
+					await this.scheduleNext();
+					return;
+				}
+				await this.state.storage.put(key, job);
+				await this.state.storage.setAlarm(
+					Date.now() + (retryMs[job.attempts - 1] ?? retryMs.at(-1) ?? 30_000),
+				);
+				return;
+			}
+
+			// Checkpointing sits outside the processing catch: if storage/alarm
+			// scheduling itself fails, let the platform retry the alarm from durable
+			// state instead of misclassifying the completed Telegram update as an
+			// application failure and rebuilding a retired job.
+			await this.finish(sequence, job.updateId);
+			runnerLog.info(
+				`queued update ${job.updateId} completed · ${Date.now() - job.enqueuedAt}ms`,
+			);
+			await this.scheduleNext();
+		}
+
+		/** Retire the head job and retain a bounded completed-id window for webhook de-duplication. */
+		private async finish(
+			sequence: number,
+			updateId: number | null,
+		): Promise<void> {
+			await this.state.storage.transaction(async (txn) => {
+				await txn.delete(jobKey(sequence));
+				if (updateId !== null) {
+					await txn.put(dedupeKey(updateId), "done");
+					const done = (await txn.get<number[]>(DONE_KEY)) ?? [];
+					done.push(updateId);
+					while (done.length > dedupeLimit) {
+						const expired = done.shift();
+						if (expired !== undefined) await txn.delete(dedupeKey(expired));
+					}
+					await txn.put(DONE_KEY, done);
+				}
+				const tail = (await txn.get<number>(TAIL_KEY)) ?? sequence;
+				if (sequence >= tail) {
+					await txn.delete([HEAD_KEY, TAIL_KEY]);
+				} else {
+					await txn.put(HEAD_KEY, sequence + 1);
+				}
+			});
+		}
+
+		private async scheduleNext(): Promise<void> {
+			if ((await this.state.storage.get<number>(HEAD_KEY)) !== undefined) {
+				await this.state.storage.setAlarm(Date.now());
+			}
+		}
+	};
 }
