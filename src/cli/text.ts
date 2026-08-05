@@ -5,10 +5,10 @@
  * region/spinner) build on these; keeping them here avoids an import cycle.
  */
 
+import { ANSI_RE } from "../universal/ansi.js";
 import { bold, cyan, dim, gray, green, red, yellow } from "../universal/log.js";
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escapes is the point
-export const ANSI_RE = /\x1b\[[0-9;]*m/g;
+export { ANSI_RE };
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: split on ANSI escapes, keeping them
 const ANSI_SPLIT_RE = /(\x1b\[[0-9;]*m)/;

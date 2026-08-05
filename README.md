@@ -123,6 +123,54 @@ money(100, 'EUR')   // "€100.00"
 usdIntlOptions(0.43387) // { style: 'currency', currency: 'USD', minimumFractionDigits: 3, ... }
 ```
 
+### ANSI primitives (`ansi`)
+
+Raw escape codes, ALWAYS ON — the vocabulary under the TTY-aware layers. The
+logger and `cli` palettes decide *whether* to color (TTY, `NO_COLOR`,
+`FORCE_COLOR`); this module is for output whose consumer renders ANSI
+regardless of what stdout is: Claude Code status lines, tmux status strings,
+files a terminal will cat. 256-color first (`fg`/`bg` — stable across
+terminals and multiplexers); `rgb` for known-truecolor consumers. Out-of-range
+indices panic.
+
+```typescript
+import { fg, bg, rgb, BOLD, RESET, stripAnsi, ANSI_RE } from '@adriangalilea/utils/ansi'
+
+`${BOLD}${fg(171)}Fable 5${RESET}`   // bold bright violet
+fg(196)                              // red foreground
+bg(238)                              // dark gray background
+rgb(173, 127, 168)                   // 24-bit, when the consumer renders it
+stripAnsi(styled)                    // the string minus its escapes
+```
+
+`cli`'s ANSI-aware `width()` / `clip()` measure strings styled with these
+(they share `ANSI_RE`).
+
+### Time (`time`)
+
+Humanized time — three questions, three functions: how long is a duration
+(`span`), how long ago was an instant (`ago`, raw-duration twin `since`), how
+long until an instant (`until`). `ago` degrades by distance instead of
+stacking units: fresh instants stay relative, older ones snap to the clock the
+reader would check. Accepts `Date | ISO string | epoch ms | null | undefined`
+(null renders `"—"`); epoch numbers are milliseconds only, by design — a
+seconds heuristic would silently shift dates near the boundary.
+
+```typescript
+import { span, since, ago, until } from '@adriangalilea/utils/time'
+
+span(6_000_000)                    // "1h 40m"  (also "45s", "47m", "2d 3h")
+since(sessionStart)                // "47m" — elapsed, no "ago"
+ago(twoMinutesAgo)                 // "2m ago"  ("now" under a minute)
+ago(fiveHoursAgo)                  // "5h 12m ago"  (relative up to 6h)
+ago(thisMorning)                   // "10:30"       (clock time, today)
+ago(lastNight)                     // "yst 22:15"
+ago(fourDaysAgo)                   // "Mon 09:00"   (within a week)
+ago(lastMonth)                     // "07/28"
+until(weeklyReset)                 // "in 3d 13h"   ("now" if passed)
+ago(null)                          // "—" (every function)
+```
+
 ### URL (`url`)
 
 URLs, from user-typed text to cache identity. The whole funnel — *is there a

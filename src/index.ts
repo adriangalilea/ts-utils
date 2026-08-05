@@ -19,8 +19,10 @@ export type { RuntimeCapabilities } from "./runtime.js";
 export { ProcessExitError, runtime } from "./runtime.js";
 // Polyglot strings — TS-enforced multi-language values
 export * from "./say/index.js";
+// Universal utilities - work everywhere
+export * from "./universal/ansi.js";
 export * from "./universal/currency/index.js";
 export * from "./universal/format.js";
-// Universal utilities - work everywhere
 export * from "./universal/log.js";
+export * from "./universal/time.js";
 export * from "./universal/url/index.js";
