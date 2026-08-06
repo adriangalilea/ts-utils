@@ -296,6 +296,12 @@ export type MenuItem =
 			keepRow?: boolean;
 			/** Render at the bottom of the root menu, below the Privacy & data button. */
 			rootExtra?: boolean;
+			/**
+			 * Message text shown while INSIDE this submenu (an explainer, a legend),
+			 * replacing the menu's root header there. Falls back to the root header
+			 * when unset. Deepest header along the path wins on nested submenus.
+			 */
+			header?: Label;
 	  };
 
 export type PersonalDataOptions = {
@@ -589,6 +595,57 @@ export const toggleMenuItem = (opts: ToggleMenuItemOptions): MenuItem => ({
 	},
 });
 
+// ─── radioMenuItem ─────────────────────────────────────────────────
+
+export type RadioMenuItemOptions<V extends string> = {
+	/** Item id within the menu. Must be unique among siblings; choice ids are the values. */
+	id: string;
+	/** The parent row's label — typically a resolver showing the CURRENT choice. */
+	label: Label;
+	/**
+	 * Explainer/legend shown as the message text while inside the submenu
+	 * (the per-submenu header). This is where each choice — or each emoji a
+	 * choice implies — gets its one-line explanation.
+	 */
+	header?: Label;
+	choices: ReadonlyArray<{ value: V; label: Label }>;
+	isActive: (ctx: MenuCtx, value: V) => boolean | Promise<boolean>;
+	/** Persists the pick and returns the toast (gate refusals inside it — the
+	 *  menu owns the single answerCallbackQuery, never call ctx.answer). */
+	pick: (ctx: MenuCtx, value: V) => ActionResult | Promise<ActionResult>;
+	order?: number;
+	visible?: Predicate;
+	rootExtra?: boolean;
+};
+
+/**
+ * ONE setting, N mutually-exclusive values — the control that kills both the
+ * cycling toggle (state you can only discover by tapping) and paired
+ * mutually-exclusive toggles (whack-a-mole). Renders as a submenu with one
+ * button per value, the chosen one wearing Telegram's `success` fill (green =
+ * chosen value; `primary` blue stays the navigation channel), re-rendered in
+ * place on every pick. Storage- and policy-agnostic like the language picker:
+ * what "active" means and what a pick does live in the caller's closures.
+ */
+export const radioMenuItem = <V extends string>(
+	opts: RadioMenuItemOptions<V>,
+): MenuItem => ({
+	id: opts.id,
+	label: opts.label,
+	order: opts.order,
+	visible: opts.visible,
+	rootExtra: opts.rootExtra,
+	header: opts.header,
+	submenu: opts.choices.map((c) => ({
+		id: c.value,
+		label: c.label,
+		style: async (ctx) =>
+			(await opts.isActive(ctx, c.value)) ? "success" : undefined,
+		refresh: true,
+		action: (ctx) => opts.pick(ctx, c.value),
+	})),
+});
+
 // ─── internal: rendering + plugin ──────────────────────────────────
 
 const labelOf = async (l: Label, ctx: MenuCtx): Promise<string> => {
@@ -603,6 +660,25 @@ const itemsForPath = (root: MenuItem[], path: string[]): MenuItem[] | null => {
 	const found = root.find((i) => i.id === head);
 	if (!found || !("submenu" in found)) return null;
 	return itemsForPath(found.submenu, rest);
+};
+
+/** The header for a menu position: the DEEPEST submenu header along `path`, else the
+ *  menu's root header. Resolved fresh on every render, same contract as root. */
+const headerForPath = (
+	root: MenuItem[],
+	path: string[],
+	fallback: Label,
+): Label => {
+	let items: MenuItem[] | undefined = root;
+	let header = fallback;
+	for (const segment of path) {
+		if (!items) break;
+		const found: MenuItem | undefined = items.find((i) => i.id === segment);
+		if (!found || !("submenu" in found)) break;
+		if (found.header) header = found.header;
+		items = found.submenu;
+	}
+	return header;
 };
 
 const itemForPath = (root: MenuItem[], path: string[]): MenuItem | null => {
@@ -802,7 +878,7 @@ const buildMenuPlugin = (menu: BotMenu) => {
 				const kb = await renderKeyboard(items, ctx, segments);
 				try {
 					await ctx.editText(
-						await labelOf(header, ctx),
+						await labelOf(headerForPath(menu._items, segments, header), ctx),
 						headerParams(menu, kb),
 					);
 				} catch {
@@ -916,7 +992,10 @@ const buildMenuPlugin = (menu: BotMenu) => {
 						const kb = await renderKeyboard(items, ctx, parentPath);
 						try {
 							await ctx.editText(
-								await labelOf(header, ctx),
+								await labelOf(
+									headerForPath(menu._items, parentPath, header),
+									ctx,
+								),
 								headerParams(menu, kb),
 							);
 						} catch {
