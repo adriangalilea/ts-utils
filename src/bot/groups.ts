@@ -3,9 +3,12 @@
  * check. Worker-safe (no env, no OS).
  *
  * Telegram's Bot API has no "is this user a group admin?" primitive and neither does
- * gramio: the raw material is `getChatMember` returning a member whose `status` may be
- * `"creator"` or `"administrator"`. Every bot with an admin-gated group setting re-rolls
- * that check; this module rolls it ONCE.
+ * gramio. The raw material is `getChatAdministrators` — NOT `getChatMember`: in a group
+ * whose member list is hidden, `getChatMember` on another user rejects with
+ * `CHAT_ADMIN_REQUIRED` for a non-admin bot, so a gate built on it denies EVERY real
+ * admin (creator included) while the admin list itself stays readable. Every bot with an
+ * admin-gated group setting re-rolls that check; this module rolls it ONCE, on the call
+ * that works everywhere the bot is present.
  *
  * ## The two ctx spellings (the trap this module absorbs)
  *
@@ -21,19 +24,22 @@
  * These take minimum structural ctx shapes (the `bot/ctx.ts` philosophy) that real
  * gramio contexts AND `bot/menu`'s `MenuCtx` satisfy by duck typing — a menu action
  * gates with `isGroupAdmin(ctx)`, no cast. `ctx.bot` stays `unknown` for exactly that
- * assignability (MenuCtx's own choice); a ctx whose bot has no `api.getChatMember`
- * PANICS — a miswire screams, it doesn't read as "not admin".
+ * assignability (MenuCtx's own choice); a ctx whose bot has no
+ * `api.getChatAdministrators` PANICS — a miswire screams, it doesn't read as "not
+ * admin".
  *
- * `isGroupAdmin` FAILS CLOSED on the API call itself: a `getChatMember` rejection (user
- * never seen in the chat, network, the bot removed mid-tap) answers `false`, never
- * throws — it is a permission gate, and a gate that throws breaks the surface it guards
- * (a menu tap's single answerCallbackQuery, a command reply). That rejection is the
- * messy real world; denial is the only honest answer to "I couldn't verify".
+ * `isGroupAdmin` FAILS CLOSED on the API call itself: a `getChatAdministrators`
+ * rejection (the bot removed mid-tap, network) answers `false`, never throws — it is a
+ * permission gate, and a gate that throws breaks the surface it guards (a menu tap's
+ * single answerCallbackQuery, a command reply). That rejection is the messy real world;
+ * denial is the only honest answer to "I couldn't verify".
  *
- * Anonymous-admin caveat: an admin posting anonymously wears the group's own identity
- * in `message.from` (the GroupAnonymousBot), so a MESSAGE from them fails this check.
- * Callback taps always carry the real user, so inline-button gates (the settings case)
- * are unaffected.
+ * Anonymous admins: a message posted "as the group" carries the chat itself in
+ * `sender_chat`, and Telegram offers that identity only to the chat's own admins — so
+ * `sender_chat.id === chat.id` IS the proof, no API call (a linked channel's auto-forward
+ * wears the CHANNEL's id, so the equality never false-positives). Callback taps always
+ * carry the real user, and anonymous admins appear in the admin list under their real
+ * user, so inline-button gates resolve them too.
  *
  * @example
  * // Gate a group-wide toggle: the bot's own admins always may, otherwise the
@@ -63,23 +69,21 @@ export type ChatIdCtx = {
 
 /** Minimum ctx shape `isGroupAdmin` reads. `bot` is the running gramio Bot — typed
  *  `unknown` so MenuCtx and every real ctx assign without a cast; its
- *  `api.getChatMember` is asserted at call time. */
+ *  `api.getChatAdministrators` is asserted at call time. `senderChat` is the
+ *  anonymous-admin identity on message ctxs (callback ctxs have none). */
 export type GroupAdminCtx = ChatIdCtx & {
 	bot: unknown;
 	from?: { id?: number };
+	senderChat?: { id?: number };
 };
 
-// The one Bot API call this module makes, chat/user defaulted from the ctx.
-type GetChatMemberApi = {
-	getChatMember: (params: {
+// The one Bot API call this module makes, chat defaulted from the ctx. The list only
+// ever contains creators/administrators, so membership IS the answer — no status check.
+type GetChatAdministratorsApi = {
+	getChatAdministrators: (params: {
 		chat_id: number;
-		user_id: number;
-	}) => Promise<{ status?: string }>;
+	}) => Promise<Array<{ user?: { id?: number } }>>;
 };
-
-// The two chat-member statuses that hold power over a group. Not exported: the
-// contract is the question `isGroupAdmin` answers, never status comparison.
-const GROUP_ADMIN_STATUSES = new Set(["creator", "administrator"]);
 
 /** The ctx's chat id, whatever the event spelling. `undefined` only when the event has
  *  no chat at all (inline queries, some service events). */
@@ -101,29 +105,30 @@ export const isPrivateChat = (ctx: ChatTypeCtx): boolean =>
 	chatTypeOf(ctx) === "private";
 
 /**
- * Whether a user is a creator/administrator of a group, per `getChatMember`. Chat and
- * user default to the ctx's own ({@link chatIdOf}, `ctx.from.id` — gramio's own
- * parameter-defaulting idiom); pass `chatId` / `userId` for cross-chat checks. Missing
- * ids (an actor-less service event) or an API rejection answer `false`.
+ * Whether a user is a creator/administrator of a group, per `getChatAdministrators`
+ * membership. Chat and user default to the ctx's own ({@link chatIdOf}, `ctx.from.id` —
+ * gramio's own parameter-defaulting idiom); pass `chatId` / `userId` for cross-chat
+ * checks. An anonymous admin's own message (`senderChat` = the chat itself) answers
+ * `true` without an API call — unless an explicit `userId` asks about someone else.
+ * Missing ids (an actor-less service event) or an API rejection answer `false`.
  */
 export async function isGroupAdmin(
 	ctx: GroupAdminCtx,
 	opts: { chatId?: number; userId?: number } = {},
 ): Promise<boolean> {
 	const chatId = opts.chatId ?? chatIdOf(ctx);
+	if (chatId === undefined) return false;
+	if (opts.userId === undefined && ctx.senderChat?.id === chatId) return true;
 	const userId = opts.userId ?? ctx.from?.id;
-	if (chatId === undefined || userId === undefined) return false;
-	const bot = ctx.bot as { api?: Partial<GetChatMemberApi> } | undefined;
+	if (userId === undefined) return false;
+	const bot = ctx.bot as { api?: Partial<GetChatAdministratorsApi> } | undefined;
 	assert(
-		typeof bot?.api?.getChatMember === "function",
-		"isGroupAdmin: ctx.bot.api.getChatMember missing — not a gramio ctx?",
+		typeof bot?.api?.getChatAdministrators === "function",
+		"isGroupAdmin: ctx.bot.api.getChatAdministrators missing — not a gramio ctx?",
 	);
 	try {
-		const member = await bot.api.getChatMember({
-			chat_id: chatId,
-			user_id: userId,
-		});
-		return GROUP_ADMIN_STATUSES.has(member.status ?? "");
+		const admins = await bot.api.getChatAdministrators({ chat_id: chatId });
+		return admins.some((m) => m.user?.id === userId);
 	} catch {
 		return false;
 	}
