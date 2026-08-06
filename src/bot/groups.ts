@@ -121,7 +121,9 @@ export async function isGroupAdmin(
 	if (opts.userId === undefined && ctx.senderChat?.id === chatId) return true;
 	const userId = opts.userId ?? ctx.from?.id;
 	if (userId === undefined) return false;
-	const bot = ctx.bot as { api?: Partial<GetChatAdministratorsApi> } | undefined;
+	const bot = ctx.bot as
+		| { api?: Partial<GetChatAdministratorsApi> }
+		| undefined;
 	assert(
 		typeof bot?.api?.getChatAdministrators === "function",
 		"isGroupAdmin: ctx.bot.api.getChatAdministrators missing — not a gramio ctx?",

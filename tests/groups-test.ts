@@ -105,14 +105,21 @@ await ok("a plain member is not in the admin list", async () => {
 // The anonymous-admin rule: a message posted "as the group" wears the chat itself
 // in sender_chat, an identity Telegram grants only to the chat's own admins. No API
 // call — and a linked channel's auto-forward (sender_chat = the CHANNEL) stays denied.
-await ok("sender_chat = the chat itself proves admin, no API call", async () => {
-	const { ctx, calls } = makeCtx({ [-100]: [] });
-	const anon = { ...ctx, from: { id: 1087968824 }, senderChat: { id: -100 } };
-	assert.equal(await isGroupAdmin(anon), true);
-	const channelPost = { ...ctx, from: { id: 777000 }, senderChat: { id: -999 } };
-	assert.equal(await isGroupAdmin(channelPost), false);
-	assert.equal(calls.length, 1); // only the channel post hit the API
-});
+await ok(
+	"sender_chat = the chat itself proves admin, no API call",
+	async () => {
+		const { ctx, calls } = makeCtx({ [-100]: [] });
+		const anon = { ...ctx, from: { id: 1087968824 }, senderChat: { id: -100 } };
+		assert.equal(await isGroupAdmin(anon), true);
+		const channelPost = {
+			...ctx,
+			from: { id: 777000 },
+			senderChat: { id: -999 },
+		};
+		assert.equal(await isGroupAdmin(channelPost), false);
+		assert.equal(calls.length, 1); // only the channel post hit the API
+	},
+);
 
 await ok("explicit ids win over the ctx's own (cross-chat check)", async () => {
 	const { ctx, calls } = makeCtx({ [-200]: [42] });
