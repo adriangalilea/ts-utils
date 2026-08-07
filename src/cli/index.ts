@@ -4,9 +4,9 @@
  * Separate from `format` (which is universal value formatting, for every
  * layer) — this is terminal-scoped output.
  *
- * Colors come from `universal/log` and auto-disable on non-TTY / NO_COLOR, so a
- * `table()` renders colored in a terminal and as plain aligned text in a pipe,
- * log file, or a bot's monospace block — correct everywhere.
+ * Colors are gated in `cli/text` (TTY + NO_COLOR / FORCE_COLOR) on the `ansi`
+ * vocabulary, so a `table()` renders colored in a terminal and as plain
+ * aligned text in a pipe, log file, or a bot's monospace block.
  *
  * Alignment is ANSI-aware: padding is computed on the *visible* width (escape
  * codes stripped), so colored cells line up.

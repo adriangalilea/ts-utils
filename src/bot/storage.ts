@@ -46,10 +46,10 @@
 import type { Storage } from "@gramio/storage";
 
 import { SourcedError } from "../offensive.js";
-import { createLogger } from "../universal/log.js";
+import { scope } from "../universal/log.js";
 import type { BotIdCtx } from "./ctx.js";
 
-const log = createLogger("bot/storage");
+const log = scope("bot/storage");
 
 // ─── shared ────────────────────────────────────────────────────────
 

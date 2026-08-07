@@ -23,7 +23,7 @@ import type { Storage } from "@gramio/storage";
 import { InlineKeyboard } from "gramio";
 
 import { say } from "../../say/index.js";
-import { createLogger } from "../../universal/log.js";
+import { scope } from "../../universal/log.js";
 import { callbackNs } from "../callbacks.js";
 import { botStorageKey } from "../keys.js";
 import {
@@ -34,7 +34,7 @@ import {
 	type WaiverRecord,
 } from "./types.js";
 
-const log = createLogger("bot/payments");
+const log = scope("bot/payments");
 
 const cb = callbackNs("pay");
 

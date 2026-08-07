@@ -46,7 +46,7 @@
  *   })) }
  */
 import { buildAllowedUpdates } from "gramio";
-import { createLogger } from "../universal/log.js";
+import { scope } from "../universal/log.js";
 import {
 	type AlertThrottle,
 	alertAdminError,
@@ -58,7 +58,7 @@ import {
 	telegramUpdatePartition,
 } from "./update-identity.js";
 
-const log = createLogger("bot/worker");
+const log = scope("bot/worker");
 
 /** The slice of a gramio `Bot` the worker cap drives — structural, so versions don't pin. */
 export type WorkerBot = {
@@ -508,7 +508,7 @@ export interface UpdateRunnerOptions {
 	dedupeLimit?: number;
 }
 
-const runnerLog = createLogger("bot/update-runner");
+const runnerLog = scope("bot/update-runner");
 
 /** The Durable Object surface the factory-built runner class exposes. */
 export type TelegramUpdateRunnerClass<Env> = new (

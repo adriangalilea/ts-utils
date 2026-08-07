@@ -23,9 +23,9 @@
  * (prepare → bind → first/run), so any D1-shaped binding satisfies it.
  */
 import type { Storage } from "@gramio/storage";
-import { createLogger } from "../universal/log.js";
+import { scope } from "../universal/log.js";
 
-const log = createLogger("bot/storage-d1");
+const log = scope("bot/storage-d1");
 
 /** The slice of D1's API this adapter touches — satisfied by a real D1Database binding. */
 export type D1Like = {

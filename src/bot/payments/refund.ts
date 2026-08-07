@@ -29,7 +29,7 @@ import type { Storage } from "@gramio/storage";
 import { InlineKeyboard } from "gramio";
 
 import { say } from "../../say/index.js";
-import { createLogger } from "../../universal/log.js";
+import { scope } from "../../universal/log.js";
 import { callbackNs } from "../callbacks.js";
 import type { BotCallbackCtx } from "../ctx.js";
 import { botStorageKey } from "../keys.js";
@@ -43,7 +43,7 @@ import type {
 } from "./types.js";
 
 const FALLBACK_LANG = "en";
-const log = createLogger("bot/payments");
+const log = scope("bot/payments");
 
 const cb = callbackNs("pay");
 
@@ -291,7 +291,7 @@ export const buildRefundRequestHandler =
 
 		charge.paysupportState = "opened";
 		await opts.stores.charges.set(ctx, charge.chargeId, charge);
-		log.event(
+		log.success(
 			`refund requested by user: chargeId=${charge.chargeId} product=${charge.productKey} xtr=${charge.xtr}`,
 		);
 
@@ -344,7 +344,7 @@ export const buildRefundApproveHandler =
 			return;
 		}
 
-		log.event(
+		log.success(
 			`admin approving refund: chargeId=${charge.chargeId} user=${charge.userId} xtr=${charge.xtr}`,
 		);
 		try {

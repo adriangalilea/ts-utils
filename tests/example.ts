@@ -10,11 +10,12 @@ console.log("\n=== Logger Examples ===\n");
 
 // Basic logging
 log.wait("Loading resources...");
+log.step("resolving config");
 log.info("This is an info message");
 log.success("Operation completed successfully");
 log.warn("This is a warning");
 log.error("This is an error");
-log.event("User logged in");
+log.fail("Deploy failed");
 log.trace("Trace: function called");
 log.ready("Server is ready");
 
@@ -28,11 +29,12 @@ setTimeout(() => {
 	log.timeEnd("dataFetch");
 }, 100);
 
-// Prefixed logger
-const apiLogger = log.createLogger("API");
+// Scoped logger — lines carry [api], level reads API_LOG_LEVEL first
+const apiLogger = log.scope("api");
 apiLogger.info("Request received");
 apiLogger.success("Response sent");
 apiLogger.error("Connection failed");
+apiLogger.scope("auth").warn("token expiring"); // [api auth]
 
 console.log("\n=== Currency Examples ===\n");
 

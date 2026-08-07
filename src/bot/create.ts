@@ -32,7 +32,7 @@
 import { inMemoryStorage, type Storage } from "@gramio/storage";
 import { Bot } from "gramio";
 import { runtime } from "../runtime.js";
-import { createLogger } from "../universal/log.js";
+import { scope } from "../universal/log.js";
 import { type AccessControlOptions, accessControl } from "./access-control.js";
 import { type Admins, adminContext } from "./admin.js";
 import { type LanguageOptions, language } from "./language.js";
@@ -47,7 +47,7 @@ import { botSession } from "./session.js";
 import { type D1Like, d1Storage } from "./storage-d1.js";
 import { type BotWorkerRuntime, botWorkerFetch } from "./worker.js";
 
-const log = createLogger("bot");
+const log = scope("bot");
 
 type EnvLike = Record<string, unknown>;
 

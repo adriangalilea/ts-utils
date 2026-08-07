@@ -1,369 +1,378 @@
 /**
- * A Next.js-style logger for TypeScript applications
- * Provides colored output with Unicode symbols for different log levels
+ * Terminal-first logger with two renderings and one automatic decision.
  *
- * Known limitations:
- * - createLogger() is just a prefix wrapper, not a real scoped instance.
- *   No per-scope level control (can't silence 'bor' but keep 'bdns' verbose).
- * - No withTag/child pattern — consumer can't control library log levels.
+ * Two knobs, never confusing: format = how lines render, time = whether
+ * lines carry time. Each defaults sensibly and independently.
  *
- * Candidate replacement: consola (unjs). Same DX goals, solves all the above:
- *   - consola.level = N at runtime
- *   - consola.withTag('bdns') for scoped loggers that inherit global level
- *   - Pretty dev output, JSON in prod, browser support, 0 deps
- *   - https://github.com/unjs/consola
+ * Format — LOG_FORMAT=human|record, or setLogFormat(). Default by TTY
+ *     detection on the sink: a TTY gets human (symbols, color, a line meant
+ *     for eyes), anything else gets record (level words, plain text, a line
+ *     meant for a file read later). Detection happens on the stream actually
+ *     written to (stderr), never a sibling stream.
  *
- * TODO: test consola in dokploy instance before migrating.
+ * Time — LOG_TIME=1|0, or setLogTime(). Default: on in Node record mode,
+ *     off everywhere else (human eyes don't need stamps; browser and Worker
+ *     consoles stamp lines themselves). Record time opens the line with UTC
+ *     RFC3339; human time prefixes a dim local HH:MM:SS (a human knows
+ *     today's date).
+ *
+ * The record line with time on, identical across go-utils and py-utils by
+ * design:
+ *     2026-08-07T12:34:56Z WARN  [scope] message
+ *     UTC RFC3339 seconds precision · level word padded to 5 · scope brackets
+ *     only when scoped · no color, no symbols. Grep WARN, not ⚠.
+ *
+ * Sinks
+ *     Node/Bun/Deno: every level writes to stderr through console.error, so
+ *     stdout stays clean for data and cli/live's console routing keeps log
+ *     lines above an active region.
+ *     Browser: level-mapped console methods (debug/info/warn/error), human.
+ *     Workers: level-mapped console methods, record.
+ *
+ * Levels vs verbs
+ *     Levels filter: silent < error < warn < info < debug < trace. An unknown
+ *     LOG_LEVEL is a misconfiguration and throws Panic.
+ *     Verbs express outcome and are renderings, never levels:
+ *     error ⨯  fail ⨯ (error) · warn ⚠ (warn) · info · success ✓ · wait ○ ·
+ *     ready ▶ · step • (info) · debug ◦ (debug) · trace » (trace).
+ *     In record mode a verb renders as its level word.
+ *
+ * Scopes
+ *     log.scope('api') returns a child whose lines carry [api]; scopes nest
+ *     and join: log.scope('api').scope('auth') → [api auth]. A scoped logger
+ *     resolves its threshold from {SCOPE}_LOG_LEVEL (upper-cased, joined and
+ *     sanitized to A-Z0-9_: API_AUTH_LOG_LEVEL, then API_LOG_LEVEL), falling
+ *     back to setLogLevel(), then LOG_LEVEL, then info — read live, so one
+ *     subsystem can be silenced or opened up without touching code.
+ *
+ * Config is env plus three runtime setters — setLogLevel(), setLogFormat(),
+ *     setLogTime(). No handlers, no formatters, no init. NO_COLOR /
+ *     FORCE_COLOR override color within human mode. Unknown values of any
+ *     knob throw Panic. All internal memory is bounded.
+ *
+ * Siblings: go-utils and py-utils implement the same doctrine in their own
+ * idioms; the record line format is identical by design.
  */
 
+import { panic } from "../offensive.js";
 import { runtime } from "../runtime.js";
+import { BOLD, DIM, RESET, fg } from "./ansi.js";
 
-// ANSI escape codes for colors
-const ANSI = {
-	reset: "\x1b[0m",
-	bold: "\x1b[1m",
-	dim: "\x1b[2m",
+// --- environment ---------------------------------------------------------
 
-	// Foreground colors
-	black: "\x1b[30m",
-	red: "\x1b[31m",
-	green: "\x1b[32m",
-	yellow: "\x1b[33m",
-	blue: "\x1b[34m",
-	magenta: "\x1b[35m",
-	cyan: "\x1b[36m",
-	white: "\x1b[37m",
-	gray: "\x1b[90m",
+type Sink = "node" | "browser" | "worker";
 
-	// Custom purple (Next.js style)
-	purple: "\x1b[38;2;173;127;168m",
+const sink: Sink =
+	runtime.isNode || runtime.isBun || runtime.isDeno
+		? "node"
+		: runtime.isBrowser
+			? "browser"
+			: "worker";
 
-	// Background colors
-	bgRed: "\x1b[41m",
-	bgGreen: "\x1b[42m",
-	bgYellow: "\x1b[43m",
-	bgBlue: "\x1b[44m",
-	bgMagenta: "\x1b[45m",
-	bgCyan: "\x1b[46m",
-	bgWhite: "\x1b[47m",
-} as const;
+// --- format --------------------------------------------------------------
 
-// Detect if colors should be enabled
-const isColorEnabled = (): boolean => {
-	if (runtime.isBrowser) return true; // Always enable colors in browser (CSS will handle it)
+export type LogFormat = "human" | "record";
 
+let formatOverride: LogFormat | undefined;
+
+/** Force human or record rendering at runtime. Wins over LOG_FORMAT and auto-detection. */
+export function setLogFormat(format: LogFormat): void {
+	if (format !== "human" && format !== "record")
+		panic("unknown log format:", format, "(want human|record)");
+	formatOverride = format;
+}
+
+function currentFormat(): LogFormat {
+	if (formatOverride) return formatOverride;
+	const env = runtime.env("LOG_FORMAT");
+	if (env === "human" || env === "record") return env;
+	if (env !== undefined)
+		panic("unknown LOG_FORMAT:", env, "(want human|record)");
+	if (sink === "node") return runtime.stderr.isTTY ? "human" : "record";
+	return sink === "browser" ? "human" : "record";
+}
+
+// --- time ----------------------------------------------------------------
+
+let timeOverride: boolean | undefined;
+
+/** Force time prefixes on or off at runtime. Wins over LOG_TIME and the defaults. */
+export function setLogTime(on: boolean): void {
+	timeOverride = on;
+}
+
+// Default: on only for Node record mode. Human lines are for eyes; browser
+// and Worker consoles stamp every line themselves.
+function timeEnabled(format: LogFormat): boolean {
+	if (timeOverride !== undefined) return timeOverride;
+	const env = runtime.env("LOG_TIME");
+	if (env === "1") return true;
+	if (env === "0") return false;
+	if (env !== undefined) panic("unknown LOG_TIME:", env, "(want 1|0)");
+	return format === "record" && sink === "node";
+}
+
+function colorEnabled(): boolean {
+	if (currentFormat() === "record") return false;
 	if (runtime.env("NO_COLOR")) return false;
 	if (runtime.env("FORCE_COLOR")) return true;
-	return (
-		runtime.stdout.isTTY && !runtime.env("CI") && runtime.env("TERM") !== "dumb"
-	);
-};
+	if (sink === "browser") return true;
+	if (sink === "worker") return false;
+	return runtime.stderr.isTTY && runtime.env("TERM") !== "dumb";
+}
 
-const colorEnabled = isColorEnabled();
+// --- levels --------------------------------------------------------------
 
-// Color formatter function
-const formatter = (open: string, close = ANSI.reset) => {
-	if (!colorEnabled) return (str: string) => str;
-	return (str: string) => `${open}${str}${close}`;
-};
-
-// Text styling functions
-export const bold = formatter(ANSI.bold);
-export const dim = formatter(ANSI.dim);
-export const red = formatter(ANSI.red);
-export const green = formatter(ANSI.green);
-export const yellow = formatter(ANSI.yellow);
-export const blue = formatter(ANSI.blue);
-export const magenta = formatter(ANSI.magenta);
-export const cyan = formatter(ANSI.cyan);
-export const white = formatter(ANSI.white);
-export const gray = formatter(ANSI.gray);
-export const purple = formatter(ANSI.purple);
-
-// Background colors
-export const bgRed = formatter(ANSI.bgRed);
-export const bgGreen = formatter(ANSI.bgGreen);
-export const bgYellow = formatter(ANSI.bgYellow);
-export const bgBlue = formatter(ANSI.bgBlue);
-export const bgMagenta = formatter(ANSI.bgMagenta);
-export const bgCyan = formatter(ANSI.bgCyan);
-export const bgWhite = formatter(ANSI.bgWhite);
-
-// Prefix symbols matching Next.js style
-const prefixes = {
-	wait: white(bold("○")),
-	error: red(bold("⨯")),
-	warn: yellow(bold("⚠")),
-	ready: "▶",
-	info: white(bold(" ")),
-	success: green(bold("✓")),
-	event: green(bold("✓")),
-	trace: magenta(bold("»")),
+const LEVELS = {
+	silent: 0,
+	error: 1,
+	warn: 2,
+	info: 3,
+	debug: 4,
+	trace: 5,
 } as const;
 
-type LogLevel = keyof typeof prefixes;
+export type LogLevel = keyof typeof LEVELS;
+type MessageLevel = Exclude<LogLevel, "silent">;
 
-// Log level priority (lower number = higher priority)
-const LOG_LEVELS = {
-	error: 0,
-	warn: 1,
-	info: 2,
-	ready: 2,
-	success: 2,
-	event: 2,
-	wait: 3,
-	trace: 4,
-} as const;
+function parseLevel(raw: string): number {
+	const n = LEVELS[raw.toLowerCase() as LogLevel];
+	if (n === undefined)
+		panic("unknown log level:", raw, "(want silent|error|warn|info|debug|trace)");
+	return n;
+}
 
-type LogLevelName = "error" | "warn" | "info" | "trace";
+let levelOverride: number | undefined;
 
-function parseLogLevel(level: string | undefined): number {
-	switch (level?.toLowerCase()) {
-		case "error":
-			return LOG_LEVELS.error;
-		case "warn":
-			return LOG_LEVELS.warn;
-		case "info":
-			return LOG_LEVELS.info;
-		case "debug":
-		case "trace":
-			return LOG_LEVELS.trace;
-		default:
-			return LOG_LEVELS.info;
+/** Set the global log level at runtime. Wins over LOG_LEVEL; per-scope env vars still win over this. */
+export function setLogLevel(level: LogLevel): void {
+	levelOverride = parseLevel(level);
+}
+
+const envKey = (scopes: readonly string[]): string =>
+	`${scopes
+		.map((s) => s.toUpperCase().replace(/[^A-Z0-9]+/g, "_"))
+		.join("_")}_LOG_LEVEL`;
+
+// Most specific scope wins: [api auth] reads API_AUTH_LOG_LEVEL, then
+// API_LOG_LEVEL, then the runtime override, then LOG_LEVEL. Read live on
+// every line so a level flip needs no restart hook.
+function threshold(scopes: readonly string[]): number {
+	for (let i = scopes.length; i > 0; i--) {
+		const raw = runtime.env(envKey(scopes.slice(0, i)));
+		if (raw !== undefined) return parseLevel(raw);
+	}
+	if (levelOverride !== undefined) return levelOverride;
+	const raw = runtime.env("LOG_LEVEL");
+	return raw === undefined ? LEVELS.info : parseLevel(raw);
+}
+
+// --- verbs ---------------------------------------------------------------
+
+type Verb =
+	| "error"
+	| "fail"
+	| "warn"
+	| "info"
+	| "success"
+	| "wait"
+	| "ready"
+	| "step"
+	| "debug"
+	| "trace";
+
+const VERBS: Record<
+	Verb,
+	{ level: MessageLevel; symbol: string; style: string; indent: string }
+> = {
+	error: { level: "error", symbol: "⨯", style: BOLD + fg(1), indent: "" },
+	fail: { level: "error", symbol: "⨯", style: BOLD + fg(1), indent: "" },
+	warn: { level: "warn", symbol: "⚠", style: BOLD + fg(3), indent: "" },
+	info: { level: "info", symbol: " ", style: "", indent: "" },
+	success: { level: "info", symbol: "✓", style: BOLD + fg(2), indent: "" },
+	wait: { level: "info", symbol: "○", style: BOLD + fg(7), indent: "" },
+	ready: { level: "info", symbol: "▶", style: BOLD + fg(2), indent: "" },
+	step: { level: "info", symbol: "•", style: DIM, indent: "  " },
+	debug: { level: "debug", symbol: "◦", style: fg(8), indent: "" },
+	trace: { level: "trace", symbol: "»", style: BOLD + fg(5), indent: "" },
+};
+
+const LEVEL_WORD: Record<MessageLevel, string> = {
+	error: "ERROR",
+	warn: "WARN ",
+	info: "INFO ",
+	debug: "DEBUG",
+	trace: "TRACE",
+};
+
+// --- rendering -----------------------------------------------------------
+
+const rfc3339 = (): string => `${new Date().toISOString().slice(0, 19)}Z`;
+const clockTime = (): string => new Date().toTimeString().slice(0, 8);
+
+function stringify(m: unknown): string {
+	if (typeof m === "string") return m;
+	if (m instanceof Error) return m.stack ?? String(m);
+	try {
+		return JSON.stringify(m) ?? String(m);
+	} catch {
+		return String(m);
 	}
 }
 
-let currentLogLevel = parseLogLevel(runtime.env("LOG_LEVEL"));
+type ConsoleLevel = "error" | "warn" | "info" | "debug";
 
-/** Set the global log level at runtime. Overrides LOG_LEVEL env var. */
-export function setLogLevel(level: LogLevelName): void {
-	currentLogLevel = parseLogLevel(level);
-}
+const CONSOLE_METHOD: Record<MessageLevel, ConsoleLevel> = {
+	error: "error",
+	warn: "warn",
+	info: "info",
+	debug: "debug",
+	trace: "debug",
+};
 
-// LRU Cache for warn-once functionality
-class LRUCache<K, V> {
-	private cache = new Map<K, V>();
-	private maxSize: number;
+function emit(scopes: readonly string[], verb: Verb, messages: unknown[]): void {
+	const v = VERBS[verb];
+	if (LEVELS[v.level] > threshold(scopes)) return;
 
-	constructor(maxSize: number) {
-		this.maxSize = maxSize;
-	}
+	// Node funnels every level through console.error: stderr is the log sink
+	// and cli/live patches console methods to reroute lines above an active
+	// region. Browser/worker use level-mapped methods so platform consoles
+	// classify lines correctly.
+	const method: ConsoleLevel =
+		sink === "node" ? "error" : CONSOLE_METHOD[v.level];
 
-	get(key: K): V | undefined {
-		const item = this.cache.get(key);
-		if (item !== undefined) {
-			// Move to end (most recently used)
-			this.cache.delete(key);
-			this.cache.set(key, item);
-		}
-		return item;
-	}
+	const format = currentFormat();
 
-	set(key: K, value: V): void {
-		if (this.cache.has(key)) {
-			this.cache.delete(key);
-		}
-		this.cache.set(key, value);
-
-		if (this.cache.size > this.maxSize) {
-			// Remove least recently used (first item)
-			const firstKey = this.cache.keys().next().value;
-			if (firstKey !== undefined) {
-				this.cache.delete(firstKey);
-			}
-		}
-	}
-
-	has(key: K): boolean {
-		return this.cache.has(key);
-	}
-}
-
-const warnOnceCache = new LRUCache<string, boolean>(10_000);
-
-// Core logging function
-function prefixedLog(level: LogLevel, ...messages: unknown[]): void {
-	// Check if this log level should be displayed
-	const levelPriority =
-		LOG_LEVELS[level as keyof typeof LOG_LEVELS] ?? LOG_LEVELS.info;
-	if (levelPriority > currentLogLevel) {
-		return; // Skip this log
-	}
-
-	// Remove empty first message
-	if (
-		(messages[0] === "" || messages[0] === undefined) &&
-		messages.length === 1
-	) {
-		messages.shift();
-	}
-
-	// Determine console method based on level
-	const consoleMethod =
-		level === "error" ? "error" : level === "warn" ? "warn" : "log";
-	const prefix = prefixes[level];
-
-	// Handle empty messages
-	if (messages.length === 0) {
-		console[consoleMethod]("");
+	if (format === "record") {
+		const stamp = timeEnabled(format) ? `${rfc3339()} ` : "";
+		const scope = scopes.length > 0 ? `[${scopes.join(" ")}] ` : "";
+		console[method](
+			`${stamp}${LEVEL_WORD[v.level]} ${scope}${messages.map(stringify).join(" ")}`,
+		);
 		return;
 	}
 
-	// Format and log the message
+	const color = colorEnabled();
+	const dimmed = (s: string): string => (color ? `${DIM}${s}${RESET}` : s);
+	const stamp = timeEnabled(format) ? `${dimmed(clockTime())} ` : "";
+	const symbol = color ? `${v.style}${v.symbol}${RESET}` : v.symbol;
+	const scope = scopes.length > 0 ? `${dimmed(`[${scopes.join(" ")}]`)} ` : "";
+	const prefix = `${stamp}${v.indent} ${symbol} ${scope}`;
+	// A single string collapses into one line; anything richer is handed to
+	// console so devtools/util.inspect keep live object rendering.
 	if (messages.length === 1 && typeof messages[0] === "string") {
-		console[consoleMethod](` ${prefix} ${messages[0]}`);
+		console[method](`${prefix}${messages[0]}`);
 	} else {
-		console[consoleMethod](` ${prefix}`, ...messages);
+		console[method](prefix.trimEnd(), ...messages);
 	}
 }
 
-// Bootstrap function for startup messages (no prefix, just indentation)
-export function bootstrap(...messages: string[]): void {
-	console.log(`   ${messages.join(" ")}`);
-}
+// --- bounded state (daemons run for months) ------------------------------
 
-// Main logging functions
-export function wait(...messages: unknown[]): void {
-	prefixedLog("wait", ...messages);
-}
+const BOUND = 1024;
 
-export function error(...messages: unknown[]): void {
-	prefixedLog("error", ...messages);
-}
-
-export function warn(...messages: unknown[]): void {
-	prefixedLog("warn", ...messages);
-}
-
-export function ready(...messages: unknown[]): void {
-	prefixedLog("ready", ...messages);
-}
-
-export function info(...messages: unknown[]): void {
-	prefixedLog("info", ...messages);
-}
-
-export function success(...messages: unknown[]): void {
-	prefixedLog("success", ...messages);
-}
-
-export function event(...messages: unknown[]): void {
-	prefixedLog("event", ...messages);
-}
-
-export function trace(...messages: unknown[]): void {
-	prefixedLog("trace", ...messages);
-}
-
-// Special warn-once function
-export function warnOnce(...messages: unknown[]): void {
-	const key = messages.join(" ");
-	if (!warnOnceCache.has(key)) {
-		warnOnceCache.set(key, true);
-		warn(...messages);
-	}
-}
-
-// Timer functionality for measuring durations
+const warned = new Set<string>();
 const timers = new Map<string, number>();
 
-export function time(label: string): void {
-	timers.set(label, Date.now());
+// --- logger --------------------------------------------------------------
+
+export interface Logger {
+	error(...messages: unknown[]): void;
+	fail(...messages: unknown[]): void;
+	warn(...messages: unknown[]): void;
+	/** warn() that fires once per distinct message for the process lifetime. */
+	warnOnce(...messages: unknown[]): void;
+	info(...messages: unknown[]): void;
+	success(...messages: unknown[]): void;
+	wait(...messages: unknown[]): void;
+	ready(...messages: unknown[]): void;
+	/** Indented sub-step bullet under a wait/ready line. */
+	step(...messages: unknown[]): void;
+	debug(...messages: unknown[]): void;
+	trace(...messages: unknown[]): void;
+	/** Start a duration measurement; timeEnd() reports it at trace level. */
+	time(label: string): void;
+	timeEnd(label: string): void;
+	/** Child logger: lines carry [name], level reads {NAME}_LOG_LEVEL first. */
+	scope(name: string): Logger;
 }
 
-export function timeEnd(label: string): void {
-	const start = timers.get(label);
-	if (start === undefined) {
-		warn(`Timer '${label}' does not exist`);
-		return;
-	}
+function makeLogger(scopes: readonly string[]): Logger {
+	const verb =
+		(v: Verb) =>
+		(...messages: unknown[]): void =>
+			emit(scopes, v, messages);
 
-	const duration = Date.now() - start;
-	timers.delete(label);
-
-	const formatted =
-		duration > 10000
-			? `${Math.round(duration / 100) / 10}s`
-			: `${Math.round(duration)}ms`;
-
-	trace(`${label}: ${formatted}`);
-}
-
-// Utility function to create a prefixed logger instance
-export function createLogger(prefix: string) {
 	return {
-		wait: (...messages: unknown[]) => wait(`[${prefix}]`, ...messages),
-		error: (...messages: unknown[]) => error(`[${prefix}]`, ...messages),
-		warn: (...messages: unknown[]) => warn(`[${prefix}]`, ...messages),
-		ready: (...messages: unknown[]) => ready(`[${prefix}]`, ...messages),
-		info: (...messages: unknown[]) => info(`[${prefix}]`, ...messages),
-		success: (...messages: unknown[]) => success(`[${prefix}]`, ...messages),
-		event: (...messages: unknown[]) => event(`[${prefix}]`, ...messages),
-		trace: (...messages: unknown[]) => trace(`[${prefix}]`, ...messages),
-		warnOnce: (...messages: unknown[]) => warnOnce(`[${prefix}]`, ...messages),
-		time: (label: string) => time(`${prefix}:${label}`),
-		timeEnd: (label: string) => timeEnd(`${prefix}:${label}`),
+		error: verb("error"),
+		fail: verb("fail"),
+		warn: verb("warn"),
+		info: verb("info"),
+		success: verb("success"),
+		wait: verb("wait"),
+		ready: verb("ready"),
+		step: verb("step"),
+		debug: verb("debug"),
+		trace: verb("trace"),
+
+		warnOnce(...messages: unknown[]): void {
+			const key = scopes.join(" ") + messages.map(stringify).join(" ");
+			if (warned.has(key)) return;
+			if (warned.size >= BOUND) warned.clear();
+			warned.add(key);
+			emit(scopes, "warn", messages);
+		},
+
+		time(label: string): void {
+			if (timers.size >= BOUND) timers.clear();
+			timers.set(`${scopes.join(" ")}:${label}`, Date.now());
+		},
+
+		timeEnd(label: string): void {
+			const key = `${scopes.join(" ")}:${label}`;
+			const start = timers.get(key);
+			if (start === undefined) {
+				emit(scopes, "warn", [`Timer '${label}' does not exist`]);
+				return;
+			}
+			timers.delete(key);
+			const ms = Date.now() - start;
+			const pretty =
+				ms > 10_000 ? `${Math.round(ms / 100) / 10}s` : `${Math.round(ms)}ms`;
+			emit(scopes, "trace", [`${label}: ${pretty}`]);
+		},
+
+		scope(name: string): Logger {
+			return makeLogger([...scopes, name]);
+		},
 	};
 }
 
-// Export a default log instance
-const log = {
-	wait,
-	error,
-	warn,
-	ready,
-	info,
-	success,
-	event,
-	trace,
-	warnOnce,
-	time,
-	timeEnd,
-	bootstrap,
-	createLogger,
+const root = makeLogger([]);
+
+export const error = root.error;
+export const fail = root.fail;
+export const warn = root.warn;
+export const warnOnce = root.warnOnce;
+export const info = root.info;
+export const success = root.success;
+export const wait = root.wait;
+export const ready = root.ready;
+export const step = root.step;
+export const debug = root.debug;
+export const trace = root.trace;
+export const time = root.time;
+export const timeEnd = root.timeEnd;
+export const scope = root.scope;
+
+/** The root logger plus its runtime knobs, for namespace-style consumers. */
+export const log: Logger & {
+	setLogLevel: typeof setLogLevel;
+	setLogFormat: typeof setLogFormat;
+	setLogTime: typeof setLogTime;
+} = {
+	...root,
 	setLogLevel,
-
-	// Color utilities
-	colors: {
-		bold,
-		dim,
-		red,
-		green,
-		yellow,
-		blue,
-		magenta,
-		cyan,
-		white,
-		gray,
-		purple,
-		bgRed,
-		bgGreen,
-		bgYellow,
-		bgBlue,
-		bgMagenta,
-		bgCyan,
-		bgWhite,
-	},
+	setLogFormat,
+	setLogTime,
 };
-
-export { log };
-
-// Example usage helper
-export function logAppStartup(options: {
-	name: string;
-	version: string;
-	port: number;
-	host?: string;
-	environment?: string;
-}): void {
-	const { name, version, port, host = "localhost", environment } = options;
-
-	bootstrap(bold(purple(`▶ ${name} ${version}`)));
-	bootstrap(`- Local:        http://${host}:${port}`);
-
-	if (environment) {
-		bootstrap(`- Environment:  ${environment}`);
-	}
-
-	info("");
-}

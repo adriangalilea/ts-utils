@@ -23,7 +23,7 @@
 
 import { panic, SourcedError } from "../../offensive.js";
 import { say } from "../../say/index.js";
-import { createLogger } from "../../universal/log.js";
+import { scope } from "../../universal/log.js";
 import type { BotPaymentCtx, BotPreCheckoutCtx } from "../ctx.js";
 import { decodePayload } from "./payload.js";
 import { applyCharge } from "./state.js";
@@ -39,7 +39,7 @@ import type {
 	VipRungResolved,
 } from "./types.js";
 
-const log = createLogger("bot/payments");
+const log = scope("bot/payments");
 
 const FALLBACK_LANG = "en";
 
@@ -124,7 +124,7 @@ const kindOf = (
 export const buildPreCheckoutHandler =
 	(catalog: ProductCatalog) =>
 	async (ctx: PreCheckoutCtx): Promise<void> => {
-		log.event(
+		log.success(
 			`pre_checkout_query received: user=${ctx.from.id} currency=${ctx.currency} amount=${ctx.totalAmount} payload="${ctx.invoicePayload}" id=${ctx.id}`,
 		);
 		const reject = async (
@@ -273,7 +273,7 @@ export const buildSuccessfulPaymentHandler =
 		}
 		if (payment.currency !== "XTR") return; // fiat — not ours
 
-		log.event(
+		log.success(
 			`successful_payment received: chargeId=${payment.telegram_payment_charge_id} amount=${payment.total_amount} payload="${payment.invoice_payload}" subExpires=${payment.subscription_expiration_date ?? "n/a"}`,
 		);
 

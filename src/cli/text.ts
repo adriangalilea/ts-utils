@@ -5,10 +5,31 @@
  * region/spinner) build on these; keeping them here avoids an import cycle.
  */
 
-import { ANSI_RE } from "../universal/ansi.js";
-import { bold, cyan, dim, gray, green, red, yellow } from "../universal/log.js";
+import { ANSI_RE, BOLD, DIM, RESET, fg } from "../universal/ansi.js";
 
 export { ANSI_RE };
+
+// The palette makes ONE whether-to-color decision for both cli layers, and
+// cli writes to both streams (static output → stdout, live regions → stderr),
+// so color requires BOTH to be TTYs: any redirection means some cli string
+// may land in a file, and a file never gets escapes. NO_COLOR / FORCE_COLOR
+// override. `ansi` stays the always-on vocabulary underneath.
+const colorEnabled: boolean = process.env.FORCE_COLOR
+	? true
+	: process.env.NO_COLOR || process.env.TERM === "dumb"
+		? false
+		: process.stdout.isTTY === true && process.stderr.isTTY === true;
+
+const paint = (open: string) =>
+	colorEnabled ? (s: string): string => `${open}${s}${RESET}` : (s: string): string => s;
+
+export const bold = paint(BOLD);
+export const dim = paint(DIM);
+export const red = paint(fg(1));
+export const green = paint(fg(2));
+export const yellow = paint(fg(3));
+export const cyan = paint(fg(6));
+export const gray = paint(fg(8));
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: split on ANSI escapes, keeping them
 const ANSI_SPLIT_RE = /(\x1b\[[0-9;]*m)/;

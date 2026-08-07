@@ -19,7 +19,7 @@
 
 import { panic, SourcedError } from "../../offensive.js";
 import { say } from "../../say/index.js";
-import { createLogger } from "../../universal/log.js";
+import { scope } from "../../universal/log.js";
 import { encodePayload } from "./payload.js";
 import type {
 	BotPaymentsConfig,
@@ -31,7 +31,7 @@ import type {
 } from "./types.js";
 import { renderConsentBody, waiverKeyboard } from "./waiver.js";
 
-const log = createLogger("bot/payments");
+const log = scope("bot/payments");
 
 // Telegram caps from the Bot API (sendInvoice §):
 const TITLE_MAX = 32;
@@ -235,7 +235,7 @@ export const sendInvoiceForProduct = async (
 		params.subscription_period = (product as VipRungResolved).periodSeconds;
 	}
 
-	log.event(
+	log.success(
 		`sendInvoice → telegram: product=${product.id} user=${userId} xtr=${product.xtr} title="${title}" subscription_period=${params.subscription_period ?? "none"}`,
 	);
 	try {

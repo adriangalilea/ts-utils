@@ -30,10 +30,10 @@
  *   adminIds: () => store.readAdminIds(ctx, []),              // live resolver or plain array
  * })
  */
-import { createLogger } from "../universal/log.js";
+import { scope } from "../universal/log.js";
 import { notifyAdmins } from "./notify.js";
 
-const log = createLogger("bot/profile");
+const log = scope("bot/profile");
 
 // Telegram caps, counted in code points so emoji are one glyph each.
 const NAME_MAX = 64;

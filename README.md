@@ -12,32 +12,48 @@ pnpm add @adriangalilea/utils
 
 ### Logger
 
-Next.js-style logger with colored output and Unicode symbols:
+Two renderings, one automatic decision: a TTY gets *human* (symbols, color), anything else gets *record* (level words, plain text, greppable). The same program prints `✓ synced` while you develop it and `2026-08-07T12:34:56Z INFO  synced` the moment launchd points it at a file. Detection happens on the stream actually written to (stderr in Node; stdout stays clean for data).
 
 ```typescript
-import { wait, error, warn, ready, info, success, event, trace, createLogger } from '@adriangalilea/utils'
+import { wait, step, error, fail, warn, warnOnce, ready, info, success, debug, trace, scope, time, timeEnd } from '@adriangalilea/utils/log'
 
-// Basic logging
-wait('Loading...')
-error('Something went wrong')
-warn('This is a warning')
-ready('Server is ready')
+// Verbs express outcome; each renders at its level (fail is error-level, the rest info)
+wait('Loading...')          // ○
+step('resolving config')    //   • (indented sub-step)
 info('Information message')
-success('Operation successful')
-event('Event occurred')
-trace('Trace message')
+success('Operation successful')  // ✓
+ready('Server is ready')    // ▶
+warn('This is a warning')   // ⚠
+error('Something went wrong')    // ⨯
+fail('Deploy failed')       // ⨯
+debug('Cache miss')         // ◦
+trace('Trace message')      // »
 
 // Warn once (won't repeat same message)
 warnOnce('This warning appears only once')
 
-// Timer functionality
+// Timer functionality (reports at trace level)
 time('operation')
 // ... do something
-timeEnd('operation') // outputs: operation: 123ms
+timeEnd('operation') // operation: 123ms
 
-// Create prefixed logger
-const apiLogger = createLogger('API')
-apiLogger.info('Request received')  // [API] Request received
+// Scoped logger — lines carry [api], and API_LOG_LEVEL controls it from env
+const api = scope('api')
+api.info('Request received')          //  [api] Request received
+api.scope('auth').warn('token old')   // ⚠ [api auth] token old
+```
+
+Levels filter (`silent < error < warn < info < debug < trace`); an unknown `LOG_LEVEL` throws. A scoped logger reads `{SCOPE}_LOG_LEVEL` before `LOG_LEVEL`, live: `GZIP_LOG_LEVEL=silent` shuts one subsystem up without touching code, `GZIP_LOG_LEVEL=trace` opens it wide while the rest stays quiet.
+
+Two knobs, both env + runtime setter, both with sane defaults:
+
+- `LOG_FORMAT=human|record` / `setLogFormat()` — how lines render. Default: TTY → human, otherwise record. Workers and browsers use level-mapped console methods; Node funnels everything to stderr.
+- `LOG_TIME=1|0` / `setLogTime()` — whether lines open with time. Default: on in Node record mode (a daemon's log file must answer "when"), off everywhere else (human eyes don't need stamps; Worker and browser consoles stamp lines themselves). Record time is UTC RFC3339; human time is a dim local `HH:MM:SS`.
+
+The record line format is identical across go-utils and py-utils by design:
+
+```
+2026-08-07T12:34:56Z WARN  [scope] message
 ```
 
 ### Currency
@@ -388,7 +404,7 @@ catch (e) {
     return { error: 'card declined' }
   }
   if (isSourcedError(e)) {
-    logger.error(`[${e.source}:${e.operation}]`, e.toJSON())  // structured forensics
+    log.scope(e.source).error(e.operation, e.toJSON())  // structured forensics
     throw e
   }
   throw e                                                     // unknown — re-throw
@@ -399,7 +415,7 @@ Every `SourcedError` carries `source`, `operation`, `status`, `context`, and the
 
 ## Features
 
-- **Logger**: Next.js-style colored console output with symbols
+- **Logger**: human/record dual rendering (TTY-detected), scoped env-controlled levels, shared record format with go-utils and py-utils
 - **Currency**:
   - 13,750+ crypto symbols from CoinGecko (auto-updatable)
   - Alternative ticker support (XBT→BTC, wrapped tokens, etc.)

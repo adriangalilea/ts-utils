@@ -27,8 +27,7 @@
  */
 
 import { assert } from "../offensive.js";
-import { cyan, dim, green, red } from "../universal/log.js";
-import { clip } from "./text.js";
+import { clip, cyan, dim, green, red } from "./text.js";
 
 const HIDE_CURSOR = "\x1b[?25l";
 const SHOW_CURSOR = "\x1b[?25h";

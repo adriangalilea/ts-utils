@@ -17,9 +17,9 @@ import {
 	table,
 	ui,
 } from "../src/cli/index.js";
-import { createLogger } from "../src/index.js";
+import { scope } from "../src/index.js";
 
-const log = createLogger("sync");
+const log = scope("sync");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 type State = "running" | "cooling" | "done";
