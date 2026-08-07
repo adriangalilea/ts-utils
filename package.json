@@ -104,6 +104,10 @@
 			"types": "./dist/bot/llm.d.ts",
 			"default": "./dist/bot/llm.js"
 		},
+		"./bot/reactions": {
+			"types": "./dist/bot/reactions.d.ts",
+			"default": "./dist/bot/reactions.js"
+		},
 		"./bot/payments": {
 			"types": "./dist/bot/payments/index.d.ts",
 			"default": "./dist/bot/payments/index.js"
