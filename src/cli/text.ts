@@ -5,7 +5,7 @@
  * region/spinner) build on these; keeping them here avoids an import cycle.
  */
 
-import { ANSI_RE, BOLD, DIM, RESET, fg } from "../universal/ansi.js";
+import { ANSI_RE, BOLD, DIM, fg, RESET } from "../universal/ansi.js";
 
 export { ANSI_RE };
 
@@ -21,7 +21,9 @@ const colorEnabled: boolean = process.env.FORCE_COLOR
 		: process.stdout.isTTY === true && process.stderr.isTTY === true;
 
 const paint = (open: string) =>
-	colorEnabled ? (s: string): string => `${open}${s}${RESET}` : (s: string): string => s;
+	colorEnabled
+		? (s: string): string => `${open}${s}${RESET}`
+		: (s: string): string => s;
 
 export const bold = paint(BOLD);
 export const dim = paint(DIM);

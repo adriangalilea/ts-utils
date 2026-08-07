@@ -56,7 +56,7 @@
 
 import { panic } from "../offensive.js";
 import { runtime } from "../runtime.js";
-import { BOLD, DIM, RESET, fg } from "./ansi.js";
+import { BOLD, DIM, fg, RESET } from "./ansi.js";
 
 // --- environment ---------------------------------------------------------
 
@@ -138,7 +138,11 @@ type MessageLevel = Exclude<LogLevel, "silent">;
 function parseLevel(raw: string): number {
 	const n = LEVELS[raw.toLowerCase() as LogLevel];
 	if (n === undefined)
-		panic("unknown log level:", raw, "(want silent|error|warn|info|debug|trace)");
+		panic(
+			"unknown log level:",
+			raw,
+			"(want silent|error|warn|info|debug|trace)",
+		);
 	return n;
 }
 
@@ -230,7 +234,11 @@ const CONSOLE_METHOD: Record<MessageLevel, ConsoleLevel> = {
 	trace: "debug",
 };
 
-function emit(scopes: readonly string[], verb: Verb, messages: unknown[]): void {
+function emit(
+	scopes: readonly string[],
+	verb: Verb,
+	messages: unknown[],
+): void {
 	const v = VERBS[verb];
 	if (LEVELS[v.level] > threshold(scopes)) return;
 
