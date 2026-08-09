@@ -176,10 +176,6 @@
 			"types": "./dist/bot/updates.d.ts",
 			"default": "./dist/bot/updates.js"
 		},
-		"./bot/reactions": {
-			"types": "./dist/bot/reactions.d.ts",
-			"default": "./dist/bot/reactions.js"
-		},
 		"./llm": {
 			"types": "./dist/llm/index.d.ts",
 			"default": "./dist/llm/index.js"
