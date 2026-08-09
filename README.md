@@ -1,6 +1,6 @@
 # ts-utils
 
-TypeScript utilities - logger, currency, offensive programming, file operations, environment management, and more. The sibling of [swift-utils](https://github.com/adriangalilea/swift-utils), py-utils, and go-utils.
+TypeScript utilities - logger, currency, offensive programming, file operations, environment management, and more. The sibling of [swift-utils](https://github.com/adriangalilea/swift-utils), [py-utils](https://github.com/adriangalilea/py-utils), and [go-utils](https://github.com/adriangalilea/go-utils). The logging doctrine the three share, and the harness that proves they emit the same record line, live in [utils](https://github.com/adriangalilea/utils).
 
 ## Installation
 
