@@ -156,6 +156,8 @@ export async function streamChatReply(
 					toolName: event.toolName,
 					input: event.input,
 				});
+			} else if (event.kind === "tool-input-delta") {
+				// arguments streaming in; the parsed whole arrives as tool-call
 			} else {
 				usage = event.usage;
 			}

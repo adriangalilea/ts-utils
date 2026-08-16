@@ -157,6 +157,8 @@ export interface LlmOptions {
  */
 export interface LlmUsage {
 	promptTokens: number;
+	/** Prompt tokens the provider served from its KV/prompt cache, when it says (OpenAI `cached_tokens`). */
+	cachedTokens?: number;
 	completionTokens: number;
 	costUsd?: number;
 	provider: string;
@@ -172,6 +174,8 @@ export type LlmStreamEvent =
 	| { kind: "delta"; text: string }
 	| { kind: "reasoning"; text: string }
 	| { kind: "reset" }
+	/** A tool call's arguments arriving as text; `tool-call` follows with the parsed whole. */
+	| { kind: "tool-input-delta"; toolCallId: string; delta: string }
 	| { kind: "tool-call"; toolCallId: string; toolName: string; input: unknown }
 	| { kind: "end"; usage: LlmUsage | null };
 
@@ -346,6 +350,7 @@ export class Llm {
 		const queue = await this.buildQueue(errors);
 		let preferId: string | undefined;
 		let totalPrompt = 0;
+		let totalCached: number | undefined;
 		let totalCompletion = 0;
 		let totalCost: number | undefined;
 
@@ -360,6 +365,8 @@ export class Llm {
 			const attempt = yield* this.runAttempt(provider, req);
 			if (attempt.usage) {
 				totalPrompt += attempt.usage.promptTokens;
+				if (attempt.usage.cachedTokens !== undefined)
+					totalCached = (totalCached ?? 0) + attempt.usage.cachedTokens;
 				totalCompletion += attempt.usage.completionTokens;
 				if (attempt.usage.costUsd !== undefined)
 					totalCost = (totalCost ?? 0) + attempt.usage.costUsd;
@@ -374,6 +381,7 @@ export class Llm {
 						totalPrompt || totalCompletion || totalCost !== undefined
 							? {
 									promptTokens: totalPrompt,
+									...(totalCached !== undefined ? { cachedTokens: totalCached } : {}),
 									completionTokens: totalCompletion,
 									...(totalCost !== undefined ? { costUsd: totalCost } : {}),
 									provider: provider.id,
@@ -455,6 +463,12 @@ export class Llm {
 				} else if (part.type === "reasoning-delta") {
 					emitted = true;
 					yield { kind: "reasoning", text: part.text };
+				} else if (part.type === "tool-input-delta") {
+					yield {
+						kind: "tool-input-delta",
+						toolCallId: part.id,
+						delta: part.delta,
+					};
 				} else if (part.type === "tool-call") {
 					sawContent = true;
 					yield {
@@ -466,6 +480,9 @@ export class Llm {
 				} else if (part.type === "finish-step") {
 					usage = {
 						promptTokens: part.usage.inputTokens ?? 0,
+						...(part.usage.inputTokenDetails?.cacheReadTokens !== undefined
+							? { cachedTokens: part.usage.inputTokenDetails.cacheReadTokens }
+							: {}),
 						completionTokens: part.usage.outputTokens ?? 0,
 						...(extractCost(part.providerMetadata, part.usage.raw) !== undefined
 							? { costUsd: extractCost(part.providerMetadata, part.usage.raw) }
