@@ -172,10 +172,12 @@ export type LlmStreamEvent =
 	| { kind: "delta"; text: string }
 	| { kind: "reasoning"; text: string }
 	| { kind: "reset" }
-	| { kind: "tool-call"; toolName: string; input: unknown }
+	| { kind: "tool-call"; toolCallId: string; toolName: string; input: unknown }
 	| { kind: "end"; usage: LlmUsage | null };
 
 export interface LlmToolCall {
+	/** The provider's id for this call: what a later turn must echo back to replay it (ds4 keys its exact-DSML replay on it). */
+	toolCallId: string;
 	toolName: string;
 	input: unknown;
 }
@@ -318,7 +320,11 @@ export class Llm {
 				reasoning = "";
 				toolCalls.length = 0;
 			} else if (event.kind === "tool-call")
-				toolCalls.push({ toolName: event.toolName, input: event.input });
+				toolCalls.push({
+					toolCallId: event.toolCallId,
+					toolName: event.toolName,
+					input: event.input,
+				});
 			else usage = event.usage;
 		}
 		return { text: text.trim(), reasoning: reasoning.trim(), toolCalls, usage };
@@ -453,6 +459,7 @@ export class Llm {
 					sawContent = true;
 					yield {
 						kind: "tool-call",
+						toolCallId: part.toolCallId,
 						toolName: part.toolName,
 						input: part.input,
 					};

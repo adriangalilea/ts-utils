@@ -151,7 +151,11 @@ export async function streamChatReply(
 				toolCalls.length = 0;
 				preview.reset();
 			} else if (event.kind === "tool-call") {
-				toolCalls.push({ toolName: event.toolName, input: event.input });
+				toolCalls.push({
+					toolCallId: event.toolCallId,
+					toolName: event.toolName,
+					input: event.input,
+				});
 			} else {
 				usage = event.usage;
 			}
