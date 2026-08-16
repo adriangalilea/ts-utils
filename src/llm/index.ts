@@ -299,6 +299,7 @@ interface Attempt {
 	error?: unknown;
 	usage: {
 		promptTokens: number;
+		cachedTokens?: number;
 		completionTokens: number;
 		costUsd?: number;
 	} | null;
@@ -329,7 +330,7 @@ export class Llm {
 					toolName: event.toolName,
 					input: event.input,
 				});
-			else usage = event.usage;
+			else if (event.kind === "end") usage = event.usage;
 		}
 		return { text: text.trim(), reasoning: reasoning.trim(), toolCalls, usage };
 	}
