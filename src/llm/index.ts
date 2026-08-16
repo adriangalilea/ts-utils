@@ -382,7 +382,9 @@ export class Llm {
 						totalPrompt || totalCompletion || totalCost !== undefined
 							? {
 									promptTokens: totalPrompt,
-									...(totalCached !== undefined ? { cachedTokens: totalCached } : {}),
+									...(totalCached !== undefined
+										? { cachedTokens: totalCached }
+										: {}),
 									completionTokens: totalCompletion,
 									...(totalCost !== undefined ? { costUsd: totalCost } : {}),
 									provider: provider.id,
