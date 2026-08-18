@@ -124,6 +124,14 @@ export interface ProviderConfig {
 	 * plain OpenAI ignores unknown fields).
 	 */
 	disableThinking?: boolean;
+	/**
+	 * Transport override for this provider: every request to it goes through
+	 * this function instead of the global fetch. How a Worker reaches an
+	 * endpoint it has no route to (a self-hosted engine behind a relay
+	 * socket, a tunnel, a test double). Not serializable, so it can only be
+	 * set by code, never by a config file. Honored by every dialect.
+	 */
+	fetch?: typeof globalThis.fetch;
 }
 
 /**
@@ -525,6 +533,7 @@ export class Llm {
 			const openrouter = createOpenRouter({
 				...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
 				...(provider.baseUrl ? { baseURL: provider.baseUrl } : {}),
+				...(provider.fetch ? { fetch: provider.fetch } : {}),
 			});
 			return openrouter.chat(provider.defaultModel, {
 				usage: { include: true }, // OpenRouter usage accounting: actual billed cost on the final chunk
@@ -540,6 +549,7 @@ export class Llm {
 				...(provider.baseUrl
 					? { baseURL: normalizeAnthropicBase(provider.baseUrl) }
 					: {}),
+				...(provider.fetch ? { fetch: provider.fetch } : {}),
 			});
 			return anthropic(provider.defaultModel);
 		}
@@ -551,6 +561,7 @@ export class Llm {
 			name: provider.id,
 			baseURL: normalizeOpenAiBase(provider.baseUrl),
 			...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
+			...(provider.fetch ? { fetch: provider.fetch } : {}),
 			includeUsage: true, // stream_options usage frame
 		});
 		return compat.chatModel(provider.defaultModel);
