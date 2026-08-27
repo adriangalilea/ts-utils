@@ -312,6 +312,10 @@ assert.equal(bareYoutubeVideoId(YT), YT);
 assert.equal(bareYoutubeVideoId("abcDEFghijk"), "abcDEFghijk"); // mixed case is noise enough
 assert.equal(bareYoutubeVideoId("regressions"), null); // 11 lowercase letters = a word
 assert.equal(bareYoutubeVideoId("IMPLEMENTED"), null); // 11 uppercase letters = an acronym
+assert.equal(bareYoutubeVideoId("author-only"), null); // hyphenated English is words, not noise
+assert.equal(bareYoutubeVideoId("worker-side"), null);
+assert.equal(bareYoutubeVideoId("snake_cased"), null); // underscore alone is not noise either
+assert.equal(bareYoutubeVideoId("abc-DEF-123"), "abc-DEF-123"); // digits/mixed case still validate
 assert.equal(bareYoutubeVideoId("hello world"), null);
 assert.equal(bareYoutubeVideoId(`https://youtu.be/${YT}`), null); // URLs are youtubeVideoId's job
 assert.equal(

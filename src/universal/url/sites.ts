@@ -114,17 +114,20 @@ export function youtubeVideoId(input: string): string | null {
 
 /**
  * A BARE token as a video id, strictly validated: the 11-char shape alone also
- * matches ordinary words ("regressions"), so a bare id must additionally look
- * like base64 noise - a digit, a dash/underscore, or mixed case. Real ids
- * lacking all three are ~(26/64)^11 rare; a URL spelling never needs this
- * (use {@link youtubeVideoId}). This is THE gate for treating loose chat text
- * as a video: fail it and the text is words, not an id - do not engage.
+ * matches ordinary words ("regressions"), so a bare id must additionally carry
+ * base64 noise - a DIGIT or MIXED CASE. A dash/underscore alone does NOT
+ * qualify: hyphenated English ("author-only", "worker-side") is 11 chars often
+ * enough to hijack prose. Real ids lacking both signals are ~0.02% rare; a URL
+ * spelling never needs this (use {@link youtubeVideoId}). This is THE gate for
+ * treating loose chat text as a video: fail it and the text is words, not an
+ * id - do not engage. Callers additionally scope WHERE it runs (xtldr: only
+ * when the whole message is the one token, never a paragraph scan).
  */
 export function bareYoutubeVideoId(input: string): string | null {
 	const trimmed = input.trim();
 	if (!YOUTUBE_ID.test(trimmed)) return null;
 	const noisy =
-		/[0-9_-]/.test(trimmed) || (/[a-z]/.test(trimmed) && /[A-Z]/.test(trimmed));
+		/[0-9]/.test(trimmed) || (/[a-z]/.test(trimmed) && /[A-Z]/.test(trimmed));
 	return noisy ? trimmed : null;
 }
 
