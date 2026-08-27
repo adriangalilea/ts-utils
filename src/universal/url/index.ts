@@ -44,9 +44,9 @@ import { TIDY_RULES, type TrackingProvider } from "./tidy-rules.js";
 
 export { OVERLAY_RULES } from "./overlay.js";
 export {
+	bareYoutubeVideoId,
 	SITES,
 	type SiteAdapter,
-	bareYoutubeVideoId,
 	siteFor,
 	youtubeThumbnailUrl,
 	youtubeTimestampUrl,

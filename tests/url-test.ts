@@ -8,6 +8,7 @@
  */
 import { strict as assert } from "node:assert";
 import {
+	bareYoutubeVideoId,
 	cleanUrl,
 	hostMatches,
 	hostOf,
@@ -18,7 +19,6 @@ import {
 	youtubeThumbnailUrl,
 	youtubeTimestampUrl,
 	youtubeUrl,
-	bareYoutubeVideoId,
 	youtubeVideoId,
 } from "../src/universal/url/index.js";
 

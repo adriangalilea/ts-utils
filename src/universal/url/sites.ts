@@ -124,8 +124,7 @@ export function bareYoutubeVideoId(input: string): string | null {
 	const trimmed = input.trim();
 	if (!YOUTUBE_ID.test(trimmed)) return null;
 	const noisy =
-		/[0-9_-]/.test(trimmed) ||
-		(/[a-z]/.test(trimmed) && /[A-Z]/.test(trimmed));
+		/[0-9_-]/.test(trimmed) || (/[a-z]/.test(trimmed) && /[A-Z]/.test(trimmed));
 	return noisy ? trimmed : null;
 }
 
