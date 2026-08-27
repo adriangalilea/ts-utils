@@ -257,39 +257,54 @@ export async function syncBotProfile(
 }
 
 /**
- * The BotFather-drift check: warn the admins when a declared capability is
- * off. Capability toggles (inline mode, guest mode, group privacy) have NO
- * Bot API setters — getMe only REPORTS them — so detect-and-DM is the whole
- * programmatic surface Telegram offers. A `false` from getMe means the toggle
- * is off; undefined means getMe hasn't run (or predates the field) and stays
- * silent rather than crying wolf.
+ * The BotFather-drift check, THREE-STATE per capability: `true` = the bot
+ * depends on the toggle (warn when getMe reports it off), `false` = the
+ * toggle must STAY off (a removed-on-purpose feature - warn when it drifts
+ * back on), `undefined` = no expectation. Capability toggles (inline mode,
+ * guest mode, group privacy) have NO Bot API setters — getMe only REPORTS
+ * them — so detect-and-DM is the whole programmatic surface Telegram offers.
+ * `undefined` from getMe means it hasn't run (or predates the field) and
+ * stays silent rather than crying wolf.
  */
 async function checkExpectations(
 	bot: ProfileBot,
 	opts: BotProfileOptions,
 ): Promise<void> {
 	const drift: string[] = [];
-	if (opts.expects?.inline && bot.info?.supports_inline_queries === false) {
-		drift.push(
-			"inline mode is OFF, but this bot's features depend on it.\n" +
-				"Only BotFather can enable it: @BotFather → /setinline (and /setinlinefeedback).",
-		);
-	}
-	if (
-		opts.expects?.guestQueries &&
-		bot.info?.supports_guest_queries === false
-	) {
-		drift.push(
-			"Guest Mode is OFF, but this bot's features depend on it.\n" +
-				"Only BotFather can enable it: @BotFather → the bot's settings → Guest Mode.",
-		);
-	}
-	if (opts.expects?.secretary && bot.info?.can_connect_to_business === false) {
-		drift.push(
-			"Secretary Mode is OFF, but this bot's features depend on it (BusinessConnection / business_message).\n" +
-				"Only BotFather can enable it: @BotFather → the bot's settings → Secretary Mode.",
-		);
-	}
+	const check = (
+		expected: boolean | undefined,
+		actual: boolean | undefined,
+		name: string,
+		flipHint: string,
+	) => {
+		if (expected === undefined || actual === undefined) return;
+		if (expected && !actual)
+			drift.push(
+				`${name} is OFF, but this bot's features depend on it.\n${flipHint}`,
+			);
+		if (!expected && actual)
+			drift.push(
+				`${name} is ON, but this bot expects it OFF - flip it back off.\n${flipHint}`,
+			);
+	};
+	check(
+		opts.expects?.inline,
+		bot.info?.supports_inline_queries,
+		"inline mode",
+		"Only BotFather can flip it: @BotFather → /setinline (and /setinlinefeedback).",
+	);
+	check(
+		opts.expects?.guestQueries,
+		bot.info?.supports_guest_queries,
+		"Guest Mode",
+		"Only BotFather can flip it: @BotFather → the bot's settings → Guest Mode.",
+	);
+	check(
+		opts.expects?.secretary,
+		bot.info?.can_connect_to_business,
+		"Secretary Mode (BusinessConnection / business_message)",
+		"Only BotFather can flip it: @BotFather → the bot's settings → Secretary Mode.",
+	);
 	if (drift.length === 0) return;
 
 	const handle = bot.info?.username ? `@${bot.info.username}` : "this bot";
