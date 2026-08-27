@@ -46,6 +46,7 @@ export { OVERLAY_RULES } from "./overlay.js";
 export {
 	SITES,
 	type SiteAdapter,
+	bareYoutubeVideoId,
 	siteFor,
 	youtubeThumbnailUrl,
 	youtubeTimestampUrl,

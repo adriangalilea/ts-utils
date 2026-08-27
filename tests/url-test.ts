@@ -18,6 +18,7 @@ import {
 	youtubeThumbnailUrl,
 	youtubeTimestampUrl,
 	youtubeUrl,
+	bareYoutubeVideoId,
 	youtubeVideoId,
 } from "../src/universal/url/index.js";
 
@@ -304,6 +305,15 @@ for (const spelling of [
 assert.equal(youtubeVideoId("https://example.com/watch?v=dQw4w9WgXcQ"), null); // not a youtube host
 assert.equal(youtubeVideoId("https://youtu.be/short"), null); // not an 11-char id
 assert.equal(youtubeVideoId("hello world"), null);
+
+// bareYoutubeVideoId: loose chat text engages ONLY when the token looks like an id,
+// not merely id-shaped - ordinary words and acronyms are words, not videos.
+assert.equal(bareYoutubeVideoId(YT), YT);
+assert.equal(bareYoutubeVideoId("abcDEFghijk"), "abcDEFghijk"); // mixed case is noise enough
+assert.equal(bareYoutubeVideoId("regressions"), null); // 11 lowercase letters = a word
+assert.equal(bareYoutubeVideoId("IMPLEMENTED"), null); // 11 uppercase letters = an acronym
+assert.equal(bareYoutubeVideoId("hello world"), null);
+assert.equal(bareYoutubeVideoId(`https://youtu.be/${YT}`), null); // URLs are youtubeVideoId's job
 assert.equal(
 	youtubeUrl(`https://youtu.be/${YT}?si=x`),
 	`https://www.youtube.com/watch?v=${YT}`,

@@ -112,6 +112,23 @@ export function youtubeVideoId(input: string): string | null {
 	return null;
 }
 
+/**
+ * A BARE token as a video id, strictly validated: the 11-char shape alone also
+ * matches ordinary words ("regressions"), so a bare id must additionally look
+ * like base64 noise - a digit, a dash/underscore, or mixed case. Real ids
+ * lacking all three are ~(26/64)^11 rare; a URL spelling never needs this
+ * (use {@link youtubeVideoId}). This is THE gate for treating loose chat text
+ * as a video: fail it and the text is words, not an id - do not engage.
+ */
+export function bareYoutubeVideoId(input: string): string | null {
+	const trimmed = input.trim();
+	if (!YOUTUBE_ID.test(trimmed)) return null;
+	const noisy =
+		/[0-9_-]/.test(trimmed) ||
+		(/[a-z]/.test(trimmed) && /[A-Z]/.test(trimmed));
+	return noisy ? trimmed : null;
+}
+
 /** The canonical watch URL for a video id or any YouTube URL spelling; null if neither. */
 export function youtubeUrl(idOrUrl: string): string | null {
 	const id = youtubeVideoId(idOrUrl);
