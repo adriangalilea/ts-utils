@@ -12,7 +12,10 @@ import { createLlm } from "../src/llm/index.js";
 const TOOLS = {
 	add_quote: tool({
 		description: "test tool",
-		inputSchema: jsonSchema<Record<string, unknown>>({ type: "object", properties: { text: { type: "string" } } }),
+		inputSchema: jsonSchema<Record<string, unknown>>({
+			type: "object",
+			properties: { text: { type: "string" } },
+		}),
 	}),
 };
 
@@ -24,7 +27,10 @@ const sse = (chunks: string[], opts: { dieAfter?: boolean } = {}) => {
 			// Death must be ASYNC: erroring synchronously can outrun the SSE parser
 			// draining the queued chunks, and then no tool part ever forms.
 			if (opts.dieAfter)
-				setTimeout(() => controller.error(new Error("connection torn down")), 20);
+				setTimeout(
+					() => controller.error(new Error("connection torn down")),
+					20,
+				);
 			else {
 				controller.enqueue(enc.encode("data: [DONE]\n\n"));
 				controller.close();
@@ -75,7 +81,9 @@ const fetchB: typeof globalThis.fetch = async () =>
 			object: "chat.completion.chunk",
 			created: 0,
 			model: "fake",
-			choices: [{ index: 0, delta: { content: "recovered" }, finish_reason: null }],
+			choices: [
+				{ index: 0, delta: { content: "recovered" }, finish_reason: null },
+			],
 		}),
 		JSON.stringify({
 			id: "b1",
@@ -88,21 +96,55 @@ const fetchB: typeof globalThis.fetch = async () =>
 
 const llm = createLlm({
 	providers: [
-		{ id: "dying", type: "openai", baseUrl: "http://fake.a/v1", defaultModel: "fake", priority: 1, fetch: fetchA },
-		{ id: "healthy", type: "openai", baseUrl: "http://fake.b/v1", defaultModel: "fake", priority: 2, fetch: fetchB },
+		{
+			id: "dying",
+			type: "openai",
+			baseUrl: "http://fake.a/v1",
+			defaultModel: "fake",
+			priority: 1,
+			fetch: fetchA,
+		},
+		{
+			id: "healthy",
+			type: "openai",
+			baseUrl: "http://fake.b/v1",
+			defaultModel: "fake",
+			priority: 2,
+			fetch: fetchB,
+		},
 	],
 });
 
 const kinds: string[] = [];
-for await (const ev of llm.stream({ prompt: "hi", tools: TOOLS, toolChoice: "auto" })) kinds.push(ev.kind);
+for await (const ev of llm.stream({
+	prompt: "hi",
+	tools: TOOLS,
+	toolChoice: "auto",
+}))
+	kinds.push(ev.kind);
 
 // The dying attempt must have surfaced its tool traffic, then a reset, then B's text.
 const resetAt = kinds.indexOf("reset");
-const toolAt = kinds.findIndex((k) => k === "tool-input-delta" || k === "tool-call");
+const toolAt = kinds.findIndex(
+	(k) => k === "tool-input-delta" || k === "tool-call",
+);
 const deltaAt = kinds.indexOf("delta");
-assert.notEqual(toolAt, -1, `no tool event reached the consumer: ${kinds.join(",")}`);
-assert.notEqual(resetAt, -1, `no reset after a tool-only failed attempt: ${kinds.join(",")}`);
-assert.ok(toolAt < resetAt && resetAt < deltaAt, `order wrong: ${kinds.join(",")}`);
+assert.notEqual(
+	toolAt,
+	-1,
+	`no tool event reached the consumer: ${kinds.join(",")}`,
+);
+assert.notEqual(
+	resetAt,
+	-1,
+	`no reset after a tool-only failed attempt: ${kinds.join(",")}`,
+);
+assert.ok(
+	toolAt < resetAt && resetAt < deltaAt,
+	`order wrong: ${kinds.join(",")}`,
+);
 assert.equal(kinds.at(-1), "end");
-console.log(`  PASS reset follows a tool-only failed attempt (${kinds.join(" → ")})`);
+console.log(
+	`  PASS reset follows a tool-only failed attempt (${kinds.join(" → ")})`,
+);
 console.log("\n1 passed");
