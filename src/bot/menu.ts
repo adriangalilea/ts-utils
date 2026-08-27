@@ -257,7 +257,11 @@ export type MenuItem =
 			 * DisabledButton — a tap does nothing, no callback fires). A disabled
 			 * button cannot explain itself, so pair it with header/body copy saying
 			 * WHY and how to unlock. The action still needs its own guard: clients
-			 * predating the field render a normal tappable button.
+			 * predating the field render a normal tappable button. Clients also do
+			 * not DRAW the disabled state yet (checked Aug 2026: Telegram Desktop
+			 * renders it identically), so give the locked state a label marker too
+			 * (🔒 via a label resolver) — a dead-but-normal-looking button reads as
+			 * a lagging bot.
 			 */
 			disabled?: Predicate;
 			/**
