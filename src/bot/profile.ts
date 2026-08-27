@@ -59,6 +59,7 @@ export type ProfileBot = {
 		supports_inline_queries?: boolean;
 		supports_guest_queries?: boolean;
 		can_connect_to_business?: boolean;
+		can_read_all_group_messages?: boolean;
 	};
 	api: {
 		/** Optional in the type: needs gramio with Bot API 10.1+ types (declaring `photo` on an
@@ -79,6 +80,8 @@ export type ProfileBot = {
 			p: { commands: BotCommandEntry[] } & Lang,
 		) => Promise<unknown>;
 		sendMessage: (p: { chat_id: number; text: string }) => Promise<unknown>;
+		/** Optional: lets capability checks read LIVE state instead of the boot snapshot. */
+		getMe?: () => Promise<unknown>;
 	};
 };
 
@@ -113,7 +116,14 @@ export interface BotProfileOptions {
 	 * BotFather-only capabilities this bot's features assume. Checked against `getMe` on every
 	 * sync; a mismatch WARNS the admins (it can't be fixed over the API, only surfaced).
 	 */
-	expects?: { inline?: boolean; guestQueries?: boolean; secretary?: boolean };
+	expects?: {
+		inline?: boolean;
+		guestQueries?: boolean;
+		secretary?: boolean;
+		/** Group Privacy, inverted to what it grants: `true` = the bot must SEE ordinary group
+		 *  messages (privacy disabled), `false` = privacy must stay on. */
+		readsGroups?: boolean;
+	};
 	/** Admins to DM on an expectation mismatch: a plain array or a live resolver. */
 	adminIds?:
 		| readonly number[]
@@ -256,20 +266,54 @@ export async function syncBotProfile(
 	);
 }
 
+/** The bot's BotFather-governed capabilities, read LIVE when possible: `bot.info` is the
+ *  boot-time getMe snapshot, and a BotFather flip must be visible to the very next check,
+ *  not to the next isolate (the stale heads-up bug class). Normalizes gramio's camelCase
+ *  and the raw API's snake_case; falls back to the snapshot if the call fails. */
+export async function botCapabilities(bot: ProfileBot): Promise<{
+	inline?: boolean;
+	guestQueries?: boolean;
+	secretary?: boolean;
+	readsGroups?: boolean;
+}> {
+	type Caps = {
+		supports_inline_queries?: boolean;
+		supportsInlineQueries?: boolean;
+		supports_guest_queries?: boolean;
+		supportsGuestQueries?: boolean;
+		can_connect_to_business?: boolean;
+		canConnectToBusiness?: boolean;
+		can_read_all_group_messages?: boolean;
+		canReadAllGroupMessages?: boolean;
+	};
+	const live = bot.api.getMe
+		? ((await bot.api.getMe().catch(() => null)) as Caps | null)
+		: null;
+	const c = live ?? ((bot.info ?? {}) as Caps);
+	return {
+		inline: c.supports_inline_queries ?? c.supportsInlineQueries,
+		guestQueries: c.supports_guest_queries ?? c.supportsGuestQueries,
+		secretary: c.can_connect_to_business ?? c.canConnectToBusiness,
+		readsGroups: c.can_read_all_group_messages ?? c.canReadAllGroupMessages,
+	};
+}
+
 /**
  * The BotFather-drift check, THREE-STATE per capability: `true` = the bot
- * depends on the toggle (warn when getMe reports it off), `false` = the
- * toggle must STAY off (a removed-on-purpose feature - warn when it drifts
- * back on), `undefined` = no expectation. Capability toggles (inline mode,
- * guest mode, group privacy) have NO Bot API setters — getMe only REPORTS
- * them — so detect-and-DM is the whole programmatic surface Telegram offers.
- * `undefined` from getMe means it hasn't run (or predates the field) and
- * stays silent rather than crying wolf.
+ * depends on the toggle (warn when it's off), `false` = the toggle must STAY
+ * off (a removed-on-purpose feature - warn when it drifts back on),
+ * `undefined` = no expectation. Capability toggles (inline mode, guest mode,
+ * group privacy) have NO Bot API setters — getMe only REPORTS them — so
+ * detect-and-DM is the whole programmatic surface Telegram offers. State is
+ * read LIVE via {@link botCapabilities}; an `undefined` actual (call failed,
+ * field predates the client) stays silent rather than crying wolf.
  */
 async function checkExpectations(
 	bot: ProfileBot,
 	opts: BotProfileOptions,
 ): Promise<void> {
+	if (!opts.expects) return;
+	const caps = await botCapabilities(bot);
 	const drift: string[] = [];
 	const check = (
 		expected: boolean | undefined,
@@ -288,22 +332,28 @@ async function checkExpectations(
 			);
 	};
 	check(
-		opts.expects?.inline,
-		bot.info?.supports_inline_queries,
+		opts.expects.inline,
+		caps.inline,
 		"inline mode",
 		"Only BotFather can flip it: @BotFather → /setinline (and /setinlinefeedback).",
 	);
 	check(
-		opts.expects?.guestQueries,
-		bot.info?.supports_guest_queries,
+		opts.expects.guestQueries,
+		caps.guestQueries,
 		"Guest Mode",
 		"Only BotFather can flip it: @BotFather → the bot's settings → Guest Mode.",
 	);
 	check(
-		opts.expects?.secretary,
-		bot.info?.can_connect_to_business,
+		opts.expects.secretary,
+		caps.secretary,
 		"Secretary Mode (BusinessConnection / business_message)",
 		"Only BotFather can flip it: @BotFather → the bot's settings → Secretary Mode.",
+	);
+	check(
+		opts.expects.readsGroups,
+		caps.readsGroups,
+		"Group-message visibility (Group Privacy inverted)",
+		"Only BotFather can flip it: @BotFather → /setprivacy — then RE-ADD the bot to existing groups (Telegram applies it per membership).",
 	);
 	if (drift.length === 0) return;
 
