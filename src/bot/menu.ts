@@ -253,6 +253,14 @@ export type MenuItem =
 			/** Re-render the menu message after the action runs. */
 			refresh?: boolean;
 			/**
+			 * Renders the button greyed-out and non-tappable (Bot API 10.3
+			 * DisabledButton — a tap does nothing, no callback fires). A disabled
+			 * button cannot explain itself, so pair it with header/body copy saying
+			 * WHY and how to unlock. The action still needs its own guard: clients
+			 * predating the field render a normal tappable button.
+			 */
+			disabled?: Predicate;
+			/**
 			 * Adds a one-step confirmation before the action runs. First tap
 			 * edits the menu message in place to show `prompt` + "Confirm" /
 			 * "Cancel" buttons; the action only runs on Confirm.
@@ -613,6 +621,11 @@ export type RadioMenuItemOptions<V extends string> = {
 	/** Persists the pick and returns the toast (gate refusals inside it — the
 	 *  menu owns the single answerCallbackQuery, never call ctx.answer). */
 	pick: (ctx: MenuCtx, value: V) => ActionResult | Promise<ActionResult>;
+	/** Grey out a choice per-context (Bot API 10.3 disabled button) — a value whose
+	 *  prerequisites aren't met. Pair with `header` copy explaining why (a disabled
+	 *  button never fires, so it cannot explain itself), and STILL refuse the value
+	 *  inside `pick`: clients predating the field render a normal tappable button. */
+	disabledWhen?: (ctx: MenuCtx, value: V) => boolean | Promise<boolean>;
 	order?: number;
 	visible?: Predicate;
 	rootExtra?: boolean;
@@ -636,14 +649,18 @@ export const radioMenuItem = <V extends string>(
 	visible: opts.visible,
 	rootExtra: opts.rootExtra,
 	header: opts.header,
-	submenu: opts.choices.map((c) => ({
-		id: c.value,
-		label: c.label,
-		style: async (ctx) =>
-			(await opts.isActive(ctx, c.value)) ? "success" : undefined,
-		refresh: true,
-		action: (ctx) => opts.pick(ctx, c.value),
-	})),
+	submenu: opts.choices.map((c) => {
+		const dw = opts.disabledWhen;
+		return {
+			id: c.value,
+			label: c.label,
+			style: async (ctx) =>
+				(await opts.isActive(ctx, c.value)) ? "success" : undefined,
+			refresh: true,
+			...(dw ? { disabled: (ctx: MenuCtx) => dw(ctx, c.value) } : {}),
+			action: (ctx) => opts.pick(ctx, c.value),
+		};
+	}),
 });
 
 // ─── internal: rendering + plugin ──────────────────────────────────
@@ -752,7 +769,8 @@ const renderKeyboard = async (
 		const opts = style ? { style } : undefined;
 
 		if ("action" in item) {
-			kb.text(label, actCb.pack({ path }), opts);
+			if (item.disabled && (await item.disabled(ctx))) kb.disabled(label, opts);
+			else kb.text(label, actCb.pack({ path }), opts);
 		} else if ("url" in item) {
 			kb.url(label, item.url, opts);
 		} else {
