@@ -728,6 +728,7 @@ Field summary:
 - `refresh: true` re-renders the menu in place after `action` runs, so dynamic `label` / `style` resolvers reflect mutated state without the user re-opening `/settings`. `toggleMenuItem` enables this by default.
 - `action` returns `void | string | Polyglot<string>`; the menu plugin sends a single `answerCallbackQuery` with that text. **Never call `ctx.answer(...)` from inside an action** — Telegram rejects the second answer, the action throws, and `refresh` never runs.
 - `confirm: { prompt }` adds a one-step confirmation overlay before the action runs. Cancel returns to root. Use this for destructive actions instead of `ctx.answer({ show_alert: true })` — Telegram's alert UI doesn't compose with refresh / toast.
+- `disabled` (a `(ctx) => boolean` predicate on action items) renders the button greyed-out and non-tappable (Bot API 10.3 DisabledButton — no callback ever fires). A disabled button can't explain itself: pair it with header/body copy saying why, and keep a guard in the action for clients predating the field. `radioMenuItem` exposes it per choice as `disabledWhen(ctx, value)`.
 
 **Live state inside resolvers**: `label` / `style` / `header` / `visible` resolvers fire AFTER the action mutated the session, and they may be **async** — read your database (or `ctx.session.<field>`) directly at render time; never cache render strings into the session to satisfy a signature. `ctx.lang` from `bot/language` is a snapshot at event start and goes stale within the same callback; `ctx.say(...)` IS live and safe to use anywhere.
 
