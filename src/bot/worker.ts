@@ -506,6 +506,12 @@ export interface UpdateRunnerOptions {
 	retryMs?: readonly number[];
 	/** Completed update ids retained for webhook de-duplication. Default 512. */
 	dedupeLimit?: number;
+	/** Wall-clock bound per attempt. A HANG is worse than a failure: an attempt that never
+	 *  settles re-runs the same alarm forever, wedging the conversation with ZERO logs (tails
+	 *  only print completed invocations). The bound turns a hang into a screaming, retried,
+	 *  eventually-dropped failure. Generous by default (slow transcript/LLM work is the point
+	 *  of the alarm design). Default 180s. */
+	attemptTimeoutMs?: number;
 }
 
 const runnerLog = scope("bot/update-runner");
@@ -547,6 +553,7 @@ export function telegramUpdateRunner<Env>(
 	const maxAttempts = options.maxAttempts ?? 3;
 	const retryMs = options.retryMs ?? [5_000, 30_000];
 	const dedupeLimit = options.dedupeLimit ?? 512;
+	const attemptTimeoutMs = options.attemptTimeoutMs ?? 180_000;
 	const fallbackThrottle = alertThrottle();
 
 	return class TelegramUpdateRunner {
@@ -608,10 +615,31 @@ export function telegramUpdateRunner<Env>(
 			}
 
 			let rt: BotWorkerRuntime | undefined;
+			let timer: ReturnType<typeof setTimeout> | undefined;
 			try {
 				rt = await resolve(this.env);
-				await rt.bot.updates.handleUpdate(job.update);
-				if (rt.flush) await rt.flush();
+				const runtime = rt;
+				// Bounded attempt (see attemptTimeoutMs): the race rejects into the ordinary
+				// retry/drop machinery. The zombie promise cannot be cancelled - a timed-out
+				// attempt's underlying work may still complete side effects; the dedupe window
+				// and idempotent handlers are what make that tolerable.
+				await Promise.race([
+					(async () => {
+						await runtime.bot.updates.handleUpdate(job.update);
+						if (runtime.flush) await runtime.flush();
+					})(),
+					new Promise((_, reject) => {
+						timer = setTimeout(
+							() =>
+								reject(
+									new Error(
+										`attempt exceeded ${attemptTimeoutMs}ms (hung update)`,
+									),
+								),
+							attemptTimeoutMs,
+						);
+					}),
+				]);
 			} catch (error) {
 				job.attempts += 1;
 				runnerLog.error(
@@ -642,6 +670,8 @@ export function telegramUpdateRunner<Env>(
 					Date.now() + (retryMs[job.attempts - 1] ?? retryMs.at(-1) ?? 30_000),
 				);
 				return;
+			} finally {
+				if (timer !== undefined) clearTimeout(timer);
 			}
 
 			// Checkpointing sits outside the processing catch: if storage/alarm
