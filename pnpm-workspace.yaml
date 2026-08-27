@@ -4,3 +4,11 @@ allowBuilds:
 # The @gramio/contexts Threaded-Mode fork is a CONSUMER-side override (see
 # README "Threaded Mode") — the lib builds against upstream, and pnpm 11
 # supply-chain policy blocks exotic subdeps here anyway.
+
+# Local override of the GLOBAL supply-chain age gate (7d, strict): the gramio
+# family ships Bot API features the bots need same-week (10.3 disabled buttons).
+# Overriding replaces the global list, so @adriangalilea/* rides along.
+minimumReleaseAgeExclude:
+  - "@adriangalilea/*"
+  - gramio
+  - "@gramio/*"
