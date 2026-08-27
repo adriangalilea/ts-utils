@@ -475,12 +475,14 @@ export class Llm {
 					emitted = true;
 					yield { kind: "reasoning", text: part.text };
 				} else if (part.type === "tool-input-delta") {
+					emitted = true;
 					yield {
 						kind: "tool-input-delta",
 						toolCallId: part.id,
 						delta: part.delta,
 					};
 				} else if (part.type === "tool-call") {
+					emitted = true;
 					sawContent = true;
 					yield {
 						kind: "tool-call",
