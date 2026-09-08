@@ -26,6 +26,17 @@ Readers propagate database errors rather than presenting missing data as zero.
 `renderMetrics(rows, { daily? })` from `metrics/cli` renders it with the existing
 ANSI-aware `cli.table` helpers. Both discover every recorded metric from its
 declaration metadata. No product-specific metric list belongs in a renderer.
+
+For period comparisons, `metricWindows(days, { now?, includeToday? })` from
+`metrics/report` returns adjacent equal-length `current` and `previous` UTC ranges.
+By default both contain completed days; `includeToday` marks the current window
+`partial`. Fetch those ranges through your adapter, then call
+`compareMetrics(currentRows, previousRows)` and
+`renderMetricComparison(comparisons)` from `metrics/cli`. Comparisons include
+disappearing series, count changes and weighted timing-average changes. Percent
+change is null without a nonzero baseline; missing timing samples stay null.
+Changing a metric's kind or unit across the inputs is rejected. Missing observations
+are not proof that collection was running: deltas compare recorded data only.
 The SQL adapter accepts a libSQL-compatible client; D1 or another store can implement
 the injected `write(measurement)` contract instead. No database client is bundled.
 

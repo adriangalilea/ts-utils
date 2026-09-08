@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { renderMetrics } from "../src/metrics/cli.js";
+import { renderMetricComparison, renderMetrics } from "../src/metrics/cli.js";
 import { defineMetrics, type Measurement } from "../src/metrics/index.js";
-import { summarizeMetrics } from "../src/metrics/report.js";
+import {
+	compareMetrics,
+	metricWindows,
+	summarizeMetrics,
+} from "../src/metrics/report.js";
 import {
 	METRICS_SCHEMA,
 	type MetricsDatabase,
@@ -134,6 +138,74 @@ assert.equal(
 );
 await assert.rejects(readMetrics(db, { from: "2026-09-09", to: "2026-09-08" }));
 assert.equal(errors.length, 6);
+assert.deepEqual(metricWindows(14, { now: new Date("2026-09-08T23:59:59Z") }), {
+	current: { from: "2026-08-25", to: "2026-09-07" },
+	previous: { from: "2026-08-11", to: "2026-08-24" },
+	partial: false,
+});
+assert.deepEqual(metricWindows(1, { now: new Date("2024-03-01T01:00:00Z") }), {
+	current: { from: "2024-02-29", to: "2024-02-29" },
+	previous: { from: "2024-02-28", to: "2024-02-28" },
+	partial: false,
+});
+assert.deepEqual(
+	metricWindows(2, {
+		now: new Date("2026-01-01T00:00:00Z"),
+		includeToday: true,
+	}),
+	{
+		current: { from: "2025-12-31", to: "2026-01-01" },
+		previous: { from: "2025-12-29", to: "2025-12-30" },
+		partial: true,
+	},
+);
+for (const n of [0, -1, 1.5, NaN, Infinity, 3661])
+	assert.throws(() => metricWindows(n));
+const counter = rows.find((r) => r.dimensions.component === "chat");
+const timing = rows.find((r) => r.key === "latency");
+assert.ok(counter && timing);
+const comparison = compareMetrics(rows, [
+	{ ...counter, count: 4 },
+	{ ...counter, dimensions: { component: "removed" }, count: 3 },
+	{ ...timing, count: 1, sum: 10 },
+]);
+assert.deepEqual(
+	comparison.find((r) => r.dimensions.component === "chat")?.countChange,
+	{ absolute: -2, percent: -50 },
+);
+assert.deepEqual(
+	comparison.find((r) => r.dimensions.component === "removed")?.countChange,
+	{ absolute: -3, percent: -100 },
+);
+assert.deepEqual(
+	comparison.find((r) => r.dimensions.component === "glass")?.countChange,
+	{ absolute: 1, percent: null },
+);
+assert.deepEqual(comparison.find((r) => r.key === "latency")?.averageChange, {
+	absolute: 30,
+	percent: 300,
+});
+assert.equal(compareMetrics([], [timing])[0].averageChange, null);
+assert.equal(
+	compareMetrics([timing], [{ ...timing, sum: 0 }])[0].averageChange?.percent,
+	null,
+);
+assert.throws(() => compareMetrics([timing], [{ ...timing, unit: "seconds" }]));
+const canonical = compareMetrics(
+	[{ ...counter, dimensions: { a: "1", b: "2" } }],
+	[{ ...counter, dimensions: { b: "2", a: "1" } }],
+);
+assert.equal(canonical.length, 1);
+assert.equal(canonical[0].countChange.absolute, 0);
+assert.equal(
+	compareMetrics([counter], [{ ...counter, project: "other" }]).length,
+	2,
+);
+const rendered = renderMetricComparison(comparison);
+assert.match(rendered, /no baseline/);
+assert.match(rendered, /-100%/);
+assert.match(rendered, /avg current/);
+assert.match(renderMetricComparison([]), /either window/);
 sqlite.close();
 console.log(
 	"Metrics: validation, failure isolation, dimensions, UTC buckets, atomic upserts, identity and project separation passed",
