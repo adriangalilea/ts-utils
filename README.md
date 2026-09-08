@@ -2,6 +2,53 @@
 
 TypeScript utilities - logger, currency, offensive programming, file operations, environment management, and more. The sibling of [swift-utils](https://github.com/adriangalilea/swift-utils), [py-utils](https://github.com/adriangalilea/py-utils), and [go-utils](https://github.com/adriangalilea/go-utils). The logging doctrine the three share, and the harness that proves they emit the same record line, live in [utils](https://github.com/adriangalilea/utils).
 
+## Product metrics
+
+```ts
+import { createClient } from "@libsql/client"
+import { defineMetrics } from "@adriangalilea/utils/metrics"
+import { sqliteMetricsWriter } from "@adriangalilea/utils/metrics/sqlite"
+
+const db = createClient({ url: process.env.METRICS_DATABASE_URL!, authToken: process.env.METRICS_AUTH_TOKEN })
+const metrics = defineMetrics({
+  installCopy: { kind: "counter", label: "install command copies", dimensions: { component: ["chat", "glass"] } },
+}, { write: sqliteMetricsWriter(db, "my-project") })
+
+await metrics.installCopy.bump({ dimensions: { component: "chat" } })
+```
+
+Provision the exported `METRICS_SCHEMA` once before collecting. `describe()` returns
+the declarations; the SQL writer stores labels beside daily counters so reports
+discover metrics without another hardcoded list. `readMetrics(db, { from, to,
+project? })` returns daily rows with labels and dimensions, using inclusive UTC dates.
+Readers propagate database errors rather than presenting missing data as zero.
+`summarizeMetrics(rows)` from `metrics/report` produces one generic report shape;
+`renderMetrics(rows, { daily? })` from `metrics/cli` renders it with the existing
+ANSI-aware `cli.table` helpers. Both discover every recorded metric from its
+declaration metadata. No product-specific metric list belongs in a renderer.
+The SQL adapter accepts a libSQL-compatible client; D1 or another store can implement
+the injected `write(measurement)` contract instead. No database client is bundled.
+
+Measurements validate finite nonnegative samples, positive integer counts, and
+declared dimension values. Calls resolve even when validation or storage fails;
+`onError(error, key)` observes failures (the default logs a warning without actor
+data). Await calls or attach them to the runtime's request lifetime (`after` in
+Next.js, `waitUntil` in Workers). Unattached promises are not reliable delivery.
+Counters are best-effort observations, not exactly-once ledgers; retries can count
+twice. Money and successful-install accounting belong elsewhere.
+
+`perUser: true` accepts an optional string or numeric `user` for daily actor rows.
+Enable it only with a deletion and retention policy; no identity is inferred.
+`overlaps: [["a", "b"]]` declares unordered audience overlap, not an ordered funnel.
+Daily totals support counts and averages, not percentile latency or event ordering.
+
+**3.0 migration:** `bot/metrics` and its bot-barrel export are removed. Import
+`@adriangalilea/utils/metrics`; replace `write(key, count, sum, user)` with
+`write({ key, count, sum, user, day, dimensions, spec })`. Rename `funnels` to
+`overlaps` in declarations and schema consumers. Existing stores can adapt the new
+write object without moving historical data. Metric keys and dimensions are storage
+identifiers: introduce a new key when changing meaning rather than relabelling history.
+
 ## Installation
 
 ```bash
@@ -611,7 +658,8 @@ Telegram's [Threaded Mode](https://telegram.org/blog/threaded-conversations) for
 | `@adriangalilea/utils/bot/coalesce` | Joins client-split inbound messages back into one. When a user pastes >4096 chars, Telegram clients fragment it into separate `message` updates with no marker. Middleware detects the burst and emits one combined event. |
 | `@adriangalilea/utils/llm` | Multi-provider LLM caller on the Vercel AI SDK — the policy layer the SDK doesn't ship. `createLlm({ providers, health? })` → `.stream(req)` (typed events: `delta` / `reasoning` / `reset` / `tool-call` / `end`) and `.complete(req)`. **Failover:** priority-ordered across OpenAI-compatible, Anthropic-compatible, and OpenRouter endpoints; multiple keys per provider (health tracked per key fingerprint); per-key circuit breaker with exponential cool-down persisted in any KV-shaped `HealthStore`; an attempt that dies after emitting yields `reset` (discard, next candidate regenerates); empty completions count as failures. **Accounting:** tokens summed across billed attempts; `costUsd` is the ACTUAL charge (OpenRouter usage accounting via `providerMetadata`, or a `cost` field on the raw usage frame) — never a price-table estimate. **Knobs:** per-model temperature, maxTokens caps, `disableThinking` mapped to each dialect. **Tools:** AI SDK `tool()` + `toolChoice` pass through (re-exported). Worker-safe; peers: `ai`, `@ai-sdk/openai-compatible`, `@ai-sdk/anthropic`, `@openrouter/ai-sdk-provider`. |
 | `@adriangalilea/utils/bot/llm` | The Telegram side of an LLM chatbot; the model side is `@adriangalilea/utils/llm`. **Output:** `streamChatReply(ctx, events, opts?)` consumes an `AsyncIterable<LlmStreamEvent>` and paints it with Telegram's native message-draft streaming (`sendMessageDraft` full-frame repaints, throttled ~1/s, keepalive under the ~30s draft TTL), then persists the finished markdown via `ctx.send`, entity-split across 4096 by `@gramio/split`. Reasoning models get a thinking phase — streams into the ephemeral draft and evaporates (`reasoning: 'preview'`, default), persists as an expandable blockquote (`'message'`), or never renders at all (`'hidden'`). Upstream `reset` (provider failover) repaints the draft from scratch. Drafts are private-chat-only (+ BotFather forum-topic mode); elsewhere the preview phase is skipped and only the final send happens. Returns `{ content, reasoning, toolCalls, usage, messages }`. The painter underneath is `@adriangalilea/utils/bot/draft` (`createDraftPreview(ctx, { render, throttleMs? })`): dependency-light (no markdown machinery), for producers that push deltas or own their per-frame rendering (plain or rich-message frames) and persist path, with `streamForensics` (render-regression + reset warnings) built in and exported standalone. **History:** `llmHistory({...})` returns `.plugin` (decorates `ctx.llm` with `.add() / .get() / .clear() / .all() / .clearAll()`, per-(user, thread) OpenAI `ChatMessage` shape, persisted in the shared session record so the menu's 🗑 Forget wipes it automatically) AND `.menuItem` (drop-in "🗑 Delete this thread" for `botMenu` — wipes the LLM history AND calls `deleteForumTopic` so the Telegram thread + all its messages disappear from the chat; falls back to history-only clear when no `threadId` is present). |
-| `@adriangalilea/utils/bot/metrics` | Self-serve product measurement, the flags pattern applied to counting: `defineMetrics(spec, { write, funnels? })` — declare a metric once (counter / timing, `perUser: true` for uniques·repeat·retention·funnels), `bump()`/`record()` at the call site (fire-and-forget, never throws), `describe()` is the schema panels render generically so a new metric reaches every panel with zero panel edits. Storage = one injected atomic day-bucket upsert (aggregate row + per-user row when `user` given); per-user rows are personal data — wipe on forget, prune by age. Money stays in ledgers. |
+| `@adriangalilea/utils/metrics` | Declared counters and timings, bounded dimensions, optional actor IDs, and a schema for generic reporting. Inject a writer; measurement failures are reported without rejecting calls. See Product metrics below. |
+| `@adriangalilea/utils/metrics/sqlite` | Atomic SQLite/libSQL writer, explicit provisioning schema, and inclusive UTC daily reports. Connections and credentials belong to the application. |
 | `@adriangalilea/utils/bot/menu` | `botMenu({ command, description, items, privacy?, personalData?, adminContact })` — `/settings` command + InlineKeyboard router. Root view always renders a `🛡️ Privacy & data` submenu button that wraps the privacy policy link plus (if `personalData: { storage }`) 🗑 Forget + 📥 Export buttons. Items take `keepRow` (render on the same row as the next item — e.g. a two-per-row language picker) and `rootExtra` (render at the bottom of the root menu, below Privacy & data). `label` / `header` / `style` / `visible` resolvers may be **async** (read your db at render time — never cache render strings in the session); `parseMode: 'HTML'` renders the header formatted (you own escaping); `personalData.onForget(ctx, userId)` wipes YOUR tables inside the same try as the session delete, so Forget either forgets everything or reports failure. `toggleMenuItem({ id, read, write, label: { off, on }, toast? })` — convenience factory for boolean-toggle items with dynamic label + optional toast, storage-agnostic via `read`/`write` closures. |
 | `@adriangalilea/utils/bot/payments` | `botPayments({ session, storage, paysupport, paysupportHint?, legal, waiver, vip?, credits?, perks? })` — Telegram Stars monetization in one drop-in plugin. **Three axes, all optional:** `vip` (positional tier ladder — single rung in v1 is just `vip: [{...}]`, ladder is `vip: [{...}, {...}]`; ids are `vip.1`, `vip.2`, …), `credits` (consumable balance + top-up packs `credits.1`, `credits.2`, …), `perks` (orthogonal one-shot unlocks `perks.<key>`). **Surface:** `ctx.payments.atLeast('vip')` / `atLeast('vip.2')` (typed rank check), `ctx.payments.tier()` / `.tier.level()` / `.tier.label()`, `ctx.payments.credits.{balance, consume, tryConsume}` (throws `InsufficientCredits`), `ctx.payments.has(perkId)`, `await ctx.payments.require('vip', { feature? })` (gate that sends a localized upgrade prompt deep-linked to `/settings → 💎 VIP`), `await ctx.payments.invoice(productKey)` (threads Art. 103(m) TRLGDCU consent inline before `sendInvoice`). **Owns:** waiver consent flow (versioned text → forces re-consent on bump, snapshotted on every charge for audit), `/paysupport` slash command (Telegram ToS §6.5; `paysupportHint` overrides the where-to-manage-charges line when your menu isn't `/settings`), idempotent `successful_payment` fulfillment via `pay:idempotency:{chargeId}` sentinel, lazy subscription expiry (no cron needed), tier upgrade auto-cancel of the lower rung's renewal, and admin-DM refund approval (mirror of `accessControl`'s [✅ Aprobar][❌ Denegar] pattern). **Returns:** `{ plugin, menuItem, payouts, onFulfilled }` — `menuItem` is the drop-in `💎 VIP` entry for `botMenu`; `payouts.{record, list, export, exportForUsers}` is the Fragment payout ledger (you receive TON, log the EUR conversion, export time-windowed CSV/JSON for your gestor); `onFulfilled(productKey \| '*', handler)` / `onRefunded(...)` register fire-and-forget hooks (purchase applied / admin-approved refund — a revenue ledger writes on one, reverses on the other). **Stars-only by design** — Telegram ToS §6.2 forbids third-party payment providers for digital goods. Crypto Pay deferred (MiCA risk); Stripe-outside-Telegram is a future v2 channel. Full compliance memo (Spanish-autónomo seller-of-record analysis, Verifactu vs Crea y Crece, MiCA, Art. 103(m) waiver text, GDPR retention) in `src/bot/payments/CLAUDE.md`. |
 | `@adriangalilea/utils/bot/create` | `createBot<S>({ token?, storage?, initial?, admins?, language?, menu?, access?, payments?, handlers?, worker? })` — the composer (see "One bot file, ideation → production" above). Returns `{ build, session, poll, isMain, fetch }`: `poll()` long-polls, `export default app` is a complete Worker, `app.session(ctx)` / the `handlers` callback's `session(ctx)` is the TYPED accessor for your `S` fields. Owns storage+session wiring; resolves storage per environment (D1 binding → `bot/storage-d1`; `BOT_PERSIST` path → sqlite, `redis://` → redis, lazily-imported optional peers; else announced-ephemeral memory) — or pass `storage: (env) => Storage` when the choice is env-dependent (e.g. a D1 binding not named `DB`). Boot NARRATES the composition (`session: memory …`, `features: language(en,es) · menu(/settings)`) so every implicit decision is visible where you're looking. Runnable demo: `pnpm demo:bot`. |

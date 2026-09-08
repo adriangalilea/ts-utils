@@ -1,6 +1,6 @@
 {
 	"name": "@adriangalilea/utils",
-	"version": "2.38.1",
+	"version": "3.0.0",
 	"description": "TypeScript utilities - logger, currency, formatter, GramIO bot plugins, and more",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -184,9 +184,21 @@
 			"types": "./dist/bot/inline-feedback.d.ts",
 			"default": "./dist/bot/inline-feedback.js"
 		},
-		"./bot/metrics": {
-			"types": "./dist/bot/metrics.d.ts",
-			"default": "./dist/bot/metrics.js"
+		"./metrics": {
+			"types": "./dist/metrics/index.d.ts",
+			"default": "./dist/metrics/index.js"
+		},
+		"./metrics/sqlite": {
+			"types": "./dist/metrics/sqlite.d.ts",
+			"default": "./dist/metrics/sqlite.js"
+		},
+		"./metrics/report": {
+			"types": "./dist/metrics/report.d.ts",
+			"default": "./dist/metrics/report.js"
+		},
+		"./metrics/cli": {
+			"types": "./dist/metrics/cli.d.ts",
+			"default": "./dist/metrics/cli.js"
 		},
 		"./bot/text": {
 			"types": "./dist/bot/text.d.ts",
@@ -203,7 +215,7 @@
 	"scripts": {
 		"build": "tsc",
 		"dev": "tsx src/index.ts",
-		"test": "echo 'Tests not configured yet'",
+		"test": "tsx tests/metrics-test.ts",
 		"test:log": "tsx tests/log-test.ts",
 		"test:runtime": "tsx tests/runtime-test.ts",
 		"test:text": "tsx tests/text-test.ts",
