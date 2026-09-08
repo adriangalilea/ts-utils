@@ -1,4 +1,16 @@
-import type { DailyMetric } from "./sqlite.js";
+/** Store-independent daily observations, shared by adapters and renderers. */
+export interface DailyMetric {
+	project: string;
+	key: string;
+	label: string;
+	kind: string;
+	help: string;
+	unit: string;
+	dimensions: Record<string, string>;
+	day: string;
+	count: number;
+	sum: number;
+}
 
 export interface MetricTotal {
 	project: string;

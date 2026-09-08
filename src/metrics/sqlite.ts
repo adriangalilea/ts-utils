@@ -1,4 +1,5 @@
 import type { Measurement } from "./index.js";
+import type { DailyMetric } from "./report.js";
 
 /** Structural libSQL interface; callers own connections and credentials. */
 export interface MetricsDatabase {
@@ -57,19 +58,6 @@ export function sqliteMetricsWriter(db: MetricsDatabase, project: string) {
 			});
 		await db.batch(statements, "write");
 	};
-}
-
-export interface DailyMetric {
-	project: string;
-	key: string;
-	label: string;
-	kind: string;
-	help: string;
-	unit: string;
-	dimensions: Record<string, string>;
-	day: string;
-	count: number;
-	sum: number;
 }
 
 /** Inclusive UTC dates. Errors propagate: unavailable data must never read as zero. */

@@ -1,6 +1,5 @@
 import { table, ui } from "../cli/index.js";
-import { summarizeMetrics } from "./report.js";
-import type { DailyMetric } from "./sqlite.js";
+import { type DailyMetric, summarizeMetrics } from "./report.js";
 
 /** Render declarations stored beside observations; adding a metric requires no panel edit. */
 export function renderMetrics(

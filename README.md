@@ -42,6 +42,10 @@ Enable it only with a deletion and retention policy; no identity is inferred.
 `overlaps: [["a", "b"]]` declares unordered audience overlap, not an ordered funnel.
 Daily totals support counts and averages, not percentile latency or event ordering.
 
+**4.0 migration:** import `DailyMetric` from `metrics/report`, not `metrics/sqlite`.
+Report types and renderers are store-independent; SQLite is one optional adapter.
+This removes the old type export rather than retaining a compatibility alias.
+
 **3.0 migration:** `bot/metrics` and its bot-barrel export are removed. Import
 `@adriangalilea/utils/metrics`; replace `write(key, count, sum, user)` with
 `write({ key, count, sum, user, day, dimensions, spec })`. Rename `funnels` to
