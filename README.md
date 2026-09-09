@@ -7,21 +7,36 @@ TypeScript utilities - logger, currency, offensive programming, file operations,
 ```ts
 import { createClient } from "@libsql/client"
 import { defineMetrics } from "@adriangalilea/utils/metrics"
-import { sqliteMetricsWriter } from "@adriangalilea/utils/metrics/sqlite"
+import { libsqlDriver } from "@adriangalilea/utils/metrics/libsql"
+import { metricsWriter } from "@adriangalilea/utils/metrics/sqlite"
 
-const db = createClient({ url: process.env.METRICS_DATABASE_URL!, authToken: process.env.METRICS_AUTH_TOKEN })
+const driver = libsqlDriver(createClient({ url: process.env.METRICS_DATABASE_URL!, authToken: process.env.METRICS_AUTH_TOKEN }))
 const metrics = defineMetrics({
   installCopy: { kind: "counter", label: "install command copies", dimensions: { component: ["chat", "glass"] } },
-}, { write: sqliteMetricsWriter(db, "my-project") })
+}, { write: metricsWriter(driver, "my-project") })
 
 await metrics.installCopy.bump({ dimensions: { component: "chat" } })
 ```
 
+One SQLite dialect, many stores. `metrics/sqlite` holds the schema, the writer and
+the readers over a `MetricsDriver`: two verbs, `query(statement)` for rows and
+`transact(statements)` for an all-or-nothing write batch. `metrics/libsql` wraps a
+Turso / libSQL client, `metrics/d1` wraps a Cloudflare D1 binding (`d1Driver(env.DB)`),
+each with the driver's native calls and structural types, so no database client is
+bundled. Any other SQLite driver implements the two verbs in a few lines (the test
+does it over `node:sqlite`). A store that does not speak SQLite implements the
+injected `write(measurement)` contract and its own readers returning the
+`metrics/report` types.
+
 Provision the exported `METRICS_SCHEMA` once before collecting. `describe()` returns
-the declarations; the SQL writer stores labels beside daily counters so reports
-discover metrics without another hardcoded list. `readMetrics(db, { from, to,
+the declarations; the writer stores labels beside daily counters so reports
+discover metrics without another hardcoded list. `readMetrics(driver, { from, to,
 project? })` returns daily rows with labels and dimensions, using inclusive UTC dates.
-Readers propagate database errors rather than presenting missing data as zero.
+`readAudience(driver, { from, to, project }, describe().overlaps)` answers who did it
+from the opt-in per-user rows: per key, distinct actors, actors with more than one
+sample on a single day, actors seen on more than one day, then each declared
+overlap as `fromUsers` and `bothUsers`. Readers propagate database errors rather
+than presenting missing data as zero.
 `summarizeMetrics(rows)` from `metrics/report` produces one generic report shape;
 `renderMetrics(rows, { daily? })` from `metrics/cli` renders it with the existing
 ANSI-aware `cli.table` helpers. Both discover every recorded metric from its
@@ -37,10 +52,8 @@ disappearing series, count changes and weighted timing-average changes. Percent
 change is null without a nonzero baseline; missing timing samples stay null.
 Changing a metric's kind or unit across the inputs is rejected. Missing observations
 are not proof that collection was running: deltas compare recorded data only.
-The SQL writer rejects changes to an existing key's kind or unit atomically, before
+The writer rejects changes to an existing key's kind or unit atomically, before
 adding observations. Use a new key for a new meaning; labels and help can be edited.
-The SQL adapter accepts a libSQL-compatible client; D1 or another store can implement
-the injected `write(measurement)` contract instead. No database client is bundled.
 
 Measurements validate finite nonnegative samples, positive integer counts, and
 declared dimension values. Calls resolve even when validation or storage fails;
@@ -55,16 +68,15 @@ Enable it only with a deletion and retention policy; no identity is inferred.
 `overlaps: [["a", "b"]]` declares unordered audience overlap, not an ordered funnel.
 Daily totals support counts and averages, not percentile latency or event ordering.
 
-**4.0 migration:** import `DailyMetric` from `metrics/report`, not `metrics/sqlite`.
-Report types and renderers are store-independent; SQLite is one optional adapter.
-This removes the old type export rather than retaining a compatibility alias.
-
-**3.0 migration:** `bot/metrics` and its bot-barrel export are removed. Import
-`@adriangalilea/utils/metrics`; replace `write(key, count, sum, user)` with
-`write({ key, count, sum, user, day, dimensions, spec })`. Rename `funnels` to
-`overlaps` in declarations and schema consumers. Existing stores can adapt the new
-write object without moving historical data. Metric keys and dimensions are storage
-identifiers: introduce a new key when changing meaning rather than relabelling history.
+**5.0 migration:** `sqliteMetricsWriter(client, project)` and `MetricsDatabase` are
+gone. Wrap the client in a driver, `libsqlDriver(client)` or `d1Driver(binding)`, and
+pass it to `metricsWriter(driver, project)`, `readMetrics(driver, …)` and the new
+`readAudience(driver, …)`. A private store with its own tables moves its rows into
+`METRICS_SCHEMA` (`project`, `key`, `dimensions` as `'{}'` when it had none, `day`,
+`user` as text) and seeds `metric_definition` for the keys it already holds, or the
+history stays invisible to `readMetrics` until each key's first write. Metric keys and
+dimensions are storage identifiers: introduce a new key when changing meaning rather
+than relabelling history.
 
 ## Installation
 

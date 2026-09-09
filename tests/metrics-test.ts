@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { renderMetricComparison, renderMetrics } from "../src/metrics/cli.js";
+import { d1Driver } from "../src/metrics/d1.js";
 import { defineMetrics, type Measurement } from "../src/metrics/index.js";
+import { libsqlDriver } from "../src/metrics/libsql.js";
 import {
 	compareMetrics,
 	metricWindows,
@@ -9,9 +11,10 @@ import {
 } from "../src/metrics/report.js";
 import {
 	METRICS_SCHEMA,
-	type MetricsDatabase,
+	type MetricsDriver,
+	metricsWriter,
+	readAudience,
 	readMetrics,
-	sqliteMetricsWriter,
 } from "../src/metrics/sqlite.js";
 
 const samples: Measurement[] = [];
@@ -23,8 +26,10 @@ const spec = {
 		perUser: true,
 		dimensions: { component: ["chat", "glass"] },
 	},
+	opens: { kind: "counter", label: "opens", perUser: true },
 	latency: { kind: "timing", label: "latency", unit: "ms" },
 } as const;
+const overlaps = [["copies", "opens"]] as const;
 const metrics = defineMetrics(spec, {
 	write: async (m) => {
 		samples.push(m);
@@ -82,11 +87,12 @@ assert.equal(metrics.describe().metrics[0].label, "copies");
 
 const sqlite = new DatabaseSync(":memory:");
 for (const sql of METRICS_SCHEMA) sqlite.exec(sql);
-const db: MetricsDatabase = {
-	async execute({ sql, args }) {
-		return { rows: sqlite.prepare(sql).all(...args) };
+// node:sqlite as a driver: the same two verbs the shipped libSQL and D1 drivers implement.
+const db: MetricsDriver = {
+	async query({ sql, args }) {
+		return sqlite.prepare(sql).all(...args) as Record<string, unknown>[];
 	},
-	async batch(statements) {
+	async transact(statements) {
 		sqlite.exec("BEGIN");
 		try {
 			for (const { sql, args } of statements) sqlite.prepare(sql).run(...args);
@@ -97,8 +103,49 @@ const db: MetricsDatabase = {
 		}
 	},
 };
+// The shipped drivers, over fakes shaped like the real clients, so both call paths run here.
+const libsqlCalls: string[] = [];
+const viaLibsql = libsqlDriver({
+	async execute(statement) {
+		libsqlCalls.push("execute");
+		return { rows: await db.query(statement) };
+	},
+	async batch(statements, mode) {
+		libsqlCalls.push(`batch:${mode}`);
+		return db.transact(statements);
+	},
+});
+const d1Calls: string[] = [];
+type FakeD1Statement = {
+	sql: string;
+	args: (string | number)[];
+	bind(...values: unknown[]): FakeD1Statement;
+	all<T>(): Promise<{ results: T[] }>;
+};
+const viaD1 = d1Driver({
+	prepare(sql) {
+		const statement: FakeD1Statement = {
+			sql,
+			args: [],
+			bind(...values) {
+				statement.args = values as (string | number)[];
+				return statement;
+			},
+			async all<T>() {
+				d1Calls.push("all");
+				return { results: (await db.query(statement)) as T[] };
+			},
+		};
+		return statement;
+	},
+	async batch(statements) {
+		d1Calls.push(`batch:${statements.length}`);
+		return db.transact(statements as FakeD1Statement[]);
+	},
+});
 const stored = defineMetrics(spec, {
-	write: sqliteMetricsWriter(db, "ui"),
+	write: metricsWriter(db, "ui"),
+	overlaps,
 	now: () => new Date("2026-09-08T12:00:00Z"),
 	onError: (e) => {
 		errors.push(e);
@@ -110,7 +157,7 @@ await stored.copies.bump({ dimensions: { component: "glass" } });
 await stored.latency.record(30);
 await stored.latency.record(50);
 const other = defineMetrics(spec, {
-	write: sqliteMetricsWriter(db, "other"),
+	write: metricsWriter(db, "other"),
 	now: () => new Date("2026-09-08T12:00:00Z"),
 });
 await other.copies.bump({ dimensions: { component: "chat" } });
@@ -138,6 +185,113 @@ assert.equal(
 );
 await assert.rejects(readMetrics(db, { from: "2026-09-09", to: "2026-09-08" }));
 assert.equal(errors.length, 6);
+
+// Audience: who did it. actor copies twice on the 8th (same-day repeat), once more on the
+// 10th (returned); guest and actor open on the 10th; the anonymous glass bump is nobody.
+const later = defineMetrics(spec, {
+	write: metricsWriter(db, "ui"),
+	overlaps,
+	now: () => new Date("2026-09-10T12:00:00Z"),
+});
+await later.copies.bump({ user: "actor", dimensions: { component: "glass" } });
+await later.opens.bump({ user: "guest" });
+await later.opens.bump({ user: 7 });
+await later.opens.bump({ user: "actor" });
+const audience = await readAudience(
+	db,
+	{ from: "2026-09-08", to: "2026-09-10", project: "ui" },
+	stored.describe().overlaps,
+);
+assert.deepEqual(audience, {
+	metrics: [
+		{
+			project: "ui",
+			key: "copies",
+			uniques: 1,
+			repeatUsers: 1,
+			returningUsers: 1,
+		},
+		{
+			project: "ui",
+			key: "opens",
+			uniques: 3,
+			repeatUsers: 0,
+			returningUsers: 0,
+		},
+	],
+	overlaps: [
+		{ project: "ui", from: "copies", to: "opens", fromUsers: 1, bothUsers: 1 },
+	],
+});
+assert.deepEqual(
+	(
+		await readAudience(
+			db,
+			{ from: "2026-09-10", to: "2026-09-10", project: "ui" },
+			[],
+		)
+	).metrics.find((m) => m.key === "copies"),
+	{
+		project: "ui",
+		key: "copies",
+		uniques: 1,
+		repeatUsers: 0,
+		returningUsers: 0,
+	},
+);
+assert.deepEqual(
+	await readAudience(
+		db,
+		{ from: "2026-09-08", to: "2026-09-10", project: "other" },
+		stored.describe().overlaps,
+	),
+	{
+		metrics: [],
+		overlaps: [
+			{
+				project: "other",
+				from: "copies",
+				to: "opens",
+				fromUsers: 0,
+				bothUsers: 0,
+			},
+		],
+	},
+);
+await assert.rejects(
+	readAudience(db, { from: "2026-09-08", to: "2026-09-10", project: "UI" }, []),
+);
+
+// The shipped drivers: write through D1's prepare/bind/batch, read through libSQL's execute.
+const onD1 = defineMetrics(spec, {
+	write: metricsWriter(viaD1, "d1"),
+	now: () => new Date("2026-09-08T12:00:00Z"),
+	onError: (e) => {
+		throw e;
+	},
+});
+await onD1.opens.bump({ user: 42 });
+await onD1.latency.record(9);
+assert.deepEqual(d1Calls, ["batch:3", "batch:2"]);
+const fromLibsql = await readMetrics(viaLibsql, {
+	from: "2026-09-08",
+	to: "2026-09-08",
+	project: "d1",
+});
+assert.deepEqual(libsqlCalls, ["execute"]);
+assert.equal(fromLibsql.length, 2);
+assert.equal(fromLibsql.find((r) => r.key === "opens")?.count, 1);
+assert.equal(
+	(
+		await readAudience(
+			viaD1,
+			{ from: "2026-09-08", to: "2026-09-08", project: "d1" },
+			[],
+		)
+	).metrics[0]?.uniques,
+	1,
+);
+assert.ok(d1Calls.includes("all"));
 assert.deepEqual(metricWindows(14, { now: new Date("2026-09-08T23:59:59Z") }), {
 	current: { from: "2026-08-25", to: "2026-09-07" },
 	previous: { from: "2026-08-11", to: "2026-08-24" },
@@ -192,7 +346,7 @@ assert.equal(
 );
 assert.throws(() => compareMetrics([timing], [{ ...timing, unit: "seconds" }]));
 assert.throws(() => summarizeMetrics([timing, { ...timing, unit: "seconds" }]));
-const strictWriter = sqliteMetricsWriter(db, "ui");
+const strictWriter = metricsWriter(db, "ui");
 for (const changed of [
 	{ kind: "counter", unit: "ms" },
 	{ kind: "timing", unit: "s" },
@@ -235,5 +389,5 @@ assert.match(rendered, /avg current/);
 assert.match(renderMetricComparison([]), /either window/);
 sqlite.close();
 console.log(
-	"Metrics: validation, failure isolation, dimensions, UTC buckets, atomic upserts, identity and project separation passed",
+	"Metrics: validation, failure isolation, dimensions, UTC buckets, atomic upserts, audience, libSQL and D1 drivers, project separation passed",
 );

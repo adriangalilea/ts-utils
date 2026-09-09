@@ -1,16 +1,22 @@
 import type { Measurement } from "./index.js";
-import type { DailyMetric } from "./report.js";
+import type { Audience, DailyMetric } from "./report.js";
 
-/** Structural libSQL interface; callers own connections and credentials. */
-export interface MetricsDatabase {
-	execute(statement: {
-		sql: string;
-		args: Array<string | number>;
-	}): Promise<{ rows: Iterable<Record<string, unknown>> }>;
-	batch(
-		statements: Array<{ sql: string; args: Array<string | number> }>,
-		mode: "write",
-	): Promise<unknown>;
+export type SqlValue = string | number;
+export interface SqlStatement {
+	sql: string;
+	args: SqlValue[];
+}
+
+/**
+ * The SQLite dialect below needs exactly two verbs from a store. `metrics/libsql` and
+ * `metrics/d1` implement them with each driver's native calls; any driver that speaks
+ * SQLite (node:sqlite, bun:sqlite, better-sqlite3) does the same in a few lines.
+ */
+export interface MetricsDriver {
+	/** The rows of one read statement. */
+	query(statement: SqlStatement): Promise<Iterable<Record<string, unknown>>>;
+	/** Every statement or none: a constraint failure in any of them rolls the batch back. */
+	transact(statements: SqlStatement[]): Promise<unknown>;
 }
 
 /** Run explicitly during provisioning, never on a user's request. */
@@ -21,12 +27,26 @@ export const METRICS_SCHEMA = [
 	`CREATE INDEX IF NOT EXISTS metric_user_identity ON metric_user_daily(project, user)`,
 ] as const;
 
-export function sqliteMetricsWriter(db: MetricsDatabase, project: string) {
-	if (!/^[a-z][a-z0-9-]*$/.test(project))
-		throw new Error("metrics: invalid project");
+const PROJECT = /^[a-z][a-z0-9-]*$/;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+function assertProject(project: string) {
+	if (!PROJECT.test(project)) throw new Error("metrics: invalid project");
+}
+
+function assertRange(range: { from: string; to: string }) {
+	for (const day of [range.from, range.to]) {
+		if (!DAY.test(day) || new Date(day).toISOString().slice(0, 10) !== day)
+			throw new Error("metrics: invalid UTC date");
+	}
+	if (range.from > range.to) throw new Error("metrics: reversed date range");
+}
+
+export function metricsWriter(driver: MetricsDriver, project: string) {
+	assertProject(project);
 	return async (m: Measurement) => {
 		const dimensions = JSON.stringify(m.dimensions);
-		const statements = [
+		const statements: SqlStatement[] = [
 			{
 				// NOT NULL makes a changed kind/unit fail the whole atomic batch, including counts.
 				// Labels/help may evolve, but historical measurements must retain their meaning.
@@ -58,28 +78,22 @@ export function sqliteMetricsWriter(db: MetricsDatabase, project: string) {
 					m.sum,
 				],
 			});
-		await db.batch(statements, "write");
+		await driver.transact(statements);
 	};
 }
 
 /** Inclusive UTC dates. Errors propagate: unavailable data must never read as zero. */
 export async function readMetrics(
-	db: MetricsDatabase,
+	driver: MetricsDriver,
 	range: { from: string; to: string; project?: string },
 ): Promise<DailyMetric[]> {
-	for (const day of [range.from, range.to]) {
-		if (
-			!/^\d{4}-\d{2}-\d{2}$/.test(day) ||
-			new Date(day).toISOString().slice(0, 10) !== day
-		)
-			throw new Error("metrics: invalid UTC date");
-	}
-	if (range.from > range.to) throw new Error("metrics: reversed date range");
-	const result = await db.execute({
+	assertRange(range);
+	if (range.project !== undefined) assertProject(range.project);
+	const rows = await driver.query({
 		sql: `SELECT d.*, s.label, s.kind, s.help, s.unit FROM metric_daily d JOIN metric_definition s USING(project, key) WHERE day >= ? AND day <= ? ${range.project ? "AND project = ?" : ""} ORDER BY project, key, dimensions, day`,
 		args: [range.from, range.to, ...(range.project ? [range.project] : [])],
 	});
-	return Array.from(result.rows, (r) => ({
+	return Array.from(rows, (r) => ({
 		project: String(r.project),
 		key: String(r.key),
 		label: String(r.label),
@@ -91,4 +105,57 @@ export async function readMetrics(
 		count: Number(r.count),
 		sum: Number(r.sum),
 	}));
+}
+
+/**
+ * Who did it, over the opt-in per-user rows of one project, all dimensions folded: per key,
+ * distinct actors, actors with more than one sample on a single day, actors seen on more
+ * than one day; then the declared unordered overlaps. Keys nobody touched are absent.
+ */
+export async function readAudience(
+	driver: MetricsDriver,
+	range: { from: string; to: string; project: string },
+	overlaps: ReadonlyArray<{ from: string; to: string }>,
+): Promise<Audience> {
+	assertRange(range);
+	assertProject(range.project);
+	const window = [range.project, range.from, range.to] as const;
+	const perKey = await driver.query({
+		sql: `WITH per_day AS (SELECT key, user, day, SUM(count) AS count FROM metric_user_daily WHERE project = ? AND day >= ? AND day <= ? GROUP BY key, user, day), per_user AS (SELECT key, user, COUNT(*) AS days, MAX(count) AS peak FROM per_day GROUP BY key, user) SELECT key, COUNT(*) AS uniques, SUM(CASE WHEN peak > 1 THEN 1 ELSE 0 END) AS repeat_users, SUM(CASE WHEN days > 1 THEN 1 ELSE 0 END) AS returning_users FROM per_user GROUP BY key ORDER BY key`,
+		args: [...window],
+	});
+	const metrics = Array.from(perKey, (r) => ({
+		project: range.project,
+		key: String(r.key),
+		uniques: Number(r.uniques),
+		repeatUsers: Number(r.repeat_users),
+		returningUsers: Number(r.returning_users),
+	}));
+	const shared: Audience["overlaps"] = [];
+	const actors = `SELECT DISTINCT user FROM metric_user_daily WHERE project = ? AND key = ? AND day >= ? AND day <= ?`;
+	for (const pair of overlaps) {
+		const [row] = Array.from(
+			await driver.query({
+				sql: `WITH a AS (${actors}), b AS (${actors}) SELECT (SELECT COUNT(*) FROM a) AS from_users, (SELECT COUNT(*) FROM a WHERE user IN (SELECT user FROM b)) AS both_users`,
+				args: [
+					range.project,
+					pair.from,
+					range.from,
+					range.to,
+					range.project,
+					pair.to,
+					range.from,
+					range.to,
+				],
+			}),
+		);
+		shared.push({
+			project: range.project,
+			from: pair.from,
+			to: pair.to,
+			fromUsers: Number(row?.from_users ?? 0),
+			bothUsers: Number(row?.both_users ?? 0),
+		});
+	}
+	return { metrics, overlaps: shared };
 }

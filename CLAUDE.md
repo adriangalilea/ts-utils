@@ -2,10 +2,13 @@
 
 ## Metrics operations
 
-Metrics core and reporting types are store-independent. Applications own their
-connections and adapters: UI uses a dedicated Turso database; xtldr keeps D1.
-Do not wire garden to UI's store or move historical data to adopt the shared API.
-For the optional SQLite/libSQL adapter, provision `METRICS_SCHEMA` explicitly;
+Metrics core and reporting types are store-independent; the SQLite dialect is one
+module over a two-verb driver, and every store gets a driver of its own (libSQL, D1),
+never a client shaped like another client's. Applications own their connections and
+their database: ui writes to a dedicated Turso database, xtldr to its bot's D1, both
+through `METRICS_SCHEMA`, so one reader and one report serve every product. A new
+SQLite store is a new `metrics/<driver>.ts` implementing `query` and `transact` with
+that driver's native calls. Provision `METRICS_SCHEMA` explicitly;
 never create tables during requests. Use database-scoped credentials, table
 read/add/update permissions for ingestion (upserts require reads), and read-only
 credentials for reports. Ingestion cannot delete rows or change schema.

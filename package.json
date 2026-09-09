@@ -1,6 +1,6 @@
 {
 	"name": "@adriangalilea/utils",
-	"version": "4.1.1",
+	"version": "5.0.0",
 	"description": "TypeScript utilities - logger, currency, formatter, GramIO bot plugins, and more",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -191,6 +191,14 @@
 		"./metrics/sqlite": {
 			"types": "./dist/metrics/sqlite.d.ts",
 			"default": "./dist/metrics/sqlite.js"
+		},
+		"./metrics/libsql": {
+			"types": "./dist/metrics/libsql.d.ts",
+			"default": "./dist/metrics/libsql.js"
+		},
+		"./metrics/d1": {
+			"types": "./dist/metrics/d1.d.ts",
+			"default": "./dist/metrics/d1.js"
 		},
 		"./metrics/report": {
 			"types": "./dist/metrics/report.d.ts",

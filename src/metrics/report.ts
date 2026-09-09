@@ -12,6 +12,32 @@ export interface DailyMetric {
 	sum: number;
 }
 
+/** Per key, from opt-in per-user rows: keys nobody touched in the window are absent. */
+export interface AudienceMetric {
+	project: string;
+	key: string;
+	/** Distinct actors. */
+	uniques: number;
+	/** Actors with more than one sample on a single day. */
+	repeatUsers: number;
+	/** Actors seen on more than one day. */
+	returningUsers: number;
+}
+
+/** Unordered: how many of `from`'s actors also touched `to`, in the same window. */
+export interface AudienceOverlap {
+	project: string;
+	from: string;
+	to: string;
+	fromUsers: number;
+	bothUsers: number;
+}
+
+export interface Audience {
+	metrics: AudienceMetric[];
+	overlaps: AudienceOverlap[];
+}
+
 export interface MetricTotal {
 	project: string;
 	key: string;
