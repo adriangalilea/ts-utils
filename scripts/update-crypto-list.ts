@@ -1,17 +1,19 @@
 #!/usr/bin/env tsx
 /**
- * Downloads the latest cryptocurrency symbols from CoinGecko API
- * and generates a TypeScript data file with all symbols.
+ * Downloads the latest cryptocurrency symbols from the CoinGecko API into
+ * src/universal/currency/crypto-symbols-data.ts.
  *
- * Usage: tsx src/currency/download-crypto-list.ts
+ * Usage: pnpm update-crypto
  */
 
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const OUT_DIR = join(
+	dirname(fileURLToPath(import.meta.url)),
+	"../src/universal/currency",
+);
 
 async function downloadCryptoSymbols() {
 	console.log("Fetching cryptocurrency list from CoinGecko...");
@@ -48,7 +50,7 @@ async function downloadCryptoSymbols() {
  * Generated on ${now}
  * ${symbols.length.toLocaleString()} cryptocurrency symbols from CoinGecko API
  * 
- * Run 'npm run update-crypto' to refresh this list
+ * Run 'pnpm update-crypto' to refresh this list
  */
 
 export const cryptoSymbolsData: readonly string[] = [
@@ -60,26 +62,16 @@ export const symbolCount = ${symbols.length}
 `;
 
 		// Write to file
-		const outputPath = join(__dirname, "crypto-symbols-data.ts");
+		const outputPath = join(OUT_DIR, "crypto-symbols-data.ts");
 		writeFileSync(outputPath, tsContent, "utf-8");
 
 		console.log(`✅ Generated ${outputPath}`);
 		console.log(`   ${symbols.length.toLocaleString()} symbols`);
 		console.log(`   Last updated: ${now}`);
-
-		// Also write a simple text file for reference (optional)
-		const textPath = join(__dirname, `crypto-symbols-${now.split("T")[0]}.txt`);
-		writeFileSync(textPath, symbols.join("\n"), "utf-8");
-		console.log(`📄 Also saved text backup to ${textPath}`);
 	} catch (error) {
 		console.error("❌ Error downloading crypto symbols:", error);
 		process.exit(1);
 	}
 }
 
-// Run if executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-	downloadCryptoSymbols();
-}
-
-export { downloadCryptoSymbols };
+await downloadCryptoSymbols();

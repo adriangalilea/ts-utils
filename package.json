@@ -221,15 +221,15 @@
 		"dist"
 	],
 	"scripts": {
-		"build": "tsc",
+		"build": "rm -rf dist && tsc",
 		"dev": "tsx src/index.ts",
 		"test": "tsx tests/metrics-test.ts",
 		"test:log": "tsx tests/log-test.ts",
 		"test:runtime": "tsx tests/runtime-test.ts",
 		"test:text": "tsx tests/text-test.ts",
 		"example": "tsx tests/example.ts",
-		"update-crypto": "tsx src/universal/currency/download-crypto-list.ts",
-		"update-url-rules": "tsx src/universal/url/update-rules.ts",
+		"update-crypto": "tsx scripts/update-crypto-list.ts",
+		"update-url-rules": "tsx scripts/update-url-rules.ts",
 		"type-check": "tsc --noEmit",
 		"lint": "biome lint",
 		"format": "biome format",

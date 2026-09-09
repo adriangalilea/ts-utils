@@ -1,9 +1,10 @@
 #!/usr/bin/env tsx
 /**
  * Vendors the tracking-parameter ruleset from @protontech/tidy-url (Proton's
- * maintained fork of DrKain/tidy-url, MIT) into ./tidy-rules.ts. Same pattern
- * as currency's download-crypto-list.ts: dataset knowledge is community-
- * maintained upstream; we vendor a snapshot instead of taking a runtime dep.
+ * maintained fork of DrKain/tidy-url, MIT) into
+ * src/universal/url/tidy-rules.ts. Same pattern as update-crypto-list.ts:
+ * dataset knowledge is community-maintained upstream, so a snapshot is
+ * vendored instead of taking a runtime dep.
  *
  * Only the param-stripping fields are carried over (name, match, match_href,
  * rules, allow, exclude). Upstream's redirect-unwrapping, AMP, and base64-
@@ -19,7 +20,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const OUT = join(dirname(fileURLToPath(import.meta.url)), "tidy-rules.ts");
+const OUT = join(
+	dirname(fileURLToPath(import.meta.url)),
+	"../src/universal/url/tidy-rules.ts",
+);
 const PACKAGE = "@protontech/tidy-url";
 
 interface UpstreamRule {
