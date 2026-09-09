@@ -11,16 +11,13 @@
  *     `@<bot> shutting down.`) when `KEV.TELEGRAM_ADMIN_ID` is set —
  *     pass `notifyAdmin: false` to disable.
  *
- *   `botSession` / `prefixStorage` — re-exported from `bot/session` so
- *     Node consumers keep one import; the implementation is worker-safe
- *     and lives there.
- *
- * Peer deps: `gramio`, `@gramio/session`, `@gramio/storage`.
+ * Peer dep: `gramio`.
  *
  * @example
  * import { Bot } from 'gramio'
  * import { redisStorage } from '@gramio/storage-redis'
- * import { gracefulStart, botSession } from '@adriangalilea/utils/bot/kit'
+ * import { botSession } from '@adriangalilea/utils/bot/session'
+ * import { gracefulStart } from '@adriangalilea/utils/bot/kit'
  * import { adminContext } from '@adriangalilea/utils/bot/admin'
  * import { kev } from '@adriangalilea/utils/platform/kev'
  *
@@ -34,11 +31,9 @@
  *
  * await gracefulStart(bot, { onShutdown: () => db.end() })
  */
-import type { AnyBot, Plugin as PluginType } from "gramio";
+import type { AnyBot } from "gramio";
 import { kev } from "../platform/kev.js";
 import { notifyAdmins } from "./notify.js";
-
-export { botSession, prefixStorage } from "./session.js";
 
 // ─── gracefulStart ─────────────────────────────────────────────────
 
@@ -145,10 +140,3 @@ export const gracefulStart = async (
 
 	await bot.start();
 };
-
-// `adminContext` moved to the Worker-safe `bot/admin` subpath (it reads no env, so it never
-// belonged in this Node-only corner). Import it from `@adriangalilea/utils/bot/admin`.
-
-// Re-export so the bot subpath consumers don't need to import from
-// `@gramio/session` separately when wiring custom advanced cases.
-export type { PluginType };

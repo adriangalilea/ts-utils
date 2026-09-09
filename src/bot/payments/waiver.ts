@@ -19,13 +19,11 @@
  * `ChargeRecord.waiverSnapshot`).
  */
 
-import type { Storage } from "@gramio/storage";
 import { InlineKeyboard } from "gramio";
 
 import { say } from "../../say/index.js";
 import { scope } from "../../universal/log.js";
 import { callbackNs } from "../callbacks.js";
-import { botStorageKey } from "../keys.js";
 import {
 	type BotPaymentsConfig,
 	DEFAULT_PRIVACY_URL,
@@ -52,18 +50,6 @@ export const waiverConsentCb = cb.data("waiver:consent", { pk: "string" });
 export const waiverCancelCb = cb.data("waiver:cancel", {});
 
 // ─── pure helpers ──────────────────────────────────────────────────
-
-/**
- * Returns true when the stored consent matches the current waiver
- * version — i.e. no re-consent needed before a purchase.
- */
-export const isWaiverFresh = (
-	stored: WaiverRecord | undefined,
-	currentVersion: string,
-): boolean => {
-	if (!stored) return false;
-	return stored.version === currentVersion;
-};
 
 /**
  * Resolve the waiver text Polyglot to a single string for the recipient's
@@ -171,33 +157,5 @@ export const persistWaiverOnSession = (
 	ctx.session.pay ??= {};
 	ctx.session.pay.waiver = record;
 	log.success(`waiver consent persisted: version=${version} locale=${locale}`);
-	return record;
-};
-
-/**
- * Persist a waiver record onto a SPECIFIC user's stored session (used
- * when the consent tap arrives on a different ctx than the original
- * `invoice()` call — rare, but possible if the user wedges multiple
- * flows). The cross-user write is via storage directly, mirroring the
- * pattern in `access-control.ts`.
- */
-export const persistWaiverForUser = async (
-	storage: Storage,
-	ctx: { bot: unknown },
-	userId: number,
-	version: string,
-	locale: string,
-): Promise<WaiverRecord> => {
-	const key = botStorageKey(ctx, userId);
-	const full = ((await storage.get(key)) ?? {}) as {
-		pay?: PaymentsSession;
-	} & Record<string, unknown>;
-	const record: WaiverRecord = {
-		at: Date.now(),
-		version,
-		locale,
-	};
-	full.pay = { ...(full.pay ?? {}), waiver: record };
-	await storage.set(key, full);
 	return record;
 };

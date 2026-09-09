@@ -12,10 +12,7 @@
  *     own storage access, so the whole package stays isolated by
  *     construction. Use this instead of `session()` — full stop.
  *
- *   `prefixStorage(storage, prefix)` — escape hatch that prepends a
- *     fixed prefix to every key of any `@gramio/storage` adapter.
- *
- * Peer deps: `gramio`, `@gramio/session`, `@gramio/storage`.
+ * Peer deps: `gramio`, `@gramio/session`.
  *
  * @example
  * import { redisStorage } from '@gramio/storage-redis'
@@ -26,7 +23,6 @@
  * bot.extend(userSession)
  */
 import { type SessionOptions, session } from "@gramio/session";
-import type { Storage } from "@gramio/storage";
 import { botId } from "./keys.js";
 
 // ─── botSession ────────────────────────────────────────────────────
@@ -79,32 +75,4 @@ export const botSession = <
 			return `${prefix}${ctx.senderId ?? ""}`;
 		}) as SessionOptions<Data, Key, Lazy>["getSessionKey"],
 	}) as ReturnType<typeof session<Data, Key, Lazy>>;
-};
-
-// ─── prefixStorage (escape hatch) ──────────────────────────────────
-
-/**
- * Wraps any `@gramio/storage` adapter so every key gets a fixed
- * `${prefix}` prepended.
- *
- * **You almost never need this.** The library's plugins are isolated
- * by bot id automatically when you wire `botSession` (see above) —
- * `prefixStorage` exists for edge cases:
- *
- *   - Sharing a Redis instance with a NON-bot system, and you want a
- *     top-level prefix on top of the bot-id namespace.
- *   - Migrating from an older deployment that used a custom prefix.
- *
- * In those cases the wrapper composes cleanly with `botSession`'s
- * internal prefix: final keys look like `${prefix}bot-<id>:<userId>`.
- */
-export const prefixStorage = (storage: Storage, prefix: string): Storage => {
-	const k = (key: string | number | symbol): string =>
-		`${prefix}${String(key)}`;
-	return {
-		get: (key) => storage.get(k(key)),
-		has: (key) => storage.has(k(key)),
-		set: (key, value) => storage.set(k(key), value),
-		delete: (key) => storage.delete(k(key)),
-	};
 };

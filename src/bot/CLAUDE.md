@@ -9,7 +9,7 @@ optional** — install only what the subpaths you import need.
 
 | Subpath | What it does |
 |---|---|
-| `bot/kit` | `gracefulStart(bot, opts?)` — SIGINT/SIGTERM → `bot.stop()` → exit; force-kills if shutdown hangs; calls `bot.syncCommands()` automatically before `bot.start()`. DMs the admin `@<bot> started.` / `@<bot> shutting down.` by default when `KEV.TELEGRAM_ADMIN_ID` is set (graceful only — crashes don't fire `onStop`); pass `notifyAdmin: false` to disable, `notifyAdmin: 12345` for an explicit chat id. `adminContext({ adminId? })` — reads `TELEGRAM_ADMIN_ID` from KEV with optional hardcoded fallback, decorates `ctx.adminId` + `ctx.isAdmin`. `botSession(opts)` — drop-in replacement for `@gramio/session`'s `session()` that auto-namespaces every key as `bot-<id>:<senderId>` using `ctx.bot.info.id`. Use this instead of `session()` — full stop. Multiple bots sharing one Redis stay isolated by construction; every plugin in this package (`accessControl`, `botMenu`, `llmHistory`) derives the same prefix internally. (`botStorageKey(ctx, userId)` / `botSubKey(ctx, sub)` / `botId(ctx)` live in `bot/keys` — pure, Worker-safe, exposed for advanced cases.) `prefixStorage(storage, prefix)` — escape hatch for adding a top-level prefix on top of the bot-id namespace; rarely needed. |
+| `bot/kit` | The one Node-only subpath: `gracefulStart(bot, opts?)` — SIGINT/SIGTERM → `bot.stop()` → exit; force-kills if shutdown hangs; calls `bot.syncCommands()` automatically before `bot.start()`. DMs the admin `@<bot> started.` / `@<bot> shutting down.` by default when `KEV.TELEGRAM_ADMIN_ID` is set (graceful only — crashes don't fire `onStop`); pass `notifyAdmin: false` to disable, `notifyAdmin: 12345` for an explicit chat id. |
 | `bot/access-control` | `accessControl({ session, storage, defaults?, dms?, groups? })` — two independent surfaces, each `"allowlist"` or `"open"`: `dms` (default allowlist — unknown DM users go pending, admin gets `[✅ Approve][❌ Deny]`; open → unknowns pass as `source: 'open'`, only a deny blocks) and `groups` (default off; allowlist → adds go pending `[✅ Approve][🚪 Leave]`, the bot stays but serves nothing, approving a room admits every member as `source: 'group'`, pre-existing rooms surface as pending on first activity; open → every add auto-approves quietly and rooms self-register, ready to be banned). Open IS the ban-list mode: `/ban <id>` / `/unban <id>` (positive = user, negative = room; banning a room leaves it), deny memory survives re-adds (leaves on sight). Canonical pairings: private bot allowlist/allowlist, public bot open/open. Persistent `/access` admin menu where STATUS is the only navigation axis — one Approved / Pending / Denied list each mixing 👤 users and 👥 rooms with per-kind actions; `onGroupRequest/onGroupApprove/onGroupDeny` hooks (send your welcome card on approve, not on add); `simulateAccessRequest()` for tests. |
 | `bot/coalesce` | `coalesceLongMessages({ minLeadingLength?, windowMs?, acrossUsers?, log? })` — joins client-split inbound messages back into one event. Also exports `isCoalescent(prev, curr, opts)` as a pure utility. |
 | `bot/language` | `language({ session, supported, default, scope?, labels? })` — per-user BCP-47 preference; resolves `ctx.lang` (typed); decorates `ctx.say` (callable polyglot resolver + `.send` / `.edit` / `.answer` methods); supplies a `menuItem` for `botMenu`. Also the picker VOCABULARY, exported so bots stop forking label lists: `flagFor(lang)` (region flag or curated regionless map), `autonym(lang)` (the language's name in itself via Intl), `languageLabel(lang)` ("🇪🇸 Español", title-cased). And the picker SURFACES, policy-agnostic: `languagePickerItem({ label, codes, isActive, pick, labelFor? })` — the 2-up primary-highlighted MenuItem factory (the plugin's own `menuItem` is this factory with session closures; a group-scoped admin-gated picker is the same factory with store closures); `addLanguageRows(kb, { codes, pack, active?, activeStyle?, labelFor?, perRow? })` — its raw-InlineKeyboard twin for onboarding/welcome keyboards (caller owns the callback schema via `pack`; `activeStyle: "success"` when primary already means something else on the keyboard, e.g. an active nav tab). |
@@ -394,7 +394,7 @@ The library handles this for you — **use `botSession()` from this package
 instead of `@gramio/session`'s `session()`**:
 
 ```ts
-import { botSession } from '@adriangalilea/utils/bot/kit'
+import { botSession } from '@adriangalilea/utils/bot/session'
 
 const userSession = botSession({ storage, key: 'session', initial: () => ({}) })
 ```
@@ -419,17 +419,6 @@ The bot id comes from `ctx.bot.info.id`, populated by gramio's `getMe()`
 during `bot.init` / `bot.start`. No regex on the token, no manual prefix
 argument, no way for a consumer to forget. Token rotation (BotFather →
 Revoke) doesn't change the id, so prefixes survive rotation.
-
-### `prefixStorage` — escape hatch only
-
-`prefixStorage(storage, prefix)` still exists for two narrow cases:
-
-- Sharing a backend with a non-bot system and wanting a top-level prefix.
-- Migrating data from an older deployment that used a custom prefix.
-
-It composes cleanly with `botSession` — final keys look like
-`${prefix}bot-<id>:<userId>`. For the normal "one or more bots in one
-Redis" case, `botSession` alone is enough.
 
 ## Architecture: shared session, one record per user
 

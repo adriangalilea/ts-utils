@@ -80,17 +80,6 @@ export type LangCode = string & { readonly __langCode: unique symbol };
 export const parseLangCode = (s: string): LangCode =>
 	Intl.getCanonicalLocales(s)[0] as LangCode;
 
-/** Non-throwing type guard. Same parser path as `parseLangCode`. */
-export const isLangCode = (s: unknown): s is LangCode => {
-	if (typeof s !== "string") return false;
-	try {
-		Intl.getCanonicalLocales(s);
-		return true;
-	} catch {
-		return false;
-	}
-};
-
 /**
  * Primary subtag of a Telegram client language hint (`"pt-BR"` → `"pt"`),
  * or undefined when absent/unusable. The shared normalizer behind every

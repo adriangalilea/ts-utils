@@ -113,23 +113,6 @@ export const TELEGRAM_REACTIONS = [
 
 export type TelegramReaction = (typeof TELEGRAM_REACTIONS)[number];
 
-/** Probed and refused on the date above — kept so callers can explain a rejection. */
-export const REFUSED_REACTIONS = [
-	"👋",
-	"😊",
-	"🙂",
-	"😄",
-	"✅",
-	"🤖",
-	"💪",
-	"🙌",
-	"😅",
-	"🥳",
-	"😂",
-	"❓",
-	"‼",
-] as const;
-
 const ACCEPTED = new Set<string>(TELEGRAM_REACTIONS);
 
 /** Whether Telegram will accept this emoji as a reaction. */

@@ -257,34 +257,3 @@ export const runtime = new RuntimeOps();
 
 // Export type for extension
 export type { RuntimeCapabilities };
-
-// Narrow to the boolean-valued capability keys: detection flags and
-// `can*()` predicates. Excludes operations like `exit` / `env`.
-type CapabilityKey = {
-	[K in keyof RuntimeCapabilities]: RuntimeCapabilities[K] extends boolean
-		? K
-		: RuntimeCapabilities[K] extends () => boolean
-			? K
-			: never;
-}[keyof RuntimeCapabilities];
-
-// Helper to assert capability with helpful error
-export function requireCapability(
-	capability: CapabilityKey,
-	operation: string,
-): void {
-	const value = runtime[capability];
-	const can = typeof value === "function" ? value.call(runtime) : value;
-	if (!can) {
-		const env = runtime.isBrowser
-			? "browser"
-			: runtime.isNode
-				? "Node.js"
-				: runtime.isDeno
-					? "Deno"
-					: runtime.isBun
-						? "Bun"
-						: "unknown";
-		throw new Error(`${operation} is not available in ${env} environment`);
-	}
-}

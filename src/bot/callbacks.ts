@@ -175,26 +175,3 @@ export const callbackNs = (prefix: string): CallbackNamespace => {
 		},
 	};
 };
-
-// ─── introspection ────────────────────────────────────────────────
-
-/**
- * Read-only view of every callback schema registered so far. Useful in
- * tests or boot-time sanity checks. Not part of the hot path.
- */
-export const registeredCallbacks = (): ReadonlyArray<{
-	fullName: string;
-	fields: FieldDef;
-}> =>
-	Array.from(registry.values(), (r) => ({
-		fullName: r.fullName,
-		fields: r.fields,
-	}));
-
-/**
- * Internal — for tests that need a clean slate. Don't call from app code.
- * @internal
- */
-export const _resetCallbackRegistry = (): void => {
-	registry.clear();
-};
