@@ -25,8 +25,13 @@
  *
  * Typography (heading air, bullet glyph, the title underline) IS the opinion;
  * it becomes configurable when a second consumer needs a different look, not
- * before. Zero deps, worker-safe.
+ * before. Zero external deps, worker-safe; the HTML escaping comes from
+ * `tg-html`, which owns the same output dialect.
  */
+
+import { escapeAttr, escapeHtml } from "../tg-html/index.js";
+
+export { escapeHtml };
 
 /** Unwrap a leading/trailing ```…``` code fence (some models add one) and trim. */
 export function tidyRichMarkdown(raw: string): string {
@@ -309,20 +314,6 @@ function inlineMd(text: string): string {
 		new RegExp(`${STASH}(\\d+)${STASH}`, "g"),
 		(_, i: string) => tokens[Number(i)],
 	);
-}
-
-/** Escape text/code content for Telegram HTML. */
-export function escapeHtml(s: string): string {
-	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-/** Escape an href for a Telegram HTML attribute. */
-function escapeAttr(s: string): string {
-	return s
-		.replace(/&/g, "&amp;")
-		.replace(/"/g, "&quot;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;");
 }
 
 /**

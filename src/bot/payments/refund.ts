@@ -30,9 +30,11 @@ import { InlineKeyboard } from "gramio";
 
 import { say } from "../../say/index.js";
 import { scope } from "../../universal/log.js";
+import { coarseSpan } from "../../universal/time.js";
 import { callbackNs } from "../callbacks.js";
 import type { BotCallbackCtx } from "../ctx.js";
 import { botStorageKey } from "../keys.js";
+import { ctxLang, langOfUser, loadFullRecord } from "../lang.js";
 import { rebuildVipAndPerks, revertCreditsForCharge } from "./state.js";
 import type { PaymentsStores } from "./stores.js";
 import type {
@@ -40,9 +42,9 @@ import type {
 	ChargeRecord,
 	PaymentsSession,
 	RefundEvent,
+	SessionLike,
 } from "./types.js";
 
-const FALLBACK_LANG = "en";
 const log = scope("bot/payments");
 
 const cb = callbackNs("pay");
@@ -79,8 +81,6 @@ type RefundBotApi = {
 	}) => Promise<unknown>;
 };
 
-type SessionLike = { pay?: PaymentsSession; language?: string };
-
 /**
  * Callback-query ctx shape this module's handlers receive. Composed
  * from the canonical `BotCallbackCtx` with `{ cid: string }` queryData,
@@ -91,31 +91,6 @@ type CommonCtx = BotCallbackCtx<SessionLike, { cid: string }, RefundBotApi> & {
 	adminId: number;
 	isAdmin: boolean;
 };
-
-type FullSessionRecord = {
-	pay?: PaymentsSession;
-	language?: string;
-} & Record<string, unknown>;
-
-const ctxLang = (ctx: { session?: { language?: string } }): string =>
-	ctx.session?.language ?? FALLBACK_LANG;
-
-// ─── cross-user session mutation ───────────────────────────────────
-//
-// The user's session record lives in @gramio/session's keyspace
-// (`bot-<id>:<userId>` via `botStorageKey`), not in our `pay:*` stores.
-// We still hit `storage` directly here because the session record holds
-// many fields owned by other plugins (access, language, llm) and we
-// must preserve them via read-modify-write.
-
-const loadFullRecord = async (
-	storage: Storage,
-	ctx: { bot: { info: { id: number } } },
-	userId: number,
-): Promise<FullSessionRecord> =>
-	((await storage.get(botStorageKey(ctx, userId))) as
-		| FullSessionRecord
-		| undefined) ?? {};
 
 /**
  * Apply the refund's side effect to the target user's session record
@@ -133,7 +108,11 @@ const applyRefundToUser = async (
 	userId: number,
 	refundedCharge: ChargeRecord,
 ): Promise<void> => {
-	const full = await loadFullRecord(storage, ctx, userId);
+	const full = await loadFullRecord<{ pay?: PaymentsSession }>(
+		storage,
+		ctx,
+		userId,
+	);
 	const session = { pay: full.pay } as { pay?: PaymentsSession };
 	revertCreditsForCharge(session, refundedCharge);
 	// charges already include the refunded one with state='refunded'
@@ -152,16 +131,6 @@ const applyRefundToUser = async (
 
 // ─── notification rendering ────────────────────────────────────────
 
-const fmtAge = (ms: number): string => {
-	const s = Math.floor(ms / 1000);
-	if (s < 60) return `${s}s`;
-	const m = Math.floor(s / 60);
-	if (m < 60) return `${m}min`;
-	const h = Math.floor(m / 60);
-	if (h < 24) return `${h}h`;
-	return `${Math.floor(h / 24)}d`;
-};
-
 const adminNotificationText = (charge: ChargeRecord, lang: string): string =>
 	[
 		say({ en: "💸 Refund requested", es: "💸 Reembolso solicitado" }, lang),
@@ -170,7 +139,7 @@ const adminNotificationText = (charge: ChargeRecord, lang: string): string =>
 		`📦 ${charge.productKey}`,
 		`⭐ ${charge.xtr}`,
 		`🆔 ${charge.chargeId}`,
-		`⏰ ${say({ en: "purchased", es: "comprado" }, lang)}: ${fmtAge(Date.now() - charge.receivedAt)} ${say({ en: "ago", es: "atrás" }, lang)}`,
+		`⏰ ${say({ en: "purchased", es: "comprado" }, lang)}: ${coarseSpan(Date.now() - charge.receivedAt)} ${say({ en: "ago", es: "atrás" }, lang)}`,
 	].join("\n");
 
 const adminKeyboard = (chargeId: string, lang: string): InlineKeyboard =>
@@ -187,15 +156,6 @@ const adminKeyboard = (chargeId: string, lang: string): InlineKeyboard =>
 		)
 		.row()
 		.text(say({ en: "✖️ Close", es: "✖️ Cerrar" }, lang), refundCloseCb.pack({}));
-
-const adminLangOfUser = async (
-	storage: Storage,
-	ctx: { bot: { info: { id: number } } },
-	userId: number,
-): Promise<string> => {
-	const full = await loadFullRecord(storage, ctx, userId);
-	return full.language ?? FALLBACK_LANG;
-};
 
 // ─── callback handlers ─────────────────────────────────────────────
 
@@ -295,7 +255,7 @@ export const buildRefundRequestHandler =
 			`refund requested by user: chargeId=${charge.chargeId} product=${charge.productKey} xtr=${charge.xtr}`,
 		);
 
-		const adminLang = await adminLangOfUser(opts.storage, ctx, ctx.adminId);
+		const adminLang = await langOfUser(opts.storage, ctx, ctx.adminId);
 		try {
 			await ctx.bot.api.sendMessage({
 				chat_id: ctx.adminId,
@@ -420,8 +380,7 @@ export const buildRefundApproveHandler =
 		fireBucket("*");
 
 		// User notification
-		const userFull = await loadFullRecord(opts.storage, ctx, charge.userId);
-		const uLang = userFull.language ?? FALLBACK_LANG;
+		const uLang = await langOfUser(opts.storage, ctx, charge.userId);
 		try {
 			await ctx.bot.api.sendMessage({
 				chat_id: charge.userId,
@@ -469,8 +428,7 @@ export const buildRefundDenyHandler =
 		charge.paysupportState = "none";
 		await opts.stores.charges.set(ctx, charge.chargeId, charge);
 
-		const userFull = await loadFullRecord(opts.storage, ctx, charge.userId);
-		const uLang = userFull.language ?? FALLBACK_LANG;
+		const uLang = await langOfUser(opts.storage, ctx, charge.userId);
 		try {
 			await ctx.bot.api.sendMessage({
 				chat_id: charge.userId,

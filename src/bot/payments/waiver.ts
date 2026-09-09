@@ -24,12 +24,12 @@ import { InlineKeyboard } from "gramio";
 import { say } from "../../say/index.js";
 import { scope } from "../../universal/log.js";
 import { callbackNs } from "../callbacks.js";
-import {
-	type BotPaymentsConfig,
-	DEFAULT_PRIVACY_URL,
-	FALLBACK_LANG,
-	type PaymentsSession,
-	type WaiverRecord,
+import { FALLBACK_LANG } from "../lang.js";
+import { DEFAULT_PRIVACY_URL } from "../menu.js";
+import type {
+	BotPaymentsConfig,
+	PaymentsSession,
+	WaiverRecord,
 } from "./types.js";
 
 const log = scope("bot/payments");

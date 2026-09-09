@@ -10,11 +10,8 @@
 
 import { say } from "../../say/index.js";
 import { type BotMessageCtx, narrow } from "../ctx.js";
-import {
-	type BotPaymentsConfig,
-	FALLBACK_LANG,
-	type SessionLike,
-} from "./types.js";
+import { ctxLang } from "../lang.js";
+import type { BotPaymentsConfig, SessionLike } from "./types.js";
 
 /**
  * Mandatory `/paysupport` text. ToS §6.5 requires every bot accepting
@@ -64,6 +61,6 @@ export const buildPaysupportCommand =
 	(cfg: BotPaymentsConfig<string>) =>
 	async (ctx: unknown): Promise<void> => {
 		const c = narrow<BotMessageCtx<SessionLike>>(ctx);
-		const lang = c.session.language ?? FALLBACK_LANG;
+		const lang = ctxLang(c);
 		await c.send(buildPaysupportText(cfg, lang));
 	};

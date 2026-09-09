@@ -14,6 +14,7 @@
  */
 
 import type { Polyglot } from "../../say/index.js";
+import type { LangSession } from "../lang.js";
 
 // ─── primitive building blocks ─────────────────────────────────────
 
@@ -117,12 +118,6 @@ export type LegalConfig = {
 	 */
 	readonly privacyUrl?: string;
 };
-
-/**
- * Fallback when `legal.privacyUrl` is omitted. Identical to the menu
- * plugin's default — both surface the same policy text.
- */
-export const DEFAULT_PRIVACY_URL = "https://telegram.org/privacy-tpa";
 
 /**
  * Art. 103(m) TRLGDCU waiver text. Versioned so a wording change forces
@@ -307,10 +302,7 @@ export type PaymentsSession = {
  * read: just the `pay` slice plus the recipient's locale. Single-sourced
  * here so derive/callbacks/commands/plugin agree on the shape.
  */
-export type SessionLike = { pay?: PaymentsSession; language?: string };
-
-/** Locale used when the recipient's language is unset or unresolved. */
-export const FALLBACK_LANG = "en";
+export type SessionLike = { pay?: PaymentsSession } & LangSession;
 
 // ─── ledger records (authoritative) ────────────────────────────────
 

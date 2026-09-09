@@ -147,11 +147,18 @@ import {
 } from "gramio";
 
 import { say } from "../say/index.js";
+import { coarseSpan } from "../universal/time.js";
 import { botStorageKey, botSubKey } from "./keys.js";
+import {
+	ctxLang,
+	type FullSessionRecord,
+	type LangSession,
+	langOfUser,
+	loadFullRecord,
+} from "./lang.js";
 
 const FIRST_MSG_LIMIT = 200;
 const DEFAULT_THROTTLE_MS = 6 * 60 * 60 * 1000;
-const FALLBACK_LANG = "en";
 
 // Storage keys are computed via `botStorageKey(ctx, userId)` and
 // `botSubKey(ctx, 'ac:index')` — both prefix with the calling bot's
@@ -259,7 +266,7 @@ export type AccessInfo =
  * Loose session shape — this plugin writes `access`; it READS `language`
  * to localize messages it sends to the subject. Both are optional.
  */
-type SessionLike = { access?: AccessRecord; language?: string };
+type SessionLike = { access?: AccessRecord } & LangSession;
 
 /** @internal — kept unexported so it doesn't clash with peers' refs. */
 type AcSessionPluginRef = ReturnType<typeof session<SessionLike, "session">>;
@@ -363,16 +370,6 @@ const formatUser = (u: AccessUser | undefined, fallbackId: number): string => {
 	return `${name} (${handle})`;
 };
 
-const fmtAge = (ms: number): string => {
-	const s = Math.floor(ms / 1000);
-	if (s < 60) return `${s}s`;
-	const m = Math.floor(s / 60);
-	if (m < 60) return `${m}min`;
-	const h = Math.floor(m / 60);
-	if (h < 24) return `${h}h`;
-	return `${Math.floor(h / 24)}d`;
-};
-
 const requestNotificationText = (
 	uid: number,
 	r: AccessRecord,
@@ -389,7 +386,7 @@ const requestNotificationText = (
 		"",
 		`👤 ${formatUser(r.user, uid)}`,
 		`🆔 ${uid}`,
-		`⏰ ${say({ en: "ago", es: "hace" }, lang)} ${fmtAge(Date.now() - (r.requestedAt ?? Date.now()))}`,
+		`⏰ ${say({ en: "ago", es: "hace" }, lang)} ${coarseSpan(Date.now() - (r.requestedAt ?? Date.now()))}`,
 	];
 	if (repeat) {
 		parts.push(
@@ -492,19 +489,14 @@ const indexRemove = async (
 // (`String(userId)`). We preserve OTHER plugins' fields in the same
 // record via read-modify-write.
 
-type FullSessionRecord = {
-	access?: AccessRecord;
-	language?: string;
-} & Record<string, unknown>;
+type AccessSessionRecord = FullSessionRecord<{ access?: AccessRecord }>;
 
-const loadFullRecord = async (
+const loadRecord = (
 	storage: Storage,
 	ctx: BotCtx,
 	userId: number,
-): Promise<FullSessionRecord> =>
-	((await storage.get(botStorageKey(ctx, userId))) as
-		| FullSessionRecord
-		| undefined) ?? {};
+): Promise<AccessSessionRecord> =>
+	loadFullRecord<{ access?: AccessRecord }>(storage, ctx, userId);
 
 const saveAccess = async (
 	storage: Storage,
@@ -512,7 +504,7 @@ const saveAccess = async (
 	userId: number,
 	rec: AccessRecord,
 ): Promise<void> => {
-	const full = await loadFullRecord(storage, ctx, userId);
+	const full = await loadRecord(storage, ctx, userId);
 	full.access = rec;
 	await storage.set(botStorageKey(ctx, userId), full);
 };
@@ -522,7 +514,7 @@ const loadAccess = async (
 	ctx: BotCtx,
 	userId: number,
 ): Promise<AccessRecord | undefined> => {
-	const full = await loadFullRecord(storage, ctx, userId);
+	const full = await loadRecord(storage, ctx, userId);
 	return full.access;
 };
 
@@ -532,24 +524,10 @@ const dropAccess = async (
 	ctx: BotCtx,
 	userId: number,
 ): Promise<void> => {
-	const full = await loadFullRecord(storage, ctx, userId);
+	const full = await loadRecord(storage, ctx, userId);
 	delete full.access;
 	await storage.set(botStorageKey(ctx, userId), full);
 };
-
-/** Read recipient's stored language (set by bot/language); fallback to en. */
-const langOfUser = async (
-	storage: Storage,
-	ctx: BotCtx,
-	userId: number,
-): Promise<string> => {
-	const full = await loadFullRecord(storage, ctx, userId);
-	return full.language ?? FALLBACK_LANG;
-};
-
-/** Read current ctx's lang. */
-const ctxLang = (ctx: { session: SessionLike }): string =>
-	ctx.session.language ?? FALLBACK_LANG;
 
 // ─── callback guard helpers ────────────────────────────────────────
 
@@ -657,7 +635,7 @@ const groupRequestText = (rec: GroupAccessRecord, lang: string): string => {
 	];
 	if (rec.addedBy) parts.push(`👤 ${formatUser(rec.addedBy, rec.addedBy.id)}`);
 	parts.push(
-		`⏰ ${say({ en: "ago", es: "hace" }, lang)} ${fmtAge(Date.now() - (rec.requestedAt ?? Date.now()))}`,
+		`⏰ ${say({ en: "ago", es: "hace" }, lang)} ${coarseSpan(Date.now() - (rec.requestedAt ?? Date.now()))}`,
 	);
 	return parts.join("\n");
 };
@@ -1707,7 +1685,7 @@ const listView = async (
 		const ageRef =
 			rec.approvedAt ?? rec.deniedAt ?? rec.requestedAt ?? Date.now();
 		lines.push(
-			`${n}. 👤 ${formatUser(rec.user, id)} · ${ago} ${fmtAge(Date.now() - ageRef)}` +
+			`${n}. 👤 ${formatUser(rec.user, id)} · ${ago} ${coarseSpan(Date.now() - ageRef)}` +
 				(rec.messageCount ? ` · ${rec.messageCount} msgs` : ""),
 		);
 		if (filter === "pending") {
@@ -1744,7 +1722,7 @@ const listView = async (
 		const ageRef =
 			rec?.approvedAt ?? rec?.deniedAt ?? rec?.requestedAt ?? Date.now();
 		lines.push(
-			`${n}. 👥 ${formatGroup(rec, id)} · ${ago} ${fmtAge(Date.now() - ageRef)}`,
+			`${n}. 👥 ${formatGroup(rec, id)} · ${ago} ${coarseSpan(Date.now() - ageRef)}`,
 		);
 		if (filter === "pending") {
 			keyboard

@@ -21,13 +21,13 @@
 
 import { say } from "../../say/index.js";
 import { type BotCallbackCtx, narrow } from "../ctx.js";
+import { ctxLang } from "../lang.js";
 import { presentInvoice } from "./invoice.js";
-import {
-	type BotPaymentsConfig,
-	FALLBACK_LANG,
-	type PaymentsSession,
-	type ProductCatalog,
-	type SessionLike,
+import type {
+	BotPaymentsConfig,
+	PaymentsSession,
+	ProductCatalog,
+	SessionLike,
 } from "./types.js";
 import { persistWaiverOnSession } from "./waiver.js";
 
@@ -37,7 +37,7 @@ export const buildWaiverConsentHandler =
 	(args: { cfg: BotPaymentsConfig<string>; catalog: ProductCatalog }) =>
 	async (ctx: unknown): Promise<void> => {
 		const c = narrow<BotCallbackCtx<SessionLike, { pk: string }>>(ctx);
-		const lang = c.session.language ?? FALLBACK_LANG;
+		const lang = ctxLang(c);
 		const userId = c.from?.id;
 		if (!userId) {
 			await c.answer({
@@ -104,7 +104,7 @@ export const buildWaiverCancelHandler =
 	() =>
 	async (ctx: unknown): Promise<void> => {
 		const c = narrow<BotCallbackCtx<SessionLike>>(ctx);
-		const lang = c.session.language ?? FALLBACK_LANG;
+		const lang = ctxLang(c);
 		await c.answer({
 			text: say({ en: "Canceled.", es: "Cancelado." }, lang),
 		});
@@ -123,7 +123,7 @@ export const buildRefundCloseHandler =
 	() =>
 	async (ctx: unknown): Promise<void> => {
 		const c = narrow<BotCallbackCtx<SessionLike> & { isAdmin: boolean }>(ctx);
-		const lang = c.session.language ?? FALLBACK_LANG;
+		const lang = ctxLang(c);
 		if (!c.isAdmin) {
 			await c.answer({
 				text: say({ en: "Admin only.", es: "Solo admin." }, lang),

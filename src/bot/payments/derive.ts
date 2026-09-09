@@ -21,11 +21,11 @@
 
 import { say } from "../../say/index.js";
 import { type BotCallbackCtx, type BotMessageCtx, narrow } from "../ctx.js";
+import { ctxLang, FALLBACK_LANG } from "../lang.js";
 import { menuNavCb } from "../menu.js";
 import { presentInvoice } from "./invoice.js";
 import {
 	type BotPaymentsConfig,
-	FALLBACK_LANG,
 	InsufficientCredits,
 	type ProductCatalog,
 	type SessionLike,
@@ -144,7 +144,7 @@ export const buildPaymentsDerive = ({
 			if (rung === 0) return undefined;
 			const r = catalog.vip[rung - 1];
 			if (!r) return undefined;
-			const lang = c.session.language ?? FALLBACK_LANG;
+			const lang = ctxLang(c);
 			return resolveLabel(r.name as Record<string, string>, lang);
 		};
 
@@ -172,7 +172,7 @@ export const buildPaymentsDerive = ({
 			opts?: RequireOpts,
 		): Promise<boolean> => {
 			if (atLeast(id)) return true;
-			const lang = c.session.language ?? FALLBACK_LANG;
+			const lang = ctxLang(c);
 			const featureName =
 				opts?.feature === undefined
 					? undefined

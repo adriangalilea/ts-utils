@@ -36,6 +36,7 @@
 import type { Polyglot } from "../../say/index.js";
 import { say } from "../../say/index.js";
 import { narrow } from "../ctx.js";
+import { FALLBACK_LANG, type Lang, ctxLang as sessionLang } from "../lang.js";
 import type { MenuCtx, MenuItem } from "../menu.js";
 import { presentInvoice } from "./invoice.js";
 import type {
@@ -43,10 +44,6 @@ import type {
 	PaymentsSession,
 	ProductCatalog,
 } from "./types.js";
-
-const FALLBACK_LANG = "en";
-
-type Lang = string;
 
 /**
  * `MenuCtx` is deliberately narrow + plugin-agnostic (see `bot/menu.ts`
@@ -60,7 +57,7 @@ type WithPaySession = {
 };
 
 const ctxLang = (ctx: MenuCtx): Lang =>
-	narrow<WithPaySession>(ctx).session?.language ?? FALLBACK_LANG;
+	sessionLang(narrow<WithPaySession>(ctx));
 
 // Treat an expired VIP as free everywhere in the menu. derive.ts does lazy expiry
 // without clearing the session cache, so `pay.vip` lingers after expiresAt; a raw read would label

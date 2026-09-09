@@ -1,7 +1,8 @@
 /**
  * Humanized time. Three questions, three functions: how long is this
- * duration (`span`), how long ago was this instant (`ago` — and its raw-
- * duration twin `since`), how long until this instant (`until`).
+ * duration (`span`, or `coarseSpan` for one unit only), how long ago was
+ * this instant (`ago` — and its raw-duration twin `since`), how long
+ * until this instant (`until`).
  *
  * `ago` degrades by distance instead of stacking units: fresh instants are
  * relative ("now", "3m ago", "2h 15m ago"), older ones snap to the clock the
@@ -49,6 +50,23 @@ export function span(ms: number): string {
 	if (ms < DAY)
 		return `${Math.floor(ms / HOUR)}h ${Math.floor((ms % HOUR) / MIN)}m`;
 	return `${Math.floor(ms / DAY)}d ${Math.floor((ms % DAY) / HOUR)}h`;
+}
+
+/**
+ * Duration in ms → its coarsest single unit: "45s", "47min", "3h", "2d".
+ * For a line that has room for one number and no column to align it in
+ * (a notification, a list row); reach for `span` when the remainder
+ * matters. Minutes are spelled in full here because the value stands
+ * alone with no neighbouring unit to read "m" against.
+ */
+export function coarseSpan(ms: number): string {
+	const s = Math.floor(ms / 1000);
+	if (s < 60) return `${s}s`;
+	const m = Math.floor(s / 60);
+	if (m < 60) return `${m}min`;
+	const h = Math.floor(m / 60);
+	if (h < 24) return `${h}h`;
+	return `${Math.floor(h / 24)}d`;
 }
 
 /** Elapsed since an instant, as a bare duration: "47m", "1h 40m" (no "ago"). */

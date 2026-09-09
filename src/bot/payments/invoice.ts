@@ -20,6 +20,7 @@
 import { panic, SourcedError } from "../../offensive.js";
 import { say } from "../../say/index.js";
 import { scope } from "../../universal/log.js";
+import { ctxLang, FALLBACK_LANG } from "../lang.js";
 import { encodePayload } from "./payload.js";
 import type {
 	BotPaymentsConfig,
@@ -36,8 +37,6 @@ const log = scope("bot/payments");
 // Telegram caps from the Bot API (sendInvoice §):
 const TITLE_MAX = 32;
 const DESCRIPTION_MAX = 255;
-
-const FALLBACK_LANG = "en";
 
 /**
  * Structural shape we need from the calling ctx. Matches both
@@ -76,9 +75,6 @@ type SendInvoiceParams = {
 // Single-source the Telegram length cap so each call site can't drift.
 const cap = (s: string, max: number): string =>
 	s.length > max ? s.slice(0, max) : s;
-
-const ctxLang = (ctx: InvoiceCtx): string =>
-	ctx.session?.language ?? FALLBACK_LANG;
 
 const ctxChatId = (ctx: InvoiceCtx): number => {
 	const id = ctx.chat?.id ?? ctx.message?.chat?.id;

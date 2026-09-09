@@ -167,12 +167,18 @@ function parse(html: string): Node[] {
 
 // ─── rendering ──────────────────────────────────────────────────────
 
-function escapeText(s: string): string {
+/**
+ * Escape text or code content for Telegram HTML. The whole escaping
+ * contract for both this module and `tg-md`, which renders into the
+ * same dialect.
+ */
+export function escapeHtml(s: string): string {
 	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function escapeAttr(s: string): string {
-	return escapeText(s).replace(/"/g, "&quot;");
+/** Escape a value for a Telegram HTML attribute: text escaping plus quotes. */
+export function escapeAttr(s: string): string {
+	return escapeHtml(s).replace(/"/g, "&quot;");
 }
 
 /** Text whitespace mode, set by the IMMEDIATE parent: blockquotes keep their line breaks,
@@ -180,7 +186,7 @@ function escapeAttr(s: string): string {
 type Space = "collapse" | "quote" | "verbatim";
 
 function renderText(text: string, mode: Space): string {
-	const escaped = escapeText(text);
+	const escaped = escapeHtml(text);
 	if (mode === "verbatim") return escaped;
 	if (mode === "quote") {
 		return escaped

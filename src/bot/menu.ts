@@ -82,6 +82,7 @@ import { CallbackData, InlineKeyboard, Plugin } from "gramio";
 import { type Polyglot, say } from "../say/index.js";
 import { isPrivateChat } from "./groups.js";
 import { botStorageKey } from "./keys.js";
+import { FALLBACK_LANG } from "./lang.js";
 import { langHintOf } from "./language.js";
 
 // ─── public types ──────────────────────────────────────────────────
@@ -192,7 +193,6 @@ type StyleResolver =
 			ctx: MenuCtx,
 	  ) => ButtonStyle | undefined | Promise<ButtonStyle | undefined>);
 
-const FALLBACK_LANG = "en";
 // Chrome language, read-time: the stored explicit pick, else the Telegram
 // hint's primary subtag (never persisted), else English. `say()` falls back
 // per-polyglot when a catalog lacks the resolved language.
@@ -398,7 +398,13 @@ export type BotMenuOptions = {
 
 const DEFAULT_COMMAND = "settings";
 const DEFAULT_DESCRIPTION = "Open settings menu";
-const DEFAULT_PRIVACY_URL = "https://telegram.org/privacy-tpa";
+/**
+ * Telegram's own policy for third-party bots: the default behind the
+ * menu's 🔒 Privacy & data button, and behind `bot/payments`'
+ * `legal.privacyUrl`. Both surfaces show the same text, so they read
+ * the same constant.
+ */
+export const DEFAULT_PRIVACY_URL = "https://telegram.org/privacy-tpa";
 const DEFAULT_HEADER: Polyglot<string> = { en: "⚙️ Settings", es: "⚙️ Ajustes" };
 
 // ─── callback data schemas ─────────────────────────────────────────

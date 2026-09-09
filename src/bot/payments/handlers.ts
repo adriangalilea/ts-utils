@@ -25,6 +25,7 @@ import { panic, SourcedError } from "../../offensive.js";
 import { say } from "../../say/index.js";
 import { scope } from "../../universal/log.js";
 import type { BotPaymentCtx, BotPreCheckoutCtx } from "../ctx.js";
+import { ctxLang, FALLBACK_LANG } from "../lang.js";
 import { decodePayload } from "./payload.js";
 import { applyCharge } from "./state.js";
 import type { PaymentsStores } from "./stores.js";
@@ -33,15 +34,13 @@ import type {
 	ChargeRecord,
 	CreditsPackResolved,
 	FulfillmentEvent,
-	PaymentsSession,
 	PerkResolved,
 	ProductCatalog,
+	SessionLike,
 	VipRungResolved,
 } from "./types.js";
 
 const log = scope("bot/payments");
-
-const FALLBACK_LANG = "en";
 
 // ─── shared types ──────────────────────────────────────────────────
 
@@ -70,8 +69,6 @@ type PaymentBotApi = {
 	}) => Promise<unknown>;
 };
 
-type SessionLike = { pay?: PaymentsSession; language?: string };
-
 /**
  * Pre-checkout event ctx (Telegram's 10s deadline). Strict bot.api;
  * everything else is structural. No session on this event scope.
@@ -90,9 +87,6 @@ type MessageCtx = BotPaymentCtx<SessionLike, PaymentBotApi>;
 
 /** The raw `successful_payment` shape — same as in `BotPaymentCtx`. */
 type SuccessfulPayment = MessageCtx["eventPayment"]["payload"];
-
-const ctxLang = (ctx: { session?: { language?: string } }): string =>
-	ctx.session?.language ?? FALLBACK_LANG;
 
 // Single-sourced product discriminator. Order (vip, credits, perk-default)
 // is load-bearing: it mirrors the prefix checks both builders rely on.

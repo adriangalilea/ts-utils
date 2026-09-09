@@ -46,6 +46,7 @@
  *   })) }
  */
 import { buildAllowedUpdates } from "gramio";
+import { escapeHtml } from "../tg-html/index.js";
 import { scope } from "../universal/log.js";
 import {
 	type AlertThrottle,
@@ -467,11 +468,6 @@ const DEPLOY_DM_PARAMS = {
 function etaSeconds(meta: unknown): number | null {
 	const n = Number((meta as { etaSeconds?: unknown } | null)?.etaSeconds);
 	return Number.isFinite(n) && n > 0 && n < 3600 ? Math.round(n) : null;
-}
-
-// Local minimal escaper; graduates to bot/format when that module lands.
-function escapeHtml(s: string): string {
-	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // ─── durable per-conversation update runner ─────────────────────────────────
