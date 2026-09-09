@@ -551,10 +551,12 @@ for (const changed of [
 		},
 	);
 	if (changed.kind === "counter")
-		await (wrong as { latency: { bump(): Promise<void> } }).latency.bump();
+		await (
+			wrong as unknown as { latency: { bump(): Promise<void> } }
+		).latency.bump();
 	else
 		await (
-			wrong as { latency: { record(v: number): Promise<void> } }
+			wrong as unknown as { latency: { record(v: number): Promise<void> } }
 		).latency.record(1);
 	assert.equal(refused.length, 1);
 }

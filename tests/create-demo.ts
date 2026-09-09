@@ -8,11 +8,13 @@
  * The same `app` default-exported from a Worker (D1 binding `DB`) serves
  * webhooks — no code change, see the README's lifecycle table.
  */
-import { createBot } from "../src/bot/create.js";
+import { type BotApp, createBot } from "../src/bot/create.js";
 
 type S = { favoriteColor?: string };
 
-const app = createBot<S>({
+// Annotated because the menu items below close over `app` itself, which
+// leaves the inferred type circular.
+const app: BotApp<S> = createBot<S>({
 	name: "demo-bot",
 	token: (env) => (env.BOT_TOKEN as string | undefined) ?? "1:fake-build-only",
 	language: { supported: ["en", "es"] as const, default: "en" },

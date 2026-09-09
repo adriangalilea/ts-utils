@@ -70,8 +70,9 @@ import {
 	accessControl,
 	simulateAccessRequest,
 } from "../src/bot/access-control.js";
+import { adminContext } from "../src/bot/admin.js";
 import { coalesceLongMessages } from "../src/bot/coalesce.js";
-import { adminContext, gracefulStart } from "../src/bot/kit.js";
+import { gracefulStart } from "../src/bot/kit.js";
 import { language } from "../src/bot/language.js";
 import { llmHistory, streamChatReply } from "../src/bot/llm.js";
 import { botMenu } from "../src/bot/menu.js";
@@ -207,13 +208,14 @@ const menu = botMenu({
 					)
 					.join("\n");
 				await c.send(last || "(no turns in this thread yet)");
+				return undefined;
 			},
 		},
 	],
 });
 
 const bot = new Bot(token)
-	.extend(adminContext({ adminId: 190202471 }))
+	.extend(adminContext(190202471))
 	.extend(userSession) // session first
 	.extend(accessControl({ session: userSession, storage, defaults: [] }))
 	.extend(coalesceLongMessages({ log: true }))
@@ -269,7 +271,12 @@ const bot = new Bot(token)
 		{ description: "Stream a fake LLM markdown reply" },
 		async (ctx) => {
 			if (!ctx.access.allowed) return;
-			await streamChatReply(ctx, fakeLLM());
+			// gramio's ctx type carries every extension this bot stacked;
+			// the plugins take the structural base. One cast at the boundary.
+			await streamChatReply(
+				ctx as unknown as Parameters<typeof streamChatReply>[0],
+				fakeLLM(),
+			);
 		},
 	)
 
@@ -405,7 +412,10 @@ const bot = new Bot(token)
 		},
 		async (ctx) => {
 			if (!ctx.isAdmin) return;
-			const charges = await payments.admin.listCharges(ctx, ctx.from.id);
+			const charges = await payments.admin.listCharges(
+				ctx as Parameters<typeof payments.admin.listCharges>[0],
+				ctx.from.id,
+			);
 			if (charges.length === 0) {
 				await ctx.send("(no charges yet — buy something first)");
 				return;

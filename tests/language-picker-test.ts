@@ -76,7 +76,7 @@ await ok(
 			active: "fr",
 		}).row();
 		kb.text("✓ Got it", "xgw|");
-		const rows = kb.toJSON().inline_keyboard as Array<
+		const rows = kb.toJSON().inline_keyboard as unknown as Array<
 			Array<Record<string, unknown>>
 		>;
 		assert.deepEqual(

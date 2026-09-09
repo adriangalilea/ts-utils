@@ -138,7 +138,9 @@ function fakeServer(ids: number[], { webhookUrl = "" } = {}) {
 		limit: 1,
 		timeoutS: 0,
 		quietPolls: 1,
-		onBatch: (batch) => persisted.push(...batch.map((u) => u.update_id)),
+		onBatch: (batch) => {
+			persisted.push(...batch.map((u) => u.update_id));
+		},
 	});
 	assert.deepEqual(persisted, [1, 2]); // nothing lost across the crash
 }
