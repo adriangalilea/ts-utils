@@ -77,12 +77,14 @@ Enable it only with a deletion and retention policy; no identity is inferred.
 `overlaps: [["a", "b"]]` declares unordered audience overlap, not an ordered funnel.
 Daily totals support counts and averages, not percentile latency or event ordering.
 
-**6.0 migration:** `defineMetrics` takes `store: metricsStore(driver, project)` instead
+**7.0 migration:** `defineMetrics` takes `store: metricsStore(driver, project)` instead
 of `write: metricsWriter(...)`; a custom store implements `declare` and `write`, and
 `Measurement` no longer carries `spec`. Existing tables gain a column and a table:
 `ALTER TABLE metric_definition ADD COLUMN per_user INTEGER NOT NULL DEFAULT 0` and the
-`metric_overlap` table from `METRICS_SCHEMA`; the first sample after the deploy
-declares the real flags, labels and overlaps. `readAudience` takes the schema
+`metric_project` table from `METRICS_SCHEMA` (one row per project, its overlaps as
+JSON; a 6.0 `metric_overlap` table is dropped); the first sample after the deploy
+declares the real flags, labels and overlaps. Ingestion credentials need add and
+update on every metric table and never delete: the store reconciles nothing. `readAudience` takes the schema
 (`readSchema(reader, project)`) instead of an overlap list and returns a row per
 declared per-user key. `readReport` replaces hand-rolled window + rows + audience
 composition. Metric keys and dimensions are storage identifiers: introduce a new key

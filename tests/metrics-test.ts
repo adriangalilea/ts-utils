@@ -127,6 +127,9 @@ const sqlite = new DatabaseSync(":memory:");
 for (const sql of METRICS_SCHEMA) sqlite.exec(sql);
 // node:sqlite as a driver: the same two verbs the shipped libSQL and D1 drivers implement.
 const transactions: number[] = [];
+// An ingestion credential adds and updates, never deletes or alters: the driver refuses
+// anything else, the way a scoped Turso token does (SQLITE_AUTH), so the store cannot
+// grow a reconcile step that only works with a broad credential.
 const db: MetricsDriver = {
 	async query({ sql, args }) {
 		return sqlite.prepare(sql).all(...args) as Record<string, unknown>[];
@@ -135,7 +138,13 @@ const db: MetricsDriver = {
 		transactions.push(statements.length);
 		sqlite.exec("BEGIN");
 		try {
-			for (const { sql, args } of statements) sqlite.prepare(sql).run(...args);
+			for (const { sql, args } of statements) {
+				if (!/^INSERT INTO /.test(sql))
+					throw new Error(
+						`SQLITE_AUTH: ingestion may only insert or upsert: ${sql}`,
+					);
+				sqlite.prepare(sql).run(...args);
+			}
 			sqlite.exec("COMMIT");
 		} catch (e) {
 			sqlite.exec("ROLLBACK");
@@ -218,8 +227,8 @@ const stored = defineMetrics(spec, {
 await stored.copies.bump({ user: "actor", dimensions: { component: "chat" } });
 assert.deepEqual(
 	transactions,
-	[5, 2],
-	"first sample: three definitions, the overlap reset and one overlap in one transaction, then the sample",
+	[4, 2],
+	"first sample: three definitions and the project row in one transaction, then the sample",
 );
 await stored.copies.bump({ user: "actor", dimensions: { component: "chat" } });
 await stored.copies.bump({ dimensions: { component: "glass" } });

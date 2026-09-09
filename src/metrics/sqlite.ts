@@ -31,7 +31,7 @@ export interface MetricsDriver extends MetricsReader {
 /** Run explicitly during provisioning, never on a user's request. */
 export const METRICS_SCHEMA = [
 	`CREATE TABLE IF NOT EXISTS metric_definition (project TEXT NOT NULL, key TEXT NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL, help TEXT NOT NULL, unit TEXT NOT NULL, per_user INTEGER NOT NULL, PRIMARY KEY(project, key))`,
-	`CREATE TABLE IF NOT EXISTS metric_overlap (project TEXT NOT NULL, from_key TEXT NOT NULL, to_key TEXT NOT NULL, PRIMARY KEY(project, from_key, to_key))`,
+	`CREATE TABLE IF NOT EXISTS metric_project (project TEXT NOT NULL, overlaps TEXT NOT NULL, PRIMARY KEY(project))`,
 	`CREATE TABLE IF NOT EXISTS metric_daily (project TEXT NOT NULL, key TEXT NOT NULL, dimensions TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL CHECK(count >= 0), sum REAL NOT NULL CHECK(sum >= 0), PRIMARY KEY(project, key, dimensions, day))`,
 	`CREATE TABLE IF NOT EXISTS metric_user_daily (project TEXT NOT NULL, key TEXT NOT NULL, dimensions TEXT NOT NULL, day TEXT NOT NULL, user TEXT NOT NULL, count INTEGER NOT NULL CHECK(count >= 0), sum REAL NOT NULL CHECK(sum >= 0), PRIMARY KEY(project, key, dimensions, day, user))`,
 	`CREATE INDEX IF NOT EXISTS metric_user_identity ON metric_user_daily(project, user)`,
@@ -74,15 +74,12 @@ export function metricsStore(
 					m.perUser ? 1 : 0,
 				],
 			}));
+			// One row per project, replaced whole: an ingestion credential can add and update
+			// but never delete, so the declared set is a value, not a table to reconcile.
 			statements.push({
-				sql: `DELETE FROM metric_overlap WHERE project = ?`,
-				args: [project],
+				sql: `INSERT INTO metric_project VALUES (?, ?) ON CONFLICT(project) DO UPDATE SET overlaps=excluded.overlaps`,
+				args: [project, JSON.stringify(schema.overlaps)],
 			});
-			for (const o of schema.overlaps)
-				statements.push({
-					sql: `INSERT INTO metric_overlap VALUES (?, ?, ?)`,
-					args: [project, o.from, o.to],
-				});
 			await driver.transact(statements);
 		},
 		async write(m: Measurement) {
@@ -117,16 +114,20 @@ export async function readSchema(
 	project: string,
 ): Promise<MetricsSchema> {
 	assertProject(project);
-	const [definitions, overlaps] = await Promise.all([
+	const [definitions, projects] = await Promise.all([
 		reader.query({
 			sql: `SELECT key, kind, label, help, unit, per_user FROM metric_definition WHERE project = ? ORDER BY key`,
 			args: [project],
 		}),
 		reader.query({
-			sql: `SELECT from_key, to_key FROM metric_overlap WHERE project = ? ORDER BY from_key, to_key`,
+			sql: `SELECT overlaps FROM metric_project WHERE project = ?`,
 			args: [project],
 		}),
 	]);
+	const [row] = Array.from(projects);
+	const overlaps: Array<{ from: string; to: string }> = row
+		? JSON.parse(String(row.overlaps))
+		: [];
 	return {
 		metrics: Array.from(definitions, (r) => ({
 			key: String(r.key),
@@ -136,10 +137,7 @@ export async function readSchema(
 			...(r.unit ? { unit: String(r.unit) } : {}),
 			...(Number(r.per_user) ? { perUser: true } : {}),
 		})),
-		overlaps: Array.from(overlaps, (r) => ({
-			from: String(r.from_key),
-			to: String(r.to_key),
-		})),
+		overlaps,
 	};
 }
 
