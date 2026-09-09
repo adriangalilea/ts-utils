@@ -45,9 +45,6 @@ importers:
       gramio:
         specifier: ^0.14.0
         version: 0.14.0(inspectable@3.0.2)(marked@15.0.12)
-      marked:
-        specifier: ^15.0.11
-        version: 15.0.12
       tsx:
         specifier: ^4.20.4
         version: 4.20.4
@@ -748,7 +745,8 @@ snapshots:
 
   linkifyjs@4.3.3: {}
 
-  marked@15.0.12: {}
+  marked@15.0.12:
+    optional: true
 
   ms@2.1.3: {}
 

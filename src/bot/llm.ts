@@ -29,8 +29,7 @@
  *       `@gramio/session` record under the `llm` field, so the `botMenu`
  *       🗑 Forget button wipes it together with everything else.
  *
- * Peer deps: `gramio`, `@gramio/session`, `@gramio/format`, `@gramio/split`,
- * `marked`.
+ * Peer deps: `gramio`, `@gramio/session`, `@gramio/format`, `@gramio/split`.
  *
  * @example  chatbot turn: history → llm.stream → streamed reply
  * import { createLlm } from '@adriangalilea/utils/llm'

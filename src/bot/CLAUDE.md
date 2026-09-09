@@ -2,7 +2,7 @@
 
 Plugins for personal Telegram bots built on [GramIO](https://gramio.dev). Each
 ships as a subpath of `@adriangalilea/utils`. Peer deps (`gramio`,
-`@gramio/storage`, `@gramio/session`, `@gramio/format`, `marked`) are **all
+`@gramio/storage`, `@gramio/session`, `@gramio/format`) are **all
 optional** — install only what the subpaths you import need.
 
 ## What's here

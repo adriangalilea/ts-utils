@@ -626,7 +626,7 @@ Zero dependencies, Worker-safe. Typography (heading air, bullet glyph, title und
 
 ### Telegram bot plugins (GramIO)
 
-Plugins for personal Telegram bots built on [GramIO](https://gramio.dev). Each plugin lives at its own subpath; peer deps (`gramio`, `@gramio/storage`, `@gramio/session`, `@gramio/format`, `marked`) are **all optional** — install only what you import.
+Plugins for personal Telegram bots built on [GramIO](https://gramio.dev). Each plugin lives at its own subpath; peer deps (`gramio`, `@gramio/storage`, `@gramio/session`, `@gramio/format`) are **all optional** — install only what you import.
 
 ```bash
 pnpm add @adriangalilea/utils gramio @gramio/storage @gramio/session
