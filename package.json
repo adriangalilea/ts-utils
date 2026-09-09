@@ -231,7 +231,6 @@
 		"test:log": "tsx tests/log-test.ts",
 		"test:runtime": "tsx tests/runtime-test.ts",
 		"test:text": "tsx tests/text-test.ts",
-		"test:browser": "open tests/browser-test.html",
 		"example": "tsx tests/example.ts",
 		"update-crypto": "tsx src/universal/currency/download-crypto-list.ts",
 		"update-url-rules": "tsx src/universal/url/update-rules.ts",
