@@ -55,7 +55,14 @@ export type Metrics<Spec extends Record<string, MetricSpec>> = {
 	[K in keyof Spec]: Spec[K]["kind"] extends "counter"
 		? CounterHandle
 		: TimingHandle;
-} & { describe(): MetricsSchema };
+} & {
+	describe(): MetricsSchema;
+	/**
+	 * Declare now instead of at the first sample: a server's boot, a Worker's cron. The
+	 * same once-per-process promise the samples await, so calling it is never a second write.
+	 */
+	declare(): Promise<void>;
+};
 
 const identifier = /^[a-zA-Z][a-zA-Z0-9_]*$/;
 
@@ -69,6 +76,7 @@ export function defineMetrics<const Spec extends Record<string, MetricSpec>>(
 		if (
 			!identifier.test(key) ||
 			key === "describe" ||
+			key === "declare" ||
 			key === "constructor" ||
 			key === "prototype"
 		)
@@ -171,5 +179,11 @@ export function defineMetrics<const Spec extends Record<string, MetricSpec>>(
 				? { bump: (o) => write(key, o?.n ?? 1, 0, o) }
 				: { record: (value, o) => write(key, 1, value, o) };
 	}
-	return { ...out, describe } as Metrics<Spec>;
+	return {
+		...out,
+		describe,
+		declare: async () => {
+			await declare();
+		},
+	} as Metrics<Spec>;
 }

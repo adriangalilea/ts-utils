@@ -40,6 +40,17 @@ export interface Audience {
 	overlaps: AudienceOverlap[];
 }
 
+/**
+ * Distinct actors of one per-user key: per day, and over the whole window as a set. The
+ * window figure is never the sum of the days; an actor alive on two days counts once.
+ */
+export interface ActiveActors {
+	project: string;
+	key: string;
+	daily: { day: string; users: number }[];
+	window: number;
+}
+
 export interface MetricsWindow {
 	from: string;
 	to: string;

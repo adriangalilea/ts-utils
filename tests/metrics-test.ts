@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { renderMetricComparison, renderMetrics } from "../src/metrics/cli.js";
-import { d1Driver } from "../src/metrics/d1.js";
+import { d1Driver, d1Store } from "../src/metrics/d1.js";
 import { d1RestReader } from "../src/metrics/d1-rest.js";
 import {
 	defineMetrics,
 	type Measurement,
 	type MetricsSchema,
 } from "../src/metrics/index.js";
-import { libsqlDriver } from "../src/metrics/libsql.js";
+import { libsqlDriver, libsqlStore } from "../src/metrics/libsql.js";
 import {
 	compareMetrics,
 	metricWindows,
@@ -16,8 +16,10 @@ import {
 } from "../src/metrics/report.js";
 import {
 	METRICS_SCHEMA,
+	METRICS_TABLES,
 	type MetricsDriver,
 	metricsStore,
+	readActive,
 	readAudience,
 	readMetrics,
 	readReport,
@@ -59,6 +61,12 @@ await metrics.latency.record(125);
 assert.equal(samples[1].sum, 125);
 assert.equal(declared.length, 1, "the schema reaches the store once");
 assert.deepEqual(declared[0].overlaps, [{ from: "copies", to: "opens" }]);
+await metrics.declare();
+assert.equal(
+	declared.length,
+	1,
+	"declare() is the same once-per-process promise",
+);
 await metrics.copies.bump({ n: NaN, dimensions: { component: "chat" } });
 await metrics.copies.bump({ n: -1, dimensions: { component: "chat" } });
 await metrics.latency.record(Infinity);
@@ -125,6 +133,17 @@ assert.equal(metrics.describe().metrics[0].label, "copies");
 
 const sqlite = new DatabaseSync(":memory:");
 for (const sql of METRICS_SCHEMA) sqlite.exec(sql);
+// The grant list and the schema name the same tables: a token minted from one covers the other.
+assert.deepEqual(
+	[...METRICS_TABLES].sort(),
+	(
+		sqlite
+			.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+			.all() as { name: string }[]
+	)
+		.map((r) => r.name)
+		.sort(),
+);
 // node:sqlite as a driver: the same two verbs the shipped libSQL and D1 drivers implement.
 const transactions: number[] = [];
 // An ingestion credential adds and updates, never deletes or alters: the driver refuses
@@ -154,16 +173,33 @@ const db: MetricsDriver = {
 };
 // The shipped drivers, over fakes shaped like the real clients, so both call paths run here.
 const libsqlCalls: string[] = [];
-const viaLibsql = libsqlDriver({
-	async execute(statement) {
+const fakeLibsql = {
+	async execute(statement: { sql: string; args: (string | number)[] }) {
 		libsqlCalls.push("execute");
 		return { rows: await db.query(statement) };
 	},
-	async batch(statements, mode) {
+	async batch(
+		statements: { sql: string; args: (string | number)[] }[],
+		mode: "write",
+	) {
 		libsqlCalls.push(`batch:${mode}`);
 		return db.transact(statements);
 	},
-});
+};
+const viaLibsql = libsqlDriver(fakeLibsql);
+// A credential with no grants at all: the store names what it was refused on.
+await assert.rejects(
+	metricsStore(
+		{
+			query: db.query,
+			transact: async () => {
+				throw new Error("SQLITE_AUTH: SQLite error: not authorized");
+			},
+		},
+		"nobody",
+	).declare({ metrics: [], overlaps: [] }),
+	/grant on metric_definition or metric_project/,
+);
 const d1Calls: string[] = [];
 type FakeD1Statement = {
 	sql: string;
@@ -171,8 +207,8 @@ type FakeD1Statement = {
 	bind(...values: unknown[]): FakeD1Statement;
 	all<T>(): Promise<{ results: T[] }>;
 };
-const viaD1 = d1Driver({
-	prepare(sql) {
+const fakeD1 = {
+	prepare(sql: string) {
 		const statement: FakeD1Statement = {
 			sql,
 			args: [],
@@ -187,11 +223,12 @@ const viaD1 = d1Driver({
 		};
 		return statement;
 	},
-	async batch(statements) {
+	async batch(statements: FakeD1Statement[]) {
 		d1Calls.push(`batch:${statements.length}`);
-		return db.transact(statements as FakeD1Statement[]);
+		return db.transact(statements);
 	},
-});
+};
+const viaD1 = d1Driver(fakeD1);
 const restCalls: string[] = [];
 const viaRest = d1RestReader({
 	accountId: "acct",
@@ -281,7 +318,7 @@ assert.equal(errors.length, 7);
 // Audience: who did it. actor copies twice on the 8th (same-day repeat), once more on the
 // 10th (returned); guest and actor open on the 10th; the anonymous glass bump is nobody.
 const later = defineMetrics(spec, {
-	store: metricsStore(db, "ui"),
+	store: libsqlStore(fakeLibsql, "ui"),
 	overlaps,
 	now: () => new Date("2026-09-10T12:00:00Z"),
 });
@@ -341,6 +378,32 @@ assert.deepEqual(
 	},
 	"a declared per-user metric nobody touched is a row of zeros",
 );
+assert.deepEqual(
+	await readActive(db, { from: "2026-09-08", to: "2026-09-10", project: "ui" }),
+	[
+		{
+			project: "ui",
+			key: "copies",
+			daily: [
+				{ day: "2026-09-08", users: 1 },
+				{ day: "2026-09-10", users: 1 },
+			],
+			window: 1,
+		},
+		{
+			project: "ui",
+			key: "opens",
+			daily: [{ day: "2026-09-10", users: 3 }],
+			window: 3,
+		},
+	],
+	"window actors are a set: actor on two days counts once",
+);
+assert.equal(
+	(await readActive(db, { from: "2026-09-08", to: "2026-09-10" })).length,
+	2,
+	"all projects when none is named: other has no per-user rows",
+);
 await assert.rejects(
 	readAudience(
 		db,
@@ -379,7 +442,7 @@ await assert.rejects(
 
 // The shipped drivers: write through D1's prepare/bind/batch, read through libSQL's execute.
 const onD1 = defineMetrics(spec, {
-	store: metricsStore(viaD1, "d1"),
+	store: d1Store(fakeD1, "d1"),
 	now: () => new Date("2026-09-08T12:00:00Z"),
 	onError: (e) => {
 		throw e;
@@ -393,7 +456,11 @@ const fromLibsql = await readMetrics(viaLibsql, {
 	to: "2026-09-08",
 	project: "d1",
 });
-assert.deepEqual(libsqlCalls, ["execute"]);
+assert.equal(libsqlCalls.at(-1), "execute");
+assert.ok(
+	libsqlCalls.includes("batch:write"),
+	"libsqlStore wrote through batch",
+);
 assert.equal(fromLibsql.length, 2);
 assert.equal(fromLibsql.find((r) => r.key === "opens")?.count, 1);
 assert.equal(

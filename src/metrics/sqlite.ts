@@ -1,5 +1,6 @@
 import type { Measurement, MetricsSchema, MetricsStore } from "./index.js";
 import {
+	type ActiveActors,
 	type Audience,
 	type DailyMetric,
 	type MetricsReport,
@@ -28,6 +29,17 @@ export interface MetricsDriver extends MetricsReader {
 	transact(statements: SqlStatement[]): Promise<unknown>;
 }
 
+/**
+ * Every table the store touches: what an ingestion credential must be granted
+ * (read, add, update; never delete) and what a report credential reads.
+ */
+export const METRICS_TABLES = [
+	"metric_definition",
+	"metric_project",
+	"metric_daily",
+	"metric_user_daily",
+] as const;
+
 /** Run explicitly during provisioning, never on a user's request. */
 export const METRICS_SCHEMA = [
 	`CREATE TABLE IF NOT EXISTS metric_definition (project TEXT NOT NULL, key TEXT NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL, help TEXT NOT NULL, unit TEXT NOT NULL, per_user INTEGER NOT NULL, PRIMARY KEY(project, key))`,
@@ -42,6 +54,27 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 function assertProject(project: string) {
 	if (!PROJECT.test(project)) throw new Error("metrics: invalid project");
+}
+
+/**
+ * A refused statement names the tables the batch touched: a scoped credential that
+ * predates a table in METRICS_SCHEMA fails here, and the log should say which grant.
+ */
+async function granted<T>(
+	work: Promise<T>,
+	tables: readonly string[],
+): Promise<T> {
+	try {
+		return await work;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		if (/not authorized|SQLITE_AUTH/i.test(message))
+			throw new Error(
+				`metrics: the credential lacks a grant on ${tables.join(" or ")} (${message})`,
+				{ cause: error },
+			);
+		throw error;
+	}
 }
 
 function assertRange(range: { from: string; to: string }) {
@@ -80,7 +113,10 @@ export function metricsStore(
 				sql: `INSERT INTO metric_project VALUES (?, ?) ON CONFLICT(project) DO UPDATE SET overlaps=excluded.overlaps`,
 				args: [project, JSON.stringify(schema.overlaps)],
 			});
-			await driver.transact(statements);
+			await granted(driver.transact(statements), [
+				"metric_definition",
+				"metric_project",
+			]);
 		},
 		async write(m: Measurement) {
 			const dimensions = JSON.stringify(m.dimensions);
@@ -103,7 +139,12 @@ export function metricsStore(
 						m.sum,
 					],
 				});
-			await driver.transact(statements);
+			await granted(
+				driver.transact(statements),
+				m.user === undefined
+					? ["metric_daily"]
+					: ["metric_daily", "metric_user_daily"],
+			);
 		},
 	};
 }
@@ -227,6 +268,47 @@ export async function readAudience(
 		});
 	}
 	return { metrics, overlaps };
+}
+
+/**
+ * Distinct actors per day and over the window, every per-user key, one project or all:
+ * the daily-active and window-active figures a distribution report shows.
+ */
+export async function readActive(
+	reader: MetricsReader,
+	range: { from: string; to: string; project?: string },
+): Promise<ActiveActors[]> {
+	assertRange(range);
+	if (range.project !== undefined) assertProject(range.project);
+	const scope = range.project ? "AND project = ?" : "";
+	const args = [
+		range.from,
+		range.to,
+		...(range.project ? [range.project] : []),
+	];
+	const [daily, window] = await Promise.all([
+		reader.query({
+			sql: `SELECT project, key, day, COUNT(DISTINCT user) AS users FROM metric_user_daily WHERE day >= ? AND day <= ? ${scope} GROUP BY project, key, day ORDER BY project, key, day`,
+			args,
+		}),
+		reader.query({
+			sql: `SELECT project, key, COUNT(DISTINCT user) AS users FROM metric_user_daily WHERE day >= ? AND day <= ? ${scope} GROUP BY project, key ORDER BY project, key`,
+			args,
+		}),
+	]);
+	const out = new Map<string, ActiveActors>();
+	for (const r of window)
+		out.set(`${r.project}\0${r.key}`, {
+			project: String(r.project),
+			key: String(r.key),
+			daily: [],
+			window: Number(r.users),
+		});
+	for (const r of daily)
+		out
+			.get(`${r.project}\0${r.key}`)
+			?.daily.push({ day: String(r.day), users: Number(r.users) });
+	return [...out.values()];
 }
 
 /** Everything a panel renders for one project over the last `days` UTC days, in one call. */
