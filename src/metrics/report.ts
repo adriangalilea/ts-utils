@@ -1,3 +1,5 @@
+import type { MetricsSchema } from "./index.js";
+
 /** Store-independent daily observations, shared by adapters and renderers. */
 export interface DailyMetric {
 	project: string;
@@ -36,6 +38,22 @@ export interface AudienceOverlap {
 export interface Audience {
 	metrics: AudienceMetric[];
 	overlaps: AudienceOverlap[];
+}
+
+export interface MetricsWindow {
+	from: string;
+	to: string;
+	/** The window ends on the current, incomplete UTC day. */
+	partial: boolean;
+}
+
+/** One project, one window, everything a panel renders; the schema comes from the store. */
+export interface MetricsReport {
+	project: string;
+	window: MetricsWindow;
+	schema: MetricsSchema;
+	daily: DailyMetric[];
+	audience: Audience;
 }
 
 export interface MetricTotal {

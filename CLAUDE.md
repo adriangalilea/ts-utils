@@ -8,7 +8,10 @@ never a client shaped like another client's. Applications own their connections 
 their database: ui writes to a dedicated Turso database, xtldr to its bot's D1, both
 through `METRICS_SCHEMA`, so one reader and one report serve every product. A new
 SQLite store is a new `metrics/<driver>.ts` implementing `query` and `transact` with
-that driver's native calls. Provision `METRICS_SCHEMA` explicitly;
+that driver's native calls; a read-only path (REST) implements `query` alone. The
+store is self-describing: `declare` writes the schema rows once per process, so a
+console reads any product's database with `readReport` and no product endpoint sits
+between them. Provision `METRICS_SCHEMA` explicitly;
 never create tables during requests. Use database-scoped credentials, table
 read/add/update permissions for ingestion (upserts require reads), and read-only
 credentials for reports. Ingestion cannot delete rows or change schema.

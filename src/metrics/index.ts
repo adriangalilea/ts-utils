@@ -15,11 +15,25 @@ export interface Measurement {
 	sum: number;
 	user?: string | number;
 	dimensions: Record<string, string>;
-	spec: MetricSpec;
+}
+
+export interface MetricsSchema {
+	metrics: Array<{ key: string } & MetricSpec>;
+	overlaps: Array<{ from: string; to: string }>;
+}
+
+/**
+ * Where measurements go. `declare` runs once per process before the first write and
+ * carries the whole schema (kinds, labels, per-user flags, overlaps), so a store is
+ * self-describing and a reader never needs the declaring code. `write` carries one sample.
+ */
+export interface MetricsStore {
+	declare(schema: MetricsSchema): Promise<unknown>;
+	write(measurement: Measurement): Promise<unknown>;
 }
 
 export interface MetricsOptions<Keys extends string = string> {
-	write: (measurement: Measurement) => Promise<unknown>;
+	store: MetricsStore;
 	/** Unordered user overlap, not an ordered conversion funnel. */
 	overlaps?: ReadonlyArray<readonly [Keys, Keys]>;
 	/** Failures are visible by default, but never reject a measurement call. */
@@ -36,10 +50,6 @@ export interface CounterHandle {
 }
 export interface TimingHandle {
 	record(value: number, options?: SampleOptions): Promise<void>;
-}
-export interface MetricsSchema {
-	metrics: Array<{ key: string } & MetricSpec>;
-	overlaps: Array<{ from: string; to: string }>;
 }
 export type Metrics<Spec extends Record<string, MetricSpec>> = {
 	[K in keyof Spec]: Spec[K]["kind"] extends "counter"
@@ -80,10 +90,26 @@ export function defineMetrics<const Spec extends Record<string, MetricSpec>>(
 			throw new Error("metrics: overlap requires two declared perUser metrics");
 		return { from, to };
 	});
+	const describe = (): MetricsSchema =>
+		structuredClone({
+			metrics: Object.entries(spec).map(([key, s]) => ({ key, ...s })),
+			overlaps,
+		});
 	const report =
 		opts.onError ??
 		((_error: unknown, key: string) =>
 			console.warn(`metrics: measurement failed (${key})`));
+	// The schema reaches the store once per process, ahead of the first sample. A failed
+	// declaration is retried by the next sample, so a store that was briefly away recovers
+	// and a store that refuses the schema (a changed kind) fails every sample, loudly.
+	let declared: Promise<unknown> | undefined;
+	const declare = () => {
+		declared ??= opts.store.declare(describe()).catch((error) => {
+			declared = undefined;
+			throw error;
+		});
+		return declared;
+	};
 	async function write(
 		key: string,
 		count: number,
@@ -121,14 +147,14 @@ export function defineMetrics<const Spec extends Record<string, MetricSpec>>(
 					: typeof user !== "string" || !user.length || user.length > 128)
 			)
 				throw new Error("metrics: invalid user identifier");
-			await opts.write({
+			await declare();
+			await opts.store.write({
 				key,
 				day: (opts.now?.() ?? new Date()).toISOString().slice(0, 10),
 				count,
 				sum,
 				user,
 				dimensions,
-				spec: structuredClone(s),
 			});
 		} catch (error) {
 			try {
@@ -145,12 +171,5 @@ export function defineMetrics<const Spec extends Record<string, MetricSpec>>(
 				? { bump: (o) => write(key, o?.n ?? 1, 0, o) }
 				: { record: (value, o) => write(key, 1, value, o) };
 	}
-	return {
-		...out,
-		describe: () =>
-			structuredClone({
-				metrics: Object.entries(spec).map(([key, s]) => ({ key, ...s })),
-				overlaps,
-			}),
-	} as Metrics<Spec>;
+	return { ...out, describe } as Metrics<Spec>;
 }

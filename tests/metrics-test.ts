@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { renderMetricComparison, renderMetrics } from "../src/metrics/cli.js";
 import { d1Driver } from "../src/metrics/d1.js";
-import { defineMetrics, type Measurement } from "../src/metrics/index.js";
+import { d1RestReader } from "../src/metrics/d1-rest.js";
+import {
+	defineMetrics,
+	type Measurement,
+	type MetricsSchema,
+} from "../src/metrics/index.js";
 import { libsqlDriver } from "../src/metrics/libsql.js";
 import {
 	compareMetrics,
@@ -12,12 +17,15 @@ import {
 import {
 	METRICS_SCHEMA,
 	type MetricsDriver,
-	metricsWriter,
+	metricsStore,
 	readAudience,
 	readMetrics,
+	readReport,
+	readSchema,
 } from "../src/metrics/sqlite.js";
 
 const samples: Measurement[] = [];
+const declared: MetricsSchema[] = [];
 const errors: unknown[] = [];
 const spec = {
 	copies: {
@@ -30,10 +38,17 @@ const spec = {
 	latency: { kind: "timing", label: "latency", unit: "ms" },
 } as const;
 const overlaps = [["copies", "opens"]] as const;
-const metrics = defineMetrics(spec, {
-	write: async (m) => {
+const memory = {
+	async declare(schema: MetricsSchema) {
+		declared.push(schema);
+	},
+	async write(m: Measurement) {
 		samples.push(m);
 	},
+};
+const metrics = defineMetrics(spec, {
+	store: memory,
+	overlaps,
 	now: () => new Date("2026-09-08T23:59:59Z"),
 	onError: (e) => errors.push(e),
 });
@@ -42,6 +57,8 @@ assert.equal(samples[0].day, "2026-09-08");
 assert.equal(samples[0].user, "actor");
 await metrics.latency.record(125);
 assert.equal(samples[1].sum, 125);
+assert.equal(declared.length, 1, "the schema reaches the store once");
+assert.deepEqual(declared[0].overlaps, [{ from: "copies", to: "opens" }]);
 await metrics.copies.bump({ n: NaN, dimensions: { component: "chat" } });
 await metrics.copies.bump({ n: -1, dimensions: { component: "chat" } });
 await metrics.latency.record(Infinity);
@@ -53,13 +70,13 @@ assert.equal(errors.length, 6);
 assert.throws(() =>
 	defineMetrics(
 		{ describe: { kind: "counter", label: "collision" } },
-		{ write: async () => {} },
+		{ store: memory },
 	),
 );
 assert.throws(() =>
 	defineMetrics(
 		{ a: { kind: "counter", label: "a" } },
-		{ write: async () => {}, overlaps: [["a", "a"]] },
+		{ store: memory, overlaps: [["a", "a"]] },
 	),
 );
 for (const write of [
@@ -73,7 +90,7 @@ for (const write of [
 	const failed = defineMetrics(
 		{ a: { kind: "counter", label: "a" } },
 		{
-			write,
+			store: { declare: async () => {}, write },
 			onError: () => {
 				throw new Error("reporter");
 			},
@@ -81,6 +98,27 @@ for (const write of [
 	);
 	await assert.doesNotReject(failed.a.bump());
 }
+// A store that is away at the first sample is asked again by the next one.
+let declareFailures = 1;
+const flakyDeclared: MetricsSchema[] = [];
+const flaky = defineMetrics(
+	{ a: { kind: "counter", label: "a" } },
+	{
+		store: {
+			async declare(schema) {
+				if (declareFailures-- > 0) throw new Error("away");
+				flakyDeclared.push(schema);
+			},
+			async write() {},
+		},
+		onError: (e) => errors.push(e),
+	},
+);
+await flaky.a.bump();
+await flaky.a.bump();
+await flaky.a.bump();
+assert.equal(flakyDeclared.length, 1);
+assert.equal(errors.length, 7);
 const description = metrics.describe();
 description.metrics[0].label = "mutated";
 assert.equal(metrics.describe().metrics[0].label, "copies");
@@ -88,11 +126,13 @@ assert.equal(metrics.describe().metrics[0].label, "copies");
 const sqlite = new DatabaseSync(":memory:");
 for (const sql of METRICS_SCHEMA) sqlite.exec(sql);
 // node:sqlite as a driver: the same two verbs the shipped libSQL and D1 drivers implement.
+const transactions: number[] = [];
 const db: MetricsDriver = {
 	async query({ sql, args }) {
 		return sqlite.prepare(sql).all(...args) as Record<string, unknown>[];
 	},
 	async transact(statements) {
+		transactions.push(statements.length);
 		sqlite.exec("BEGIN");
 		try {
 			for (const { sql, args } of statements) sqlite.prepare(sql).run(...args);
@@ -143,8 +183,32 @@ const viaD1 = d1Driver({
 		return db.transact(statements as FakeD1Statement[]);
 	},
 });
+const restCalls: string[] = [];
+const viaRest = d1RestReader({
+	accountId: "acct",
+	databaseId: "db",
+	token: "t",
+	fetch: (async (url: string, init: RequestInit) => {
+		restCalls.push(url);
+		assert.equal(
+			(init.headers as Record<string, string>).authorization,
+			"Bearer t",
+		);
+		const { sql, params } = JSON.parse(String(init.body));
+		if (/FROM missing/.test(sql))
+			return Response.json(
+				{ success: false, errors: [{ message: "no such table" }] },
+				{ status: 400 },
+			);
+		return Response.json({
+			success: true,
+			result: [{ results: await db.query({ sql, args: params }) }],
+		});
+	}) as typeof fetch,
+});
+
 const stored = defineMetrics(spec, {
-	write: metricsWriter(db, "ui"),
+	store: metricsStore(db, "ui"),
 	overlaps,
 	now: () => new Date("2026-09-08T12:00:00Z"),
 	onError: (e) => {
@@ -152,15 +216,34 @@ const stored = defineMetrics(spec, {
 	},
 });
 await stored.copies.bump({ user: "actor", dimensions: { component: "chat" } });
+assert.deepEqual(
+	transactions,
+	[5, 2],
+	"first sample: three definitions, the overlap reset and one overlap in one transaction, then the sample",
+);
 await stored.copies.bump({ user: "actor", dimensions: { component: "chat" } });
 await stored.copies.bump({ dimensions: { component: "glass" } });
 await stored.latency.record(30);
 await stored.latency.record(50);
+assert.equal(
+	transactions.length,
+	6,
+	"one declaration, then one transaction per sample",
+);
 const other = defineMetrics(spec, {
-	write: metricsWriter(db, "other"),
+	store: metricsStore(db, "other"),
 	now: () => new Date("2026-09-08T12:00:00Z"),
 });
 await other.copies.bump({ dimensions: { component: "chat" } });
+assert.deepEqual(await readSchema(db, "ui"), {
+	metrics: [
+		{ key: "copies", kind: "counter", label: "copies", perUser: true },
+		{ key: "latency", kind: "timing", label: "latency", unit: "ms" },
+		{ key: "opens", kind: "counter", label: "opens", perUser: true },
+	],
+	overlaps: [{ from: "copies", to: "opens" }],
+});
+assert.deepEqual((await readSchema(db, "other")).overlaps, []);
 const rows = await readMetrics(db, {
 	from: "2026-09-08",
 	to: "2026-09-08",
@@ -184,12 +267,12 @@ assert.equal(
 	0,
 );
 await assert.rejects(readMetrics(db, { from: "2026-09-09", to: "2026-09-08" }));
-assert.equal(errors.length, 6);
+assert.equal(errors.length, 7);
 
 // Audience: who did it. actor copies twice on the 8th (same-day repeat), once more on the
 // 10th (returned); guest and actor open on the 10th; the anonymous glass bump is nobody.
 const later = defineMetrics(spec, {
-	write: metricsWriter(db, "ui"),
+	store: metricsStore(db, "ui"),
 	overlaps,
 	now: () => new Date("2026-09-10T12:00:00Z"),
 });
@@ -197,74 +280,97 @@ await later.copies.bump({ user: "actor", dimensions: { component: "glass" } });
 await later.opens.bump({ user: "guest" });
 await later.opens.bump({ user: 7 });
 await later.opens.bump({ user: "actor" });
-const audience = await readAudience(
-	db,
-	{ from: "2026-09-08", to: "2026-09-10", project: "ui" },
-	stored.describe().overlaps,
-);
-assert.deepEqual(audience, {
-	metrics: [
-		{
-			project: "ui",
-			key: "copies",
-			uniques: 1,
-			repeatUsers: 1,
-			returningUsers: 1,
-		},
-		{
-			project: "ui",
-			key: "opens",
-			uniques: 3,
-			repeatUsers: 0,
-			returningUsers: 0,
-		},
-	],
-	overlaps: [
-		{ project: "ui", from: "copies", to: "opens", fromUsers: 1, bothUsers: 1 },
-	],
-});
-assert.deepEqual(
-	(
-		await readAudience(
-			db,
-			{ from: "2026-09-10", to: "2026-09-10", project: "ui" },
-			[],
-		)
-	).metrics.find((m) => m.key === "copies"),
-	{
-		project: "ui",
-		key: "copies",
-		uniques: 1,
-		repeatUsers: 0,
-		returningUsers: 0,
-	},
-);
+const schema = await readSchema(db, "ui");
 assert.deepEqual(
 	await readAudience(
 		db,
-		{ from: "2026-09-08", to: "2026-09-10", project: "other" },
-		stored.describe().overlaps,
+		{ from: "2026-09-08", to: "2026-09-10", project: "ui" },
+		schema,
 	),
 	{
-		metrics: [],
+		metrics: [
+			{
+				project: "ui",
+				key: "copies",
+				uniques: 1,
+				repeatUsers: 1,
+				returningUsers: 1,
+			},
+			{
+				project: "ui",
+				key: "opens",
+				uniques: 3,
+				repeatUsers: 0,
+				returningUsers: 0,
+			},
+		],
 		overlaps: [
 			{
-				project: "other",
+				project: "ui",
 				from: "copies",
 				to: "opens",
-				fromUsers: 0,
-				bothUsers: 0,
+				fromUsers: 1,
+				bothUsers: 1,
 			},
 		],
 	},
 );
+assert.deepEqual(
+	(
+		await readAudience(
+			db,
+			{ from: "2026-09-08", to: "2026-09-08", project: "ui" },
+			schema,
+		)
+	).metrics.find((m) => m.key === "opens"),
+	{
+		project: "ui",
+		key: "opens",
+		uniques: 0,
+		repeatUsers: 0,
+		returningUsers: 0,
+	},
+	"a declared per-user metric nobody touched is a row of zeros",
+);
 await assert.rejects(
-	readAudience(db, { from: "2026-09-08", to: "2026-09-10", project: "UI" }, []),
+	readAudience(
+		db,
+		{ from: "2026-09-08", to: "2026-09-10", project: "UI" },
+		schema,
+	),
+);
+
+// The whole panel in one call, over the REST reader.
+const report = await readReport(viaRest, {
+	project: "ui",
+	days: 3,
+	includeToday: true,
+	now: new Date("2026-09-10T20:00:00Z"),
+});
+assert.deepEqual(report.window, {
+	from: "2026-09-08",
+	to: "2026-09-10",
+	partial: true,
+});
+assert.deepEqual(report.schema, schema);
+assert.equal(
+	report.daily.length,
+	5,
+	"three series on the 8th, two on the 10th",
+);
+assert.equal(
+	report.audience.metrics.find((m) => m.key === "opens")?.uniques,
+	3,
+);
+assert.ok(restCalls.every((u) => u.endsWith("/d1/database/db/query")));
+await assert.rejects(
+	viaRest.query({ sql: "SELECT * FROM missing", args: [] }),
+	/no such table/,
 );
 
 // The shipped drivers: write through D1's prepare/bind/batch, read through libSQL's execute.
 const onD1 = defineMetrics(spec, {
-	write: metricsWriter(viaD1, "d1"),
+	store: metricsStore(viaD1, "d1"),
 	now: () => new Date("2026-09-08T12:00:00Z"),
 	onError: (e) => {
 		throw e;
@@ -272,7 +378,7 @@ const onD1 = defineMetrics(spec, {
 });
 await onD1.opens.bump({ user: 42 });
 await onD1.latency.record(9);
-assert.deepEqual(d1Calls, ["batch:3", "batch:2"]);
+assert.deepEqual(d1Calls, ["batch:4", "batch:2", "batch:1"]);
 const fromLibsql = await readMetrics(viaLibsql, {
 	from: "2026-09-08",
 	to: "2026-09-08",
@@ -283,15 +389,16 @@ assert.equal(fromLibsql.length, 2);
 assert.equal(fromLibsql.find((r) => r.key === "opens")?.count, 1);
 assert.equal(
 	(
-		await readAudience(
-			viaD1,
-			{ from: "2026-09-08", to: "2026-09-08", project: "d1" },
-			[],
-		)
-	).metrics[0]?.uniques,
+		await readReport(viaD1, {
+			project: "d1",
+			days: 1,
+			now: new Date("2026-09-09T00:00:00Z"),
+		})
+	).audience.metrics.find((m) => m.key === "opens")?.uniques,
 	1,
 );
 assert.ok(d1Calls.includes("all"));
+
 assert.deepEqual(metricWindows(14, { now: new Date("2026-09-08T23:59:59Z") }), {
 	current: { from: "2026-08-25", to: "2026-09-07" },
 	previous: { from: "2026-08-11", to: "2026-08-24" },
@@ -346,32 +453,45 @@ assert.equal(
 );
 assert.throws(() => compareMetrics([timing], [{ ...timing, unit: "seconds" }]));
 assert.throws(() => summarizeMetrics([timing, { ...timing, unit: "seconds" }]));
-const strictWriter = metricsWriter(db, "ui");
-for (const changed of [
-	{ kind: "counter", unit: "ms" },
-	{ kind: "timing", unit: "s" },
-] as const) {
-	await assert.rejects(
-		strictWriter({
-			key: "latency",
-			day: "2026-09-08",
-			count: 1,
-			sum: 1,
-			dimensions: {},
-			spec: { ...changed, label: "changed" },
-		}),
-	);
-}
-const preserved = await readMetrics(db, {
+
+// A changed meaning is refused at declaration, so every sample of that process fails loudly
+// and nothing about the stored history moves.
+const before = await readMetrics(db, {
 	from: "2026-09-08",
-	to: "2026-09-08",
+	to: "2026-09-10",
 	project: "ui",
 });
+for (const changed of [
+	{ kind: "counter", label: "latency" },
+	{ kind: "timing", label: "latency", unit: "s" },
+] as const) {
+	const refused: unknown[] = [];
+	const wrong = defineMetrics(
+		{ latency: changed },
+		{
+			store: metricsStore(db, "ui"),
+			now: () => new Date("2026-09-10T12:00:00Z"),
+			onError: (e) => refused.push(e),
+		},
+	);
+	if (changed.kind === "counter")
+		await (wrong as { latency: { bump(): Promise<void> } }).latency.bump();
+	else
+		await (
+			wrong as { latency: { record(v: number): Promise<void> } }
+		).latency.record(1);
+	assert.equal(refused.length, 1);
+}
 assert.deepEqual(
-	preserved,
-	rows,
-	"incompatible declarations roll back metadata and observations together",
+	await readMetrics(db, {
+		from: "2026-09-08",
+		to: "2026-09-10",
+		project: "ui",
+	}),
+	before,
+	"a refused declaration rolls back and writes nothing",
 );
+assert.deepEqual((await readSchema(db, "ui")).overlaps, schema.overlaps);
 const canonical = compareMetrics(
 	[{ ...counter, dimensions: { a: "1", b: "2" } }],
 	[{ ...counter, dimensions: { b: "2", a: "1" } }],
@@ -389,5 +509,5 @@ assert.match(rendered, /avg current/);
 assert.match(renderMetricComparison([]), /either window/);
 sqlite.close();
 console.log(
-	"Metrics: validation, failure isolation, dimensions, UTC buckets, atomic upserts, audience, libSQL and D1 drivers, project separation passed",
+	"Metrics: validation, failure isolation, declare-once, dimensions, UTC buckets, atomic upserts, self-describing store, audience, report, libSQL, D1 and D1 REST, project separation passed",
 );

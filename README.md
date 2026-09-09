@@ -8,35 +8,45 @@ TypeScript utilities - logger, currency, offensive programming, file operations,
 import { createClient } from "@libsql/client"
 import { defineMetrics } from "@adriangalilea/utils/metrics"
 import { libsqlDriver } from "@adriangalilea/utils/metrics/libsql"
-import { metricsWriter } from "@adriangalilea/utils/metrics/sqlite"
+import { metricsStore } from "@adriangalilea/utils/metrics/sqlite"
 
 const driver = libsqlDriver(createClient({ url: process.env.METRICS_DATABASE_URL!, authToken: process.env.METRICS_AUTH_TOKEN }))
 const metrics = defineMetrics({
   installCopy: { kind: "counter", label: "install command copies", dimensions: { component: ["chat", "glass"] } },
-}, { write: metricsWriter(driver, "my-project") })
+}, { store: metricsStore(driver, "my-project") })
 
 await metrics.installCopy.bump({ dimensions: { component: "chat" } })
 ```
 
-One SQLite dialect, many stores. `metrics/sqlite` holds the schema, the writer and
+One SQLite dialect, many stores. `metrics/sqlite` holds the schema, the store and
 the readers over a `MetricsDriver`: two verbs, `query(statement)` for rows and
 `transact(statements)` for an all-or-nothing write batch. `metrics/libsql` wraps a
 Turso / libSQL client, `metrics/d1` wraps a Cloudflare D1 binding (`d1Driver(env.DB)`),
 each with the driver's native calls and structural types, so no database client is
 bundled. Any other SQLite driver implements the two verbs in a few lines (the test
-does it over `node:sqlite`). A store that does not speak SQLite implements the
-injected `write(measurement)` contract and its own readers returning the
-`metrics/report` types.
+does it over `node:sqlite`). Readers need only `query`, a `MetricsReader`:
+`metrics/d1-rest` reads a D1 database over Cloudflare's REST API from a process with
+no binding (`d1RestReader({ accountId, databaseId, token })`). A store that does not
+speak SQLite implements the `MetricsStore` contract, `declare(schema)` and
+`write(measurement)`, and its own readers returning the `metrics/report` types.
 
-Provision the exported `METRICS_SCHEMA` once before collecting. `describe()` returns
-the declarations; the writer stores labels beside daily counters so reports
-discover metrics without another hardcoded list. `readMetrics(driver, { from, to,
-project? })` returns daily rows with labels and dimensions, using inclusive UTC dates.
-`readAudience(driver, { from, to, project }, describe().overlaps)` answers who did it
-from the opt-in per-user rows: per key, distinct actors, actors with more than one
-sample on a single day, actors seen on more than one day, then each declared
-overlap as `fromUsers` and `bothUsers`. Readers propagate database errors rather
-than presenting missing data as zero.
+**The store describes itself.** `declare` runs once per process before the first
+sample and carries the whole schema: kinds, labels, help, units, per-user flags and
+overlaps. Every later sample is one small transaction. A reader therefore never needs
+the declaring code: `readSchema(reader, project)` returns what a project declared,
+and `readReport(reader, { project, days, includeToday? })` returns everything a panel
+renders in one call, `{ project, window, schema, daily, audience }`. A changed kind or
+unit is refused at declaration and every sample of that process fails loudly; a store
+that was briefly away is asked again by the next sample.
+
+Provision the exported `METRICS_SCHEMA` once before collecting. `readMetrics(reader,
+{ from, to, project? })` returns daily rows with labels and dimensions, using inclusive
+UTC dates. `readAudience(reader, { from, to, project }, schema)` answers who did it
+from the opt-in per-user rows: one row per declared per-user metric (zeros when nobody
+touched it), with distinct actors, actors with more than one sample on a single day,
+actors seen on more than one day, then each declared overlap as `fromUsers` and
+`bothUsers`. Readers propagate database errors rather than presenting missing data
+as zero.
 `summarizeMetrics(rows)` from `metrics/report` produces one generic report shape;
 `renderMetrics(rows, { daily? })` from `metrics/cli` renders it with the existing
 ANSI-aware `cli.table` helpers. Both discover every recorded metric from its
@@ -52,8 +62,7 @@ disappearing series, count changes and weighted timing-average changes. Percent
 change is null without a nonzero baseline; missing timing samples stay null.
 Changing a metric's kind or unit across the inputs is rejected. Missing observations
 are not proof that collection was running: deltas compare recorded data only.
-The writer rejects changes to an existing key's kind or unit atomically, before
-adding observations. Use a new key for a new meaning; labels and help can be edited.
+Use a new key for a new meaning; labels, help and the per-user flag can be edited.
 
 Measurements validate finite nonnegative samples, positive integer counts, and
 declared dimension values. Calls resolve even when validation or storage fails;
@@ -68,15 +77,16 @@ Enable it only with a deletion and retention policy; no identity is inferred.
 `overlaps: [["a", "b"]]` declares unordered audience overlap, not an ordered funnel.
 Daily totals support counts and averages, not percentile latency or event ordering.
 
-**5.0 migration:** `sqliteMetricsWriter(client, project)` and `MetricsDatabase` are
-gone. Wrap the client in a driver, `libsqlDriver(client)` or `d1Driver(binding)`, and
-pass it to `metricsWriter(driver, project)`, `readMetrics(driver, …)` and the new
-`readAudience(driver, …)`. A private store with its own tables moves its rows into
-`METRICS_SCHEMA` (`project`, `key`, `dimensions` as `'{}'` when it had none, `day`,
-`user` as text) and seeds `metric_definition` for the keys it already holds, or the
-history stays invisible to `readMetrics` until each key's first write. Metric keys and
-dimensions are storage identifiers: introduce a new key when changing meaning rather
-than relabelling history.
+**6.0 migration:** `defineMetrics` takes `store: metricsStore(driver, project)` instead
+of `write: metricsWriter(...)`; a custom store implements `declare` and `write`, and
+`Measurement` no longer carries `spec`. Existing tables gain a column and a table:
+`ALTER TABLE metric_definition ADD COLUMN per_user INTEGER NOT NULL DEFAULT 0` and the
+`metric_overlap` table from `METRICS_SCHEMA`; the first sample after the deploy
+declares the real flags, labels and overlaps. `readAudience` takes the schema
+(`readSchema(reader, project)`) instead of an overlap list and returns a row per
+declared per-user key. `readReport` replaces hand-rolled window + rows + audience
+composition. Metric keys and dimensions are storage identifiers: introduce a new key
+when changing meaning rather than relabelling history.
 
 ## Installation
 
