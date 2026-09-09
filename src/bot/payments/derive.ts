@@ -195,9 +195,9 @@ export const buildPaymentsDerive = ({
 							},
 							lang,
 						);
-			// Deep-link into our menuItem (id='pay') via botMenu's
-			// shared menuNavCb schema. v1 opens VIP root; deep-linking to
-			// a specific rung is a v2 TODO (see CLAUDE.md).
+			// Deep-link into our menuItem (id='pay') via botMenu's shared
+			// menuNavCb schema, which addresses a menu item, not a rung
+			// inside one: the button opens the VIP root.
 			const button = say(
 				{ en: "💎 Open VIP plans", es: "💎 Ver planes VIP" },
 				lang,

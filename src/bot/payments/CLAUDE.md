@@ -424,7 +424,7 @@ charge log. Telegram doesn't push expiry events; we compute.
 | Telegram clock-skew on `subscription_expiration_date` | Trust Telegram's value; sweep tolerates ±1h |
 | `successful_payment` payload corrupted | Charge fulfilled but unattributable → admin DM alert; future flow disabled until investigated |
 
-### What's NOT in v1 (and why)
+### Deliberately out of scope (and why)
 
 | Feature | Reason |
 |---|---|
@@ -434,7 +434,7 @@ charge log. Telegram doesn't push expiry events; we compute.
 | Per-user Spanish facturas | One factura per Fragment payout is cleaner (§4). Re-evaluate at scale. |
 | Annual subscriptions | Telegram supports only `period: '30d'`. Build N×30d manually if ever needed. |
 | Token-usage-based credit deduction | The `llm` module's `end` event carries usage + costUsd already; wire `ctx.payments.credits` to it when a bot wants metered billing. Fixed-cost-per-call works now. |
-| Deep-linking `require()` → exact menu rung | v1 opens VIP root; deep-link is a follow-up (TODO marker in `plugin.ts`). |
+| Deep-linking `require()` → exact menu rung | `menuNavCb` addresses a menu item, not a rung inside one, so the upgrade button opens the VIP root. |
 
 ### File layout
 

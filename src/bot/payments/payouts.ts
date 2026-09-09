@@ -147,9 +147,9 @@ const filterPayoutsInWindow = (
  * Build the payout-only dataset for a time window. Returns every
  * `PayoutRecord` whose `[fromMs, toMs]` overlaps the requested window.
  *
- * The `charges` field is intentionally empty — without a global charge
- * index (v2 TODO) we can't enumerate every user's charges from one
- * call. Use `exportPayoutsForUsers` with an explicit user-id list.
+ * The `charges` field is empty: charge indexes are per user, so no
+ * single call can enumerate everybody's. Use `exportPayoutsForUsers`
+ * with an explicit user-id list.
  */
 export const exportPayouts = async (
 	bot: AnyBot,

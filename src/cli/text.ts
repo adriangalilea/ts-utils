@@ -39,9 +39,8 @@ const ANSI_SPLIT_RE = /(\x1b\[[0-9;]*m)/;
 // Grapheme clusters, not code points: what the terminal renders as ONE symbol
 // (ZWJ emoji 👨‍👩‍👧, flags 🇪🇸, skin tones) is several code points — counting
 // pieces breaks alignment.
-// TODO: East-Asian width — CJK and wide emoji occupy TWO terminal cells but
-// count as one here, so CJK-heavy columns can drift a cell; needs a wcwidth
-// range table.
+// CJK and wide emoji occupy TWO terminal cells but count as one here, so
+// CJK-heavy columns drift by a cell per wide grapheme.
 const GRAPHEMES = new Intl.Segmenter();
 
 /** Visible width of a string — ANSI escapes stripped, counted by grapheme cluster. */
