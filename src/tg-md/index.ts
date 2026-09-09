@@ -53,9 +53,8 @@ export function tidyRichMarkdown(raw: string): string {
  *   `` `code` `` -> `<code>`; links -> `<a>`
  * Only `*`-based emphasis is honored (never `_`), so `snake_case` survives. Every tag
  * is balanced, so Telegram can't reject the message; unmatched markers stay literal.
- * The spacing is the legacy tghtml contract (now @adriangalilea/utils/tg-html): every
- * heading is followed by a blank line so sections breathe — a heading hugging its
- * bullets reads as a wall.
+ * Spacing follows the same contract as `tg-html`: every heading is followed by a
+ * blank line so sections breathe — a heading hugging its bullets reads as a wall.
  */
 export function markdownToTelegramHtml(markdown: string): string {
 	const lines = tidyRichMarkdown(markdown).split(/\r?\n/);
@@ -112,8 +111,8 @@ export function markdownToTelegramHtml(markdown: string): string {
 		if (heading) {
 			const level = heading[1].length;
 			const text = inlineMd(heading[2]);
-			// ###### is the source footer: metadata, not a heading — it renders as a quiet
-			// plain line (the legacy look), never bold.
+			// ###### is the source footer: metadata, not a heading — it renders as a
+			// quiet plain line, never bold.
 			if (level === 1) out.push(`<b><u>${text}</u></b>`, "");
 			else if (level === 6) out.push(text);
 			else out.push(`<b>${text}</b>`, "");
@@ -261,7 +260,7 @@ function insertCover(out: string[], url: string | undefined): void {
 }
 
 /** Normalize rendered HTML: strip trailing whitespace, collapse blank-line runs. Blank lines
- *  around lists stay — that air is the layout (the legacy look); only runs of 3+ collapse. */
+ *  around lists stay — that air is the layout; only runs of 3+ collapse. */
 function tidyHtml(html: string): string {
 	return html
 		.replace(/[ \t]+\n/g, "\n")

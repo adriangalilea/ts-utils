@@ -260,9 +260,8 @@ up. `Plugin` already does this internally.
 ## Building blocks — the four utilities every plugin uses
 
 When writing a new `bot/*` plugin, reach for these instead of
-reinventing storage / context / callback boilerplate. Adopted by
-`bot/payments` (and migrating to the others); they exist for the
-specific frictions called out above.
+reinventing storage / context / callback boilerplate. They exist for
+the specific frictions called out above.
 
 ### `bot/storage` — typed storage with bot-id namespacing
 

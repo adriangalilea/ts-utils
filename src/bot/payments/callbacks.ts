@@ -70,13 +70,11 @@ export const buildWaiverConsentHandler =
 			lang,
 		);
 
-		// Acknowledge the tap with a toast, then DELETE the consent
-		// prompt entirely. Previously we edited the body to
-		// "✅ Consent recorded. Sending invoice…" which goes stale the
-		// moment the invoice payment sheet appears underneath — visible
-		// noise in the chat history forever after. The toast confirms
-		// what happened; the user's next interaction is the Telegram
-		// payment sheet itself.
+		// Acknowledge the tap with a toast, then DELETE the consent prompt
+		// entirely. Editing its body instead leaves a message that goes
+		// stale the moment the payment sheet opens underneath, and stays
+		// in the chat history forever. The toast confirms what happened;
+		// the next thing the user sees is the payment sheet itself.
 		await c.answer({
 			text: say(
 				{ en: "✅ Consent recorded.", es: "✅ Consentimiento registrado." },

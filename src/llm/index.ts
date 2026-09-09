@@ -527,8 +527,8 @@ export class Llm {
 	}
 
 	// One AI SDK model instance per attempt, by wire dialect. An `openai`
-	// entry pointed at openrouter.ai is upgraded to the openrouter provider so
-	// legacy configs keep typed cost accounting.
+	// entry pointed at openrouter.ai resolves to the openrouter provider,
+	// which is what reports a billed cost per request.
 	private modelFor(provider: ProviderConfig, req: ChatRequest): LanguageModel {
 		const type = dialectOf(provider);
 		if (type === "openrouter") {
@@ -698,9 +698,9 @@ export class Llm {
 	}
 }
 
-// The wire dialect actually used for an attempt: an `openai` entry pointed at
-// openrouter.ai upgrades to the openrouter provider so legacy configs keep
-// typed cost accounting.
+// The wire dialect actually used for an attempt. An `openai` entry pointed at
+// openrouter.ai resolves to the openrouter provider: the wire is the same, but
+// only that provider reports the billed cost of a request.
 function dialectOf(provider: ProviderConfig): ProviderConfig["type"] {
 	if (provider.type !== "openai" || !provider.baseUrl) return provider.type;
 	try {

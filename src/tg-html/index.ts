@@ -18,10 +18,9 @@
  *   stray < >                 → escaped, never eaten
  *
  * Zero dependencies, no DOM: a single-pass tokenizer over a small recursive
- * renderer, safe everywhere (Workers included). Successor of the standalone
- * `tghtml` package (jsr:@adriangalilea/tghtml, now archived), with its lossy
- * edge cases fixed: `x<5 and y>10` escapes instead of vanishing, and unknown
- * tags drop their markup instead of leaking `small…/small` fragments.
+ * renderer, safe everywhere (Workers included). Nothing is ever eaten:
+ * `x<5 and y>10` escapes rather than vanishing, and an unknown tag drops its
+ * markup while keeping its content.
  *
  * @example
  * import { transform } from '@adriangalilea/utils/tg-html'

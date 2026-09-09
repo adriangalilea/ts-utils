@@ -133,7 +133,7 @@ export type BotRecord<T> = {
  *   await charges.set(ctx, chargeId, charge)
  *   const c = await charges.get(ctx, chargeId)
  *
- * @example  without a validator (backwards-compatible behaviour)
+ * @example  without a validator
  *
  *   const charges = botRecord<ChargeRecord>(storage, 'pay:charge')
  *   const c = await charges.get(ctx, chargeId)  // typed but unchecked
