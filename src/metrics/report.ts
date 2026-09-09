@@ -142,6 +142,10 @@ export function summarizeMetrics(rows: readonly DailyMetric[]): MetricTotal[] {
 			sum: 0,
 			average: null,
 		};
+		if (total.kind !== row.kind || total.unit !== row.unit)
+			throw new Error(
+				`metrics: changed meaning for ${row.project}.${row.key}; use a new key`,
+			);
 		total.count += row.count;
 		total.sum += row.sum;
 		total.average =

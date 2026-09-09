@@ -37,6 +37,8 @@ disappearing series, count changes and weighted timing-average changes. Percent
 change is null without a nonzero baseline; missing timing samples stay null.
 Changing a metric's kind or unit across the inputs is rejected. Missing observations
 are not proof that collection was running: deltas compare recorded data only.
+The SQL writer rejects changes to an existing key's kind or unit atomically, before
+adding observations. Use a new key for a new meaning; labels and help can be edited.
 The SQL adapter accepts a libSQL-compatible client; D1 or another store can implement
 the injected `write(measurement)` contract instead. No database client is bundled.
 

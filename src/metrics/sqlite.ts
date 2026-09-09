@@ -28,7 +28,9 @@ export function sqliteMetricsWriter(db: MetricsDatabase, project: string) {
 		const dimensions = JSON.stringify(m.dimensions);
 		const statements = [
 			{
-				sql: `INSERT INTO metric_definition VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(project, key) DO UPDATE SET kind=excluded.kind, label=excluded.label, help=excluded.help, unit=excluded.unit`,
+				// NOT NULL makes a changed kind/unit fail the whole atomic batch, including counts.
+				// Labels/help may evolve, but historical measurements must retain their meaning.
+				sql: `INSERT INTO metric_definition VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(project, key) DO UPDATE SET kind=CASE WHEN kind=excluded.kind THEN kind ELSE NULL END, label=excluded.label, help=excluded.help, unit=CASE WHEN unit=excluded.unit THEN unit ELSE NULL END`,
 				args: [
 					project,
 					m.key,

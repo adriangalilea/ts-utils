@@ -191,6 +191,33 @@ assert.equal(
 	null,
 );
 assert.throws(() => compareMetrics([timing], [{ ...timing, unit: "seconds" }]));
+assert.throws(() => summarizeMetrics([timing, { ...timing, unit: "seconds" }]));
+const strictWriter = sqliteMetricsWriter(db, "ui");
+for (const changed of [
+	{ kind: "counter", unit: "ms" },
+	{ kind: "timing", unit: "s" },
+] as const) {
+	await assert.rejects(
+		strictWriter({
+			key: "latency",
+			day: "2026-09-08",
+			count: 1,
+			sum: 1,
+			dimensions: {},
+			spec: { ...changed, label: "changed" },
+		}),
+	);
+}
+const preserved = await readMetrics(db, {
+	from: "2026-09-08",
+	to: "2026-09-08",
+	project: "ui",
+});
+assert.deepEqual(
+	preserved,
+	rows,
+	"incompatible declarations roll back metadata and observations together",
+);
 const canonical = compareMetrics(
 	[{ ...counter, dimensions: { a: "1", b: "2" } }],
 	[{ ...counter, dimensions: { b: "2", a: "1" } }],
