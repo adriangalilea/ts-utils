@@ -17,7 +17,7 @@ optional** — install only what the subpaths you import need.
 | `bot/inline-feedback` | `inlineFeedbackProbe({ bump, reset, markAlerted, adminIds })` — behavioral tripwire for BotFather's inline FEEDBACK probability (gates `chosen_inline_result`; defaults 0%, silently resets on bot TRANSFER and inline-mode toggling, invisible to `getMe` so `expects` can't see it). Served-with-results counts up via injected storage ops; a chosen event resets; ~25 served with zero chosen → throttled admin DM naming the exact switch and both reset triggers. Never throws into the answer path. |
 | `bot/llm` | The Telegram side of an LLM chatbot; the model side (providers, failover, tools, usage) is `@adriangalilea/utils/llm`. **Output:** `streamChatReply(ctx, events, opts?)` consumes an `AsyncIterable<LlmStreamEvent>` and paints it with Telegram's native draft streaming (`sendMessageDraft` full-frame repaints, ~1/s throttle, keepalive under the ~30s draft TTL), then persists via `ctx.send`, entity-split by `@gramio/split`. Reasoning: `'preview'` (default — thinking lives in the ephemeral draft), `'message'` (also persists as `expandable_blockquote`), `'hidden'`. Upstream `reset` repaints from scratch. Drafts are private-chat-only; elsewhere only the final send happens. **History:** `llmHistory({ session, maxTurns, retentionDays })` decorates `ctx.llm` with `.add / .get / .clear / .all / .clearAll` — per-(user, thread) conversation buffer in OpenAI `ChatMessage` shape, persisted in the shared session record so the menu's 🗑 Forget wipes it automatically; `toModelMessages(ctx.llm.get())` converts it for `llm.stream({ messages })`. Also returns a drop-in `menuItem` ("🗑 Delete this thread") for `botMenu` — wipes the LLM history AND calls `deleteForumTopic` to physically remove the Telegram thread (with all its messages) from the chat, falling back to history-only when no `threadId` is present. |
 | `bot/menu` | `botMenu({ command, description, items, privacy?, personalData?, adminContact, deleteInvocation? })` — `/settings` command + InlineKeyboard router. `deleteInvocation(ctx)` predicate deletes the user's /command message after the menu opens (tidy groups: cleanup mode on + the bot holds the Delete-messages right); best-effort, never blocks the menu. Root view always shows a `🔒 Privacy & data` button that navigates to a submenu with the privacy policy link plus (if `personalData: { storage }`) 🗑 Forget + 📥 Export. `MenuItem` supports `style` (Telegram coloured buttons: `primary` / `success` / `danger`), `refresh` (re-render in place after action so dynamic labels / styles update), `confirm: { prompt }` (one-step confirmation overlay for destructive actions — replacement for `ctx.answer({ show_alert })`), and `Action` returning `void \| string \| Polyglot<string>` (menu plugin owns the single answerCallbackQuery; actions return toasts instead of calling `ctx.answer` directly). `toggleMenuItem({ id, read, write, label: { off, on }, toast? })` builds a boolean-toggle item — dynamic label + auto-`primary` style on ON + `refresh: true` + storage-agnostic. `radioMenuItem({ id, label, header?, choices, isActive, pick, disabledWhen? })` builds ONE-setting-N-values radio submenus (kills cycling toggles and mutually-exclusive toggle pairs): one button per value, chosen wears `success` (green = chosen value; `primary` blue stays navigation), re-rendered on pick; `disabledWhen(ctx, value)` greys a choice out natively (Bot API 10.3 disabled button — no tap fires; explain why in `header`, and still refuse in `pick` for old clients). Action items expose the same as `disabled: Predicate`. Submenu items accept `header` — message text shown while inside that submenu (explainer/legend), deepest wins, root header is the fallback. |
-| `bot/payments` | `botPayments({ session, storage, paysupport, legal, waiver, vip?, credits?, perks? })` — Telegram Stars monetization. Three orthogonal axes: VIP tier ladder (positional `vip.1` / `vip.2` / …), credit packs (`credits.N`), and perks (`perks.<key>`). Decorates `ctx.payments.{atLeast, tier, has, credits, require, invoice}`. Owns the Art. 103(m) TRLGDCU waiver consent flow, `/paysupport` slash command (ToS §6.5), idempotent `successful_payment` fulfillment via `pay:idempotency:{chargeId}`, admin-DM refund approval (mirror of `accessControl`'s pattern), and lazy subscription expiry. Returns `{ plugin, menuItem, payouts, admin, onFulfilled }`: `menuItem` is the drop-in `💎 VIP` entry for `botMenu`; `payouts` is the Fragment payout ledger (`record` / `list` / `export` / `exportForUsers`); `admin.{listCharges, getCharge}` for custom admin commands; `onFulfilled(productKey \| '*', handler)` fires sync hooks after each charge. Stars-only (digital goods can't use third-party providers per ToS §6.2); Crypto Pay deferred (MiCA risk); Stripe-outside-Telegram is a future v2 channel. Full compliance memo in `src/bot/payments/CLAUDE.md`. |
+| `bot/payments` | `botPayments({ session, storage, paysupport, legal, waiver, vip?, credits?, perks? })` — Telegram Stars monetization. Three orthogonal axes: VIP tier ladder (positional `vip.1` / `vip.2` / …), credit packs (`credits.N`), and perks (`perks.<key>`). Decorates `ctx.payments.{atLeast, tier, has, credits, require, invoice}`. Owns the Art. 103(m) TRLGDCU waiver consent flow, `/paysupport` slash command (ToS §6.5), idempotent `successful_payment` fulfillment via `pay:idempotency:{chargeId}`, admin-DM refund approval (mirror of `accessControl`'s pattern), and lazy subscription expiry. Returns `{ plugin, menuItem, payouts, admin, onFulfilled, onRefunded }`: `menuItem` is the drop-in `💎 VIP` entry for `botMenu`; `payouts` is the Fragment payout ledger (`record` / `list` / `export` / `exportForUsers`); `admin.{listCharges, getCharge}` for custom admin commands; `onFulfilled(productKey \| '*', handler)` and `onRefunded(...)` fire hooks after a charge is applied and after an admin-approved refund reverses one. Stars-only (digital goods can't use third-party providers per ToS §6.2); Crypto Pay deferred (MiCA risk); Stripe-outside-Telegram is a future v2 channel. Full compliance memo in `src/bot/payments/CLAUDE.md`. |
 | `bot/storage` | `botRecord<T>(storage, prefix, validator?)` / `botIndex(storage, prefix, { capacity? })` / `botSentinel(storage, prefix)` — typed storage primitives with automatic bot-id namespacing. Validator is structural (`{ parse(unknown): T }`) — zod / valibot / ArkType / hand-rolled all work. Records validate on read; corrupted storage throws `SourcedError({ source: 'storage', operation: 'validate' })` instead of NaN-ing downstream. Index is a capped, prepend-friendly de-duping `string[]`. Sentinel claims an id atomically (boundaries permitting). Used internally by `bot/payments`; available to bot authors for custom plugins. |
 | `bot/ctx` | `BotMessageCtx<S, Api>` / `BotCallbackCtx<S, Query, Api>` / `BotPaymentCtx<S, Api>` / `BotPreCheckoutCtx<Api>` — canonical structural ctx shapes that gramio's real contexts satisfy by duck-typing. `narrow<T>(ctx)` is the documented cast helper. Plugins parameterize with their `Session` shape + strict `Api` (per-method-typed `bot.api`) and stop redeclaring "ctx has session + from + send + …" in every handler. |
 | `bot/keys` | The bot-id key namespace, a **persisted contract** owned in one place: `botId(ctx)` / `botStorageKey(ctx, userId)` → `bot-<id>:<userId>` / `botSubKey(ctx, sub)` → `bot-<id>:<sub>`. Session keying, menu Forget/Export, access records, payments indexes all derive from it; the shape lives in consumers' storage rows and never changes. Pure functions of `ctx.bot.info.id` — Worker-safe. |
@@ -25,6 +25,21 @@ optional** — install only what the subpaths you import need.
 | `bot/groups` | Group-chat identity, plain functions (no plugin, no derive): `chatIdOf(ctx)` (the chat id on ANY ctx flavour), `isGroupChat(ctx)` / `isPrivateChat(ctx)` chat-type predicates, and `isGroupAdmin(ctx, { chatId?, userId? }?)` — the admin check every admin-gated group setting needs, chat/user defaulted from the ctx. Built on `getChatAdministrators` membership, NOT `getChatMember`: in a hidden-member-list group, `getChatMember` on another user rejects `CHAT_ADMIN_REQUIRED` for a non-admin bot, denying every real admin — the admin list stays readable everywhere the bot is present. Every reader resolves BOTH ctx spellings — message ctxs carry `chat`; `CallbackQueryContext` (every inline-button tap) has NO `chat`, only `chatId` + `message.chat` — so gates work identically in handlers and taps; read chat ids via `chatIdOf`, never `ctx.chat?.id`. Accepts real gramio ctxs AND `MenuCtx` with no cast. A miswired ctx (no `bot.api.getChatAdministrators`) panics; an API rejection fails CLOSED (`false`) — it's a permission gate. Policy stays at the call site: `ctx.isAdmin \|\| await isGroupAdmin(ctx)`. Anonymous admins pass BOTH ways: their own message wears the chat in `senderChat` (= proof, no API call; a linked channel's auto-forward wears the channel's id, never equal), and callback taps carry their real user, present in the admin list. |
 | `bot/user` | `userLabel(u)` — the "[name] [@username] [id]" composition every bot re-rolls for admin DMs / logs / access panels, done once: `Ada Lovelace (@ada · 42)`, each missing piece drops (never padded), both gramio spellings read (`firstName` and raw `first_name`). Plain text by design (admin DMs go out without parse_mode; `<`/`&` in names must stay literal). `UserRef` accepts a gramio `from`, a raw payload user, or a stored row. |
 | `bot/callbacks` | `callbackNs("plugin").data("name", { uid: 'number' })` — namespaced `CallbackData` factory with a process-wide collision registry. Repeated registration with the same shape returns the cached schema (HMR / dual-import safe); a second registration with conflicting fields panics. gramio hashes the full name to a 6-char wire prefix regardless of name length, so namespace discipline costs nothing on `callback_data`. |
+| `bot/admin` | `adminContext(admins)` — decorates `ctx.adminId` (the primary admin: the approve/deny and notification target) and `ctx.isAdmin` (any admin). Ids come in POSITIONALLY as a number, an array, or a FUNCTION consulted per update, so a db-backed resolver goes live with no restart. Reads no env and touches no OS, which is what keeps it Worker-safe; a Node bot composes env in at the call site. `parseIdList("123, 456 789")` turns an env string into clean ids. `accessControl` and the payments refund flow declare a gramio dependency on this plugin's name. |
+| `bot/allow-list` | `allowList({ ids?, usernames? })` — stateless gate by id and/or @username, no session, no storage; decorates `ctx.allowed` and you gate in your handlers. `makeAllowList(...)` is the same rule as a bare predicate. The light counterpart to `access-control`. A @username is optional and mutable and the Bot API cannot resolve one to an id ahead of time, so prefer `ids`. |
+| `bot/announce` | The house announcement template as a structure: compose an `Announcement` once (banner, optional Info / New Features / Fixes sections, closer, signature), render it per language, hand the bodies to a broadcast engine. Renders the common Telegram-markdown subset (`# heading`, `- ` bullets, `*italics*`) that bot pipelines already convert to HTML, so no parse_mode is assumed. |
+| `bot/create` | `createBot<S>({ token?, storage?, initial?, admins?, language?, menu?, access?, payments?, handlers?, worker? })` — the composer that builds the storage + session pair ONCE and threads it into every feature, making "must be the same instance" structural instead of a doc warning. Returns `{ build, session, poll, isMain, fetch }`: `poll()` long-polls, `export default app` is a complete Worker, `app.session(ctx)` is the typed accessor for `S`. Storage is an environment decision (D1 binding → `bot/storage-d1`, `BOT_PERSIST` path → sqlite, `redis://` → redis, else announced-ephemeral memory), and boot narrates what it chose. |
+| `bot/lang` | Internal, no subpath: `FALLBACK_LANG`, `ctxLang(ctx)`, `langOfUser(storage, ctx, userId)` and `loadFullRecord` — the language every surface reads and the session record it comes from, owned once so no two plugins can disagree about either. |
+| `bot/notify` | Best-effort admin DMs, fire-and-forget BY CONTRACT (a notification must never take the bot down): `notifyAdmins(bot, adminIds, text, extra?)`, `alertAdminError(bot, adminIds, label, error, throttle?)` rate-limited through a caller-owned `alertThrottle(ms?)` so a failure storm sends one alert per window. Worker-safe: the caller passes the ids. |
+| `bot/profile` | `syncBotProfile(bot, { name?, description?, about?, photo?, commands?, expects?, adminIds? })` — the bot's Telegram-facing identity as CODE rather than BotFather text boxes, localized and reconciled on every boot with a get → compare → set diff per field per language, so an unchanged value costs one read and a cold start is rate-limit-free. What the API cannot set (the token, the inline-mode switch) is declared as an EXPECTATION instead: `getMe` is checked and the admins are DMed when reality disagrees. Never throws. |
+| `bot/reactions` | Which emoji Telegram accepts as a message reaction, and who owns the bot's reaction on a message. `TELEGRAM_REACTIONS` / `isReaction(emoji)` / `reactionsFor(available)` are the accepted set, MEASURED by `scripts/probe-reactions.ts` because the Bot API only reports `available_reactions` for chats that restrict them. `reactionPolicy({...})` arbitrates: `setMessageReaction` REPLACES the bot's whole reaction set, so independent features reacting to one message clobber each other; semantic states with ranks give the message one owner. |
+| `bot/session` | `botSession(opts)` — drop-in replacement for `@gramio/session`'s `session()` that namespaces every key as `bot-<id>:<senderId>` from `ctx.bot.info.id`. Use this instead of `session()`, full stop: several bots on one Redis stay isolated by construction, and every plugin here derives the same prefix internally. |
+| `bot/storage-d1` | A `@gramio/storage` adapter over one Cloudflare D1 table (four methods over JSON). Its `flush()` exists because `@gramio/session` calls `set()` without awaiting and a Worker freezes the isolate the moment `fetch()` returns: hand `flush()` to `ctx.waitUntil`, which `bot/worker` does for you. Typed structurally (prepare → bind → first/run), so no `@cloudflare/workers-types` dependency. |
+| `bot/text` | Telegram outbound-text mechanics: `TELEGRAM_MAX_CHARS`, `fitTelegramText(text, { maxChars?, preserveFinalBlock? })` for deterministic fitting under the limit (keeping a short final source/footer block when asked), and the classifier for Telegram's "message is not modified" edit no-op. Dependency-free, Worker-safe. |
+| `bot/update-identity` | Pure update identity: who an update is from, which conversation it belongs to, what callback data it carries. Dependency-free and Worker-safe, so webhook ingress, durable runners and tests share one routing and deduplication contract. |
+| `bot/updates` | The pending-update queue of a webhook-less token, treated as the destroy-on-read resource it is. PEEK (`getUpdates` with no offset) confirms nothing, so webhook state, pending count and queue head are inspectable at zero risk. DRAIN is write-before-confirm: each raw batch goes to your `onBatch` and is AWAITED before the next call advances the offset, so a crash mid-drain re-delivers the unconfirmed tail. A 409 (webhook registered, or a competing poller) surfaces as a typed error, never a silent retry. |
+| `bot/urls` | Message URL + entity parsing on what Telegram ALREADY parsed: entities carry exact UTF-16 spans, and JS strings are UTF-16. `urlsInMessage` is the load-bearing verb — the visible text scanned by `urlsIn` PLUS `text_link` entities, the hyperlinked words whose URL never appears in the text and which no text scanner can see. Returns the same `Url` objects as `universal/url`, spans indexing the message text. |
+| `bot/worker` | The Cloudflare Worker cap: `POST /` (webhook, secret-token checked, acked immediately with the update riding `ctx.waitUntil`, or persisted into a per-conversation Durable Object first when `durableUpdates` is set), `POST /setup` (registers the webhook with `allowed_updates` DERIVED from the bot's handlers), plus pause and deploy-DM endpoints. The workerd twin of `bot/kit`'s `gracefulStart`. |
 
 Implementation files are flat under `src/bot/`. There is no barrel: every
 module is reached by its own subpath, so a bot pays only for what it imports.
@@ -35,7 +50,9 @@ module is reached by its own subpath, so a bot pays only for what it imports.
 import { Bot } from 'gramio'
 import { redisStorage } from '@gramio/storage-redis'
 
-import { adminContext, botSession, gracefulStart } from '@adriangalilea/utils/bot/kit'
+import { adminContext } from '@adriangalilea/utils/bot/admin'
+import { botSession } from '@adriangalilea/utils/bot/session'
+import { gracefulStart } from '@adriangalilea/utils/bot/kit'
 import { accessControl } from '@adriangalilea/utils/bot/access-control'
 import { coalesceLongMessages } from '@adriangalilea/utils/bot/coalesce'
 import { llmHistory, streamChatReply, toModelMessages } from '@adriangalilea/utils/bot/llm'
@@ -440,9 +457,6 @@ runs once per update.
 
 ### Why this and not separate sessions per plugin
 
-This was the longest design conversation of this package, with many false
-starts. The summary is below; the full evolution is in [§ Design journey](#design-journey).
-
 `@gramio/session` is a Plugin named `"@gramio/session"`. gramio's plugin
 extension uses [registration-time deduplication](https://gramio.dev/extend/middleware.html#production-architecture):
 the first `.extend(p)` with a given name wins, subsequent ones with the same
@@ -463,6 +477,11 @@ bot.extend(withUser)        // ← FIRST: derive writes ctx.user to the real ctx
 ```
 
 That's exactly our `userSession` pattern, applied to the session plugin.
+
+It is also why the menu has no per-plugin dataSource registry and nothing to
+cascade-delete: every plugin writes into ONE record, so a single
+`storage.delete(botStorageKey(ctx, userId))` wipes all of it and /export
+reads the same row.
 
 ### Cross-user mutations
 
@@ -509,13 +528,17 @@ always have a human escape hatch.
 
 ## Per-plugin notes
 
-### `kit.ts` — `adminContext` + `gracefulStart`
+### `admin.ts` — `adminContext`
 
-- `adminContext` resolves admin id via `kev.int('TELEGRAM_ADMIN_ID',
-  opts.adminId ?? 0)`. KEV reads process.env → .env (auto-discovered project
-  and monorepo root) → fallback. Cached after first read. `kev.int` throws on
-  non-int strings so a malformed env screams immediately rather than
-  producing NaN downstream.
+- `adminContext(admins)` takes the ids POSITIONALLY: a number, an array,
+  or a function consulted per update (a db-backed resolver goes live with
+  no restart). It reads no env and touches no OS, which is what keeps it
+  Worker-safe; a Node bot composes env in at the call site
+  (`adminContext(kev.int('TELEGRAM_ADMIN_ID', 123456789))`).
+- `parseIdList(raw)` turns a `"123, 456 789"` env string into clean ids.
+
+### `kit.ts` — `gracefulStart`
+
 - `gracefulStart` accepts `AnyBot` because after `.extend()` chains the
   concrete Bot type is a heavily-parameterised union; `Bot` (bare) won't
   accept it.
@@ -602,103 +625,9 @@ and tools all live in the `llm` module — nothing here talks to a model.
 - Items are a tree (`action` / `url` / `submenu` variants). Custom items
   inline alongside built-in feature items (`lang.menuItem`).
 - /forget and /export operate on the whole shared session record — no
-  per-plugin dataSource registry. Simpler than the earlier design (see
-  [§ Design journey](#design-journey)).
+  per-plugin dataSource registry (see [§ Why this and not separate sessions
+  per plugin](#why-this-and-not-separate-sessions-per-plugin)).
 - `adminContact` is required for honest error reporting on /export failure.
-
----
-
-## Design journey
-
-These plugins went through five real iterations. Documented here so we don't
-re-litigate.
-
-### Iteration 1: each plugin extends its own `session()`
-
-The first attempt had each plugin internally call `session({ key:
-'_pluginName', getSessionKey: ... })` and declare derives via the Plugin
-generic. Looked clean in isolation: each plugin self-contained, no shared
-state for the user to wire.
-
-**It didn't work.** Runtime symptom: `ctx._historySession` and `ctx.settings`
-were `undefined` inside their respective plugins, while `ctx._accessSession`
-(from the first-extended plugin) worked fine.
-
-Root cause: **gramio dedupes plugin extensions by name**. `session()` always
-produces a Plugin named `"@gramio/session"`. The first one through wins; the
-rest are runtime no-ops. The docs call this out as the
-[dedup gotcha](https://gramio.dev/extend/middleware.html#the-dedup-gotcha)
-but don't spell out the consequence for the session plugin specifically.
-
-### Iteration 2: `uniqueSession` — patch the session plugin's internal name
-
-To dodge the dedup, I wrote a helper that mutated `plugin._.name` and
-`plugin._.composer['~'].name` after construction to make each session
-plugin's dedup key unique. It worked. The bot ran. All three sessions
-coexisted on `ctx`.
-
-But: tocaba propiedades internas de gramio que ningún public API expone. If
-gramio renames or restructures those fields, the helper breaks silently. The
-fact that this hack was needed at all signalled we were fighting the
-framework, not using it.
-
-### Iteration 3: shared session at the bot level (intermediate)
-
-The gramio docs actually solve this. Their canonical
-"[`withUser`](https://gramio.dev/extend/middleware.html#production-architecture)"
-pattern: extend the shared infrastructure ONCE at the bot level, then have
-sub-routers/plugins declare it as a dep. Runtime dedups the inner extensions,
-TypeScript flows the types.
-
-Applied to session: the user creates `userSession = session(...)` once,
-passes a reference into each plugin (`language({ session: userSession,
-... })`), and each plugin's internal `.extend(opts.session)` is the
-duplicate-but-types-flow declaration.
-
-This is what we shipped. Three options were considered before settling on
-it; see [§ Options explored](#options-explored).
-
-### Iteration 4: storage-direct (rejected)
-
-The honest alternative to session was: drop `@gramio/session` entirely,
-have each plugin do `await storage.get(key)` and `await storage.set(key,
-value)` in its derives. No name collision, no internal hacks.
-
-Rejected because:
-
-- Loses the auto-persist Proxy ergonomics inside the plugin (`ctx.session.x
-  = y` triggers persistence vs explicit `await storage.set(...)`).
-- For the consumer, the user-facing `ctx.lang` / `ctx.llm` types are the
-  same either way — but storage-direct adds 2 reads per update where session
-  caches.
-- We're not really avoiding session; we'd be re-implementing it badly. The
-  shared-session pattern is the framework's intended answer.
-
-### Iteration 5: shared session, plugins as dependents
-
-Final design. Same as iteration 3, refined: each plugin takes `session` as
-a required option, declares it as `.extend(opts.session)` for type flow,
-runtime dedup means the session derive only fires once per update. /forget
-and /export operate on the whole session record via storage directly.
-
-### Options explored (named for posterity)
-
-| Option | What | Why rejected (if applicable) |
-|---|---|---|
-| Each plugin has its own internal `session()` | Self-contained | Dedup gotcha — only first one runs |
-| Patch session internals (`uniqueSession`) | Self-contained, runs | Fights framework, touches internals |
-| Single big `session()` with all fields baked in | User wires fields upfront | User has to know every plugin's shape |
-| Drop `@gramio/session`, storage-direct | No dedup, no Proxy | Re-implementing session, loses ergonomics |
-| **Shared session passed to each plugin** | gramio idiom, types flow, simple | _shipped_ |
-
-### Why menu doesn't need a dataSource registry
-
-The earlier design had each plugin expose a `{ kind, delete, read }`
-descriptor that the menu collected for cascade-delete and aggregated for
-/export. With shared session, there's nothing to cascade: every plugin's
-data is in the same record, one `storage.delete(sessionKey(userId))` wipes
-everything. The registry was solving a problem that doesn't exist in the
-final architecture.
 
 ---
 

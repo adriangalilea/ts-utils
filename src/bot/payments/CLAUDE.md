@@ -17,11 +17,9 @@ re-deriving from scratch.
 ```ts
 import { Bot } from 'gramio'
 import { redisStorage } from '@gramio/storage-redis'
-import {
-  adminContext,
-  botSession,
-  gracefulStart,
-} from '@adriangalilea/utils/bot/kit'
+import { adminContext } from '@adriangalilea/utils/bot/admin'
+import { gracefulStart } from '@adriangalilea/utils/bot/kit'
+import { botSession } from '@adriangalilea/utils/bot/session'
 import { language } from '@adriangalilea/utils/bot/language'
 import { botMenu } from '@adriangalilea/utils/bot/menu'
 import { botPayments } from '@adriangalilea/utils/bot/payments'
