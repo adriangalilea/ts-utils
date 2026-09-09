@@ -26,8 +26,8 @@ optional** — install only what the subpaths you import need.
 | `bot/user` | `userLabel(u)` — the "[name] [@username] [id]" composition every bot re-rolls for admin DMs / logs / access panels, done once: `Ada Lovelace (@ada · 42)`, each missing piece drops (never padded), both gramio spellings read (`firstName` and raw `first_name`). Plain text by design (admin DMs go out without parse_mode; `<`/`&` in names must stay literal). `UserRef` accepts a gramio `from`, a raw payload user, or a stored row. |
 | `bot/callbacks` | `callbackNs("plugin").data("name", { uid: 'number' })` — namespaced `CallbackData` factory with a process-wide collision registry. Repeated registration with the same shape returns the cached schema (HMR / dual-import safe); a second registration with conflicting fields panics. gramio hashes the full name to a 6-char wire prefix regardless of name length, so namespace discipline costs nothing on `callback_data`. |
 
-Implementation files are flat under `src/bot/`. `index.ts` is the barrel for
-`@adriangalilea/utils/bot`.
+Implementation files are flat under `src/bot/`. There is no barrel: every
+module is reached by its own subpath, so a bot pays only for what it imports.
 
 ## Standard wiring
 

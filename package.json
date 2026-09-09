@@ -64,10 +64,6 @@
 			"types": "./dist/tg-md/index.d.ts",
 			"default": "./dist/tg-md/index.js"
 		},
-		"./bot": {
-			"types": "./dist/bot/index.d.ts",
-			"default": "./dist/bot/index.js"
-		},
 		"./bot/access-control": {
 			"types": "./dist/bot/access-control.d.ts",
 			"default": "./dist/bot/access-control.js"

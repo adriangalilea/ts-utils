@@ -5,7 +5,7 @@
  * anywhere in their static import graph, and no import-time side effects
  * that assume an OS. `bot/kit` is the deliberate exception — it owns the
  * Node-only pieces (gracefulStart's process-signal wiring, kev env reads) and
- * is excluded from the safe set on purpose.
+ * sits in NODE_ONLY below.
  *
  * Two layers:
  *   1. Static: BFS the relative-import graph of each safe entry in dist/,
@@ -18,53 +18,26 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-const DIST = resolve(import.meta.dirname, "../dist");
+const ROOT = resolve(import.meta.dirname, "..");
+const DIST = resolve(ROOT, "dist");
 
-// Every subpath a Worker bot consumes. bot/kit and bot/index (which
-// re-exports kit) are intentionally absent.
-const SAFE_ENTRIES = [
-	"bot/ctx.js",
-	"bot/keys.js",
-	"bot/access-control.js",
-	"bot/admin.js",
-	"bot/allow-list.js",
-	"bot/callbacks.js",
-	"bot/coalesce.js",
-	"bot/draft.js",
-	"bot/language.js",
-	"bot/llm.js",
-	"bot/menu.js",
-	"metrics/index.js",
-	"metrics/sqlite.js",
-	"metrics/libsql.js",
-	"metrics/d1.js",
-	"metrics/d1-rest.js",
-	"bot/notify.js",
-	"bot/profile.js",
-	"bot/flags.js",
-	"bot/groups.js",
-	"bot/inline-feedback.js",
-	"bot/user.js",
-	"bot/urls.js",
-	"bot/reactions.js",
-	"bot/session.js",
-	"bot/storage.js",
-	"bot/storage-d1.js",
-	"bot/text.js",
-	"bot/update-identity.js",
-	"bot/worker.js",
-	"bot/create.js",
-	"bot/payments/index.js",
-	"llm/index.js",
-	"say/index.js",
-	"tg-html/index.js",
-	"tg-md/index.js",
-	"offensive.js",
-	"universal/log.js",
-	"universal/url/index.js",
-	"universal/url/sites.js",
-	"browser.js",
-];
+/**
+ * Subpaths that reach Node on purpose: the root barrel and `cli` pull
+ * `platform/` (kev walks the filesystem), `bot/kit` wires process
+ * signals, `metrics/cli` renders through `cli`. Everything else in the
+ * exports map is a Worker surface and is checked below, so a new
+ * subpath is guarded the moment it is published.
+ */
+const NODE_ONLY = new Set([".", "./cli", "./bot/kit", "./metrics/cli"]);
+
+type ExportsMap = Record<string, { default: string }>;
+const { exports: exportsMap } = JSON.parse(
+	readFileSync(resolve(ROOT, "package.json"), "utf8"),
+) as { exports: ExportsMap };
+
+const SAFE_ENTRIES = Object.entries(exportsMap)
+	.filter(([subpath]) => !NODE_ONLY.has(subpath))
+	.map(([, target]) => target.default.replace(/^\.\/dist\//, ""));
 
 const IMPORT_RE = /(?:from|import)\s*\(?\s*["']([^"']+)["']\s*\)?/g;
 
