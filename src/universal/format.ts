@@ -80,8 +80,9 @@ export function withCommas(
 
 /**
  * Bytes → "12.7 TB", "2.0 TB", "850.0 GB", "500.0 MB". Decimal SI prefixes —
- * how drive manufacturers and SMART tools quote capacities (`df -h` too).
- * Below 1 MB the raw byte count is the honest answer.
+ * how drive manufacturers and SMART tools quote capacities (`df -H`; `df -h`
+ * is binary). Below 1 MB the raw byte count is the honest answer. The twin of
+ * go-utils `Bytes`: one rule whichever language prints the figure.
  */
 export function bytes(value: Numberish): string {
 	if (value == null) return NO_DATA;
