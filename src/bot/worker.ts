@@ -544,10 +544,39 @@ export function telegramUpdateRunner<Env>(
 	const fallbackThrottle = alertThrottle();
 
 	return class TelegramUpdateRunner {
+		/** Attempts still running in this instance, by update id; a timed-out one stays until it settles. */
+		private readonly running = new Map<number, Promise<void>>();
+
 		constructor(
 			private readonly state: UpdateRunnerState,
 			private readonly env: Env,
 		) {}
+
+		/**
+		 * The update's work: the attempt still running for it, else a new dispatch.
+		 * A timed-out attempt cannot be cancelled and keeps running here, so a retry
+		 * that dispatched again would do the update twice (send its reply twice); it
+		 * waits for that attempt and settles with it. Only an attempt that settled,
+		 * or ran in an instance that is gone, is dispatched again.
+		 */
+		private work(runtime: BotWorkerRuntime, job: UpdateJob): Promise<void> {
+			const running = this.running.get(job.updateId);
+			if (running) {
+				runnerLog.warn("retry waits for the attempt still running", {
+					update_id: job.updateId,
+					attempt: job.attempts + 1,
+				});
+				return running;
+			}
+			const run = (async () => {
+				await runtime.bot.updates.handleUpdate(job.update);
+				if (runtime.flush) await runtime.flush();
+			})();
+			this.running.set(job.updateId, run);
+			const settle = () => this.running.delete(job.updateId);
+			run.then(settle, settle);
+			return run;
+		}
 
 		async fetch(request: Request): Promise<Response> {
 			if (
@@ -605,16 +634,10 @@ export function telegramUpdateRunner<Env>(
 			let timer: ReturnType<typeof setTimeout> | undefined;
 			try {
 				rt = await resolve(this.env);
-				const runtime = rt;
 				// Bounded attempt (see attemptTimeoutMs): the race rejects into the ordinary
-				// retry/drop machinery. The zombie promise cannot be cancelled - a timed-out
-				// attempt's underlying work may still complete side effects; the dedupe window
-				// and idempotent handlers are what make that tolerable.
+				// retry/drop machinery, and the retry joins the timed-out work (see work).
 				await Promise.race([
-					(async () => {
-						await runtime.bot.updates.handleUpdate(job.update);
-						if (runtime.flush) await runtime.flush();
-					})(),
+					this.work(rt, job),
 					new Promise((_, reject) => {
 						timer = setTimeout(
 							() =>
