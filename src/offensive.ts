@@ -176,10 +176,9 @@ export class SourcedError<S extends string = string> extends Error {
 		cause?: unknown;
 		context?: Record<string, unknown>;
 	}) {
-		const status = args.status != null ? ` status=${args.status}` : "";
-		super(`[${args.source}:${args.operation}${status}] ${args.message}`, {
-			cause: args.cause,
-		});
+		// The message is the one given: source, operation and status are fields of
+		// their own, and the logger writes them as such.
+		super(args.message, { cause: args.cause });
 		this.name = "SourcedError";
 		this.source = args.source;
 		this.operation = args.operation;
