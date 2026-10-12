@@ -3,6 +3,7 @@
 // Run: pnpm test:update-runner
 import assert from "node:assert/strict";
 import {
+	afterUpdate,
 	telegramUpdateRunner,
 	type UpdateRunnerState,
 } from "../src/bot/worker.js";
@@ -103,5 +104,55 @@ bot.updates.handleUpdate = async () => {
 };
 await fresh.alarm();
 assert.equal(handled, 1);
+
+// Work handed off with afterUpdate runs past the bound without failing the update:
+// one dispatch, no retry armed, and the idle runner stays alive until it settles.
+const enqueue = (runner: InstanceType<typeof Runner>, update_id: number) =>
+	runner.fetch(
+		new Request("https://runner/enqueue", {
+			method: "POST",
+			body: JSON.stringify({ update_id, message: { text: "x" } }),
+		}),
+	);
+handled = 0;
+let warmed = 0;
+bot.updates.handleUpdate = async (update: unknown) => {
+	handled += 1;
+	const id = (update as { update_id: number }).update_id;
+	afterUpdate(
+		id,
+		sleep(BOUND_MS * 3).then(() => {
+			warmed += 1;
+		}),
+	);
+};
+const handing = memoryState();
+const handingRunner = new Runner(handing, {});
+await enqueue(handingRunner, 100);
+await handingRunner.alarm();
+assert.equal(handled, 1);
+assert.equal(
+	warmed,
+	1,
+	"the idle runner held its alarm until the handed-off work settled",
+);
+assert.equal(handing.alarm === null || handing.alarm <= Date.now(), true);
+
+// A new update ends the hold at once; the handed-off work keeps running.
+warmed = 0;
+await enqueue(handingRunner, 101);
+const held = handingRunner.alarm();
+await sleep(5);
+await enqueue(handingRunner, 102);
+const t0 = Date.now();
+await held;
+assert.ok(
+	Date.now() - t0 < BOUND_MS,
+	"the hold ended when the next update arrived",
+);
+assert.equal(warmed, 0);
+await handingRunner.alarm(); // update 102, then holds for both warm-ups
+assert.equal(handled, 3);
+assert.equal(warmed, 2);
 
 console.log("update-runner: ok");

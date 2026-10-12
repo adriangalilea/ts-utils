@@ -61,6 +61,56 @@ import {
 
 const log = root.scope("bot").scope("worker");
 
+// --- work after the update -------------------------------------------------
+
+/** Work handed off by the update being dispatched, by update id. A slot exists only while a
+ *  dispatcher here runs that update, so nothing is kept for an update nobody collects. */
+const handedOff = new Map<number, Promise<unknown>[]>();
+
+/**
+ * Hand off work that need not finish before the update does: a cache warm-up, a
+ * prefetch, anything the reply does not wait for. The update ends without it, so it
+ * never holds the conversation's next update back and never counts toward the
+ * runner's attempt bound; the dispatcher keeps the Worker alive until it settles
+ * (`waitUntil` on the plain webhook, the runner's own alarm when durable). Outside
+ * those dispatchers (long-poll, a test) the work simply runs. It should handle its
+ * own failures; one that rejects is logged.
+ */
+export function afterUpdate(updateId: number, work: Promise<unknown>): void {
+	handedOff.get(updateId)?.push(work);
+}
+
+/** One update run with its hand-off slot open: `done` settles with the update, `after` then
+ *  resolves to the work it handed off (each logging its own failure). */
+function dispatchUpdate(
+	bot: WorkerBot,
+	flush: (() => Promise<void>) | undefined,
+	update: unknown,
+): { done: Promise<void>; after: Promise<Promise<unknown>[]> } {
+	const updateId = telegramUpdateId(update);
+	if (updateId !== null) handedOff.set(updateId, []);
+	const done = (async () => {
+		await bot.updates.handleUpdate(update);
+		if (flush) await flush();
+	})();
+	const take = () => takeHandedOff(updateId);
+	return { done, after: done.then(take, take) };
+}
+
+function takeHandedOff(updateId: number | null): Promise<unknown>[] {
+	if (updateId === null) return [];
+	const work = handedOff.get(updateId) ?? [];
+	handedOff.delete(updateId);
+	return work.map((w) =>
+		w.catch((error) =>
+			log.error("work after the update failed", {
+				update_id: updateId,
+				err: error,
+			}),
+		),
+	);
+}
+
 /** The slice of a gramio `Bot` the worker cap drives — structural, so versions don't pin. */
 export type WorkerBot = {
 	info?: { username?: string };
@@ -242,11 +292,10 @@ export function botWorkerFetch<Env>(
 				}
 				// Ack Telegram immediately, then keep the Worker alive for the slow
 				// work (avoids GramIO's 30s webhook timeout).
+				const { done, after } = dispatchUpdate(bot, rt.flush, update);
+				ctx.waitUntil(after.then((work) => Promise.all(work)));
 				ctx.waitUntil(
-					(async () => {
-						await bot.updates.handleUpdate(update);
-						if (rt.flush) await rt.flush();
-					})().catch(async (error) => {
+					done.catch(async (error) => {
 						log.error("update failed", { err: error });
 						// awaited so the DM rides the same waitUntil, not a frozen isolate
 						await alertAdminError(
@@ -499,6 +548,10 @@ export interface UpdateRunnerOptions {
 	 *  eventually-dropped failure. Generous by default (slow transcript/LLM work is the point
 	 *  of the alarm design). Default 180s. */
 	attemptTimeoutMs?: number;
+	/** How long an idle runner stays alive for work its updates handed off (`afterUpdate`).
+	 *  A new update ends the wait at once; work still running past it may be evicted with
+	 *  the object. Default 10 min (an alarm invocation may run 15). */
+	afterWorkMs?: number;
 }
 
 const runnerLog = root.scope("bot").scope("update-runner");
@@ -541,11 +594,16 @@ export function telegramUpdateRunner<Env>(
 	const retryMs = options.retryMs ?? [5_000, 30_000];
 	const dedupeLimit = options.dedupeLimit ?? 512;
 	const attemptTimeoutMs = options.attemptTimeoutMs ?? 180_000;
+	const afterWorkMs = options.afterWorkMs ?? 600_000;
 	const fallbackThrottle = alertThrottle();
 
 	return class TelegramUpdateRunner {
 		/** Attempts still running in this instance, by update id; a timed-out one stays until it settles. */
 		private readonly running = new Map<number, Promise<void>>();
+		/** Work handed off by finished updates (`afterUpdate`), until it settles. */
+		private readonly handedOff = new Set<Promise<unknown>>();
+		/** Ends an idle runner's wait on handed-off work: a new update was enqueued. */
+		private wake: (() => void) | undefined;
 
 		constructor(
 			private readonly state: UpdateRunnerState,
@@ -568,14 +626,47 @@ export function telegramUpdateRunner<Env>(
 				});
 				return running;
 			}
-			const run = (async () => {
-				await runtime.bot.updates.handleUpdate(job.update);
-				if (runtime.flush) await runtime.flush();
-			})();
-			this.running.set(job.updateId, run);
-			const settle = () => this.running.delete(job.updateId);
-			run.then(settle, settle);
-			return run;
+			const { done, after } = dispatchUpdate(
+				runtime.bot,
+				runtime.flush,
+				job.update,
+			);
+			this.running.set(job.updateId, done);
+			void after.then((work) => {
+				this.running.delete(job.updateId);
+				for (const w of work) {
+					this.handedOff.add(w);
+					void w.then(() => this.handedOff.delete(w));
+				}
+			});
+			return done;
+		}
+
+		/**
+		 * With no update queued, keep this invocation (and so the object) alive while
+		 * handed-off work runs, until it settles, a new update arrives, or afterWorkMs.
+		 */
+		private async holdForHandedOff(): Promise<void> {
+			if (this.handedOff.size === 0) return;
+			// Armed before the queue is read: an update enqueued in between still wakes it.
+			const woken = new Promise<void>((resolve) => {
+				this.wake = resolve;
+			});
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			if ((await this.state.storage.get<number>(HEAD_KEY)) === undefined) {
+				runnerLog.debug("holding for handed-off work", {
+					work: this.handedOff.size,
+				});
+				await Promise.race([
+					Promise.all([...this.handedOff]),
+					woken,
+					new Promise<void>((resolve) => {
+						timer = setTimeout(resolve, afterWorkMs);
+					}),
+				]);
+			}
+			clearTimeout(timer);
+			this.wake = undefined;
 		}
 
 		async fetch(request: Request): Promise<Response> {
@@ -614,6 +705,7 @@ export function telegramUpdateRunner<Env>(
 			) {
 				await this.state.storage.setAlarm(Date.now());
 			}
+			if (enqueued) this.wake?.();
 			return new Response(JSON.stringify({ enqueued, duplicate: !enqueued }), {
 				headers: { "content-type": "application/json" },
 			});
@@ -696,6 +788,7 @@ export function telegramUpdateRunner<Env>(
 				queued_ms: Date.now() - job.enqueuedAt,
 			});
 			await this.scheduleNext();
+			await this.holdForHandedOff();
 		}
 
 		/** Retire the head job and retain a bounded completed-id window for webhook de-duplication. */
