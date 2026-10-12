@@ -274,14 +274,14 @@
 		"@ai-sdk/anthropic": "^4.0.12",
 		"@ai-sdk/openai-compatible": "^3.0.7",
 		"@biomejs/biome": "2.4.15",
-		"@gramio/format": "^0.8.0",
+		"@gramio/format": "^0.12.1",
 		"@gramio/session": "^0.2.0",
 		"@gramio/split": "^0.0.1",
 		"@gramio/storage": "^2.0.1",
 		"@openrouter/ai-sdk-provider": "^3.0.0",
 		"@types/node": "^24.3.0",
 		"ai": "^7.0.22",
-		"gramio": "^0.14.0",
+		"gramio": "^0.15.1",
 		"tsx": "^4.20.4",
 		"typescript": "^5.9.2",
 		"zod": "^4.4.3"
@@ -295,7 +295,7 @@
 		"@gramio/storage": ">=2.0.0",
 		"@openrouter/ai-sdk-provider": "^3.0.0",
 		"ai": "^7.0.0",
-		"gramio": "^0.14.0",
+		"gramio": "^0.15.0",
 		"zod": ">=3.22"
 	},
 	"peerDependenciesMeta": {
