@@ -44,7 +44,7 @@ let sends = 0;
 let handled = 0;
 const bot = {
 	updates: {
-		handleUpdate: async () => {
+		handleUpdate: async (_update: unknown): Promise<void> => {
 			handled += 1;
 			sends += 1;
 			await sleep(BOUND_MS * 3);
