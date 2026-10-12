@@ -37,8 +37,9 @@
  *     Whether a span is shown is decided once, at begin, by its start's level
  *     against its scope's threshold; the end follows, so a hidden span writes
  *     no end, failed or not. What a hidden span holds attaches to the nearest
- *     shown span: its lines carry that id, its children and its traceparent()
- *     name it. A viewer never meets a missing parent.
+ *     shown span, a joined remote one included: its lines carry that id, its
+ *     children and its traceparent() name it. With no shown ancestor its
+ *     lines carry no ids. A viewer never meets a missing parent.
  *
  * Traces cross processes explicitly
  *     s.traceparent() is the W3C value to hand on (HTTP header, or the
@@ -647,7 +648,10 @@ interface Ctx {
 	readonly trace: string | undefined;
 	/** The span id new spans name as parent_id: the nearest shown span, or a joined remote one. */
 	readonly parent: string | undefined;
-	/** The shown span lines belong to; undefined outside any. */
+	/**
+	 * The shown span lines belong to, local or joined remote. undefined outside
+	 * any span, and on a joined logger itself: only spans join, lines do not.
+	 */
 	readonly owner: string | undefined;
 }
 
@@ -758,10 +762,12 @@ function open(ctx: Ctx, name: string, initial: Fields | undefined): Span {
 			fields,
 		});
 
-	// A filtered span is transparent: what it holds attaches where it would have.
+	// A hidden span is transparent: its lines and children attach to the nearest
+	// shown span, a joined remote one included (it is shown in its own process's
+	// stream). With none, its lines carry no ids, as lines outside any span.
 	const inner: Ctx = shown
 		? { scope: ctx.scope, depth: ctx.depth + 1, trace, parent: id, owner: id }
-		: { scope: ctx.scope, depth: ctx.depth, trace, parent, owner: ctx.owner };
+		: { scope: ctx.scope, depth: ctx.depth, trace, parent, owner: parent };
 
 	return Object.assign(makeLogger(inner), {
 		set(more: Fields): void {

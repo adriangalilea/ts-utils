@@ -31,7 +31,7 @@ const REMOTE_SPAN = "b7ad6b7169203331";
 if (process.env.LOG_TEST_CHILD) {
 	log.info("before any span");
 	log.span("first", (s) => s.info("inside"));
-	log.span("second", () => {});
+	log.span("second", (s) => s.warn("warned inside"));
 	process.exit(0);
 }
 
@@ -430,21 +430,13 @@ log.span("hidden", (h) => {
 	h.error("in a hidden root");
 	h.span("hidden child", (c) => c.error("in its hidden child"));
 });
-log.join(TRACEPARENT).span("hidden", (h) => {
-	assert(
-		h.traceparent() === TRACEPARENT,
-		"hidden joined span hands on the remote",
-	);
-	h.error("in a hidden joined span");
-});
-runtime.deleteEnv("LOG_LEVEL");
 {
 	// Lines in a hidden span with no shown ancestor carry no ids, as lines
 	// outside any span never do.
 	const shown = events();
 	assert(
 		shown.map((e) => e.msg).join("|") ===
-			"in a hidden root|in its hidden child|in a hidden joined span",
+			"in a hidden root|in its hidden child",
 		"hidden spans write only their lines, got",
 		shown.map((e) => e.msg).join("|"),
 	);
@@ -453,10 +445,45 @@ runtime.deleteEnv("LOG_LEVEL");
 			e.phase === undefined &&
 				e.trace_id === undefined &&
 				e.span_id === undefined &&
-				!untimed(JSON.stringify(e)).includes("_id"),
+				!JSON.stringify(e).includes("_id"),
 			"a line in a hidden span with no shown ancestor carries no ids:",
 			JSON.stringify(e),
 		);
+}
+// A joined remote span counts as a shown ancestor: a hidden root under a join
+// gives its lines the remote's ids, its children name the remote as parent,
+// and its traceparent() names the remote.
+runtime.setEnv("LOUD_LOG_LEVEL", "info");
+log.join(TRACEPARENT).span("hidden", (h) => {
+	assert(
+		h.traceparent() === TRACEPARENT,
+		"hidden joined span hands on the remote",
+	);
+	h.error("in a hidden joined span");
+	h.scope("loud").span("shown child", (c) => c.info("in the shown child"));
+});
+runtime.deleteEnv("LOUD_LOG_LEVEL");
+runtime.deleteEnv("LOG_LEVEL");
+{
+	const [line, cStart, cLine, cEnd, ...rest] = events();
+	assert(
+		rest.length === 0,
+		"the hidden joined span writes no events of its own",
+	);
+	assert(
+		line?.msg === "in a hidden joined span" &&
+			line.trace_id === REMOTE_TRACE &&
+			line.span_id === REMOTE_SPAN,
+		"a hidden joined span's line carries the remote's ids:",
+		JSON.stringify(line),
+	);
+	assert(
+		cStart?.phase === "start" &&
+			cStart.trace_id === REMOTE_TRACE &&
+			cStart.parent_id === REMOTE_SPAN,
+		"a hidden joined span's child names the remote as parent",
+	);
+	assert(cLine?.span_id === cStart.span_id && cEnd?.parent_id === REMOTE_SPAN);
 }
 assert(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/.test(hiddenTraceparent));
 runtime.deleteEnv("QUIET_LOG_LEVEL");
@@ -524,7 +551,7 @@ const child = (env: Record<string, string>): LogEvent[] => {
 		.map((l) => unwrap(parseEvent(l), "child line is not an event:", l));
 };
 {
-	const [before, fStart, fLine, fEnd, sStart, sEnd, ...rest] = child({
+	const [before, fStart, fLine, fEnd, sStart, sLine, sEnd, ...rest] = child({
 		TRACEPARENT,
 		LOG_SERVICE: "child",
 	});
@@ -535,6 +562,19 @@ const child = (env: Record<string, string>): LogEvent[] => {
 		assert(s.parent_id === REMOTE_SPAN, "root span under TRACEPARENT's span");
 	}
 	assert(fLine?.span_id === fStart?.span_id && fLine.parent_id === undefined);
+	assert(sLine?.span_id === sStart?.span_id);
+}
+{
+	// Hidden roots under TRACEPARENT: their lines belong to the remote span.
+	const [line, ...rest] = child({ TRACEPARENT, LOG_LEVEL: "warn" });
+	assert(rest.length === 0, "only the warn line shows, got", rest.length);
+	assert(
+		line?.msg === "warned inside" &&
+			line.trace_id === REMOTE_TRACE &&
+			line.span_id === REMOTE_SPAN,
+		"a hidden root under TRACEPARENT gives its lines the remote's ids:",
+		JSON.stringify(line),
+	);
 }
 {
 	const [before, warn, ...rest] = child({ TRACEPARENT: "nonsense" });
@@ -551,13 +591,13 @@ const child = (env: Record<string, string>): LogEvent[] => {
 		"service defaults to the entry script's name",
 	);
 	const spans = rest.filter((e) => e.phase !== undefined);
-	assert(rest.length === 5, "two spans and a line, got", rest.length);
+	assert(rest.length === 6, "two spans and two lines, got", rest.length);
 	assert(
 		spans.every((e) => e.parent_id === undefined),
 		"new traces, no parent",
 	);
 	assert(
-		rest.filter((e) => e.verb === "warn").length === 0,
+		rest.filter((e) => e.msg === "malformed TRACEPARENT ignored").length === 0,
 		"warned only once",
 	);
 }
