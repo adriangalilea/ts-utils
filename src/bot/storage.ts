@@ -49,7 +49,7 @@ import { SourcedError } from "../offensive.js";
 import { log as root } from "../universal/log.js";
 import type { BotIdCtx } from "./ctx.js";
 
-const log = root.scope("bot/storage");
+const log = root.scope("bot").scope("storage");
 
 // ─── shared ────────────────────────────────────────────────────────
 

@@ -32,7 +32,7 @@ import type {
 	WaiverRecord,
 } from "./types.js";
 
-const log = root.scope("bot/payments");
+const log = root.scope("bot").scope("payments");
 
 const cb = callbackNs("pay");
 

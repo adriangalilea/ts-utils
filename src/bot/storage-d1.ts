@@ -25,7 +25,7 @@
 import type { Storage } from "@gramio/storage";
 import { log as root } from "../universal/log.js";
 
-const log = root.scope("bot/storage-d1");
+const log = root.scope("bot").scope("storage-d1");
 
 /** The slice of D1's API this adapter touches — satisfied by a real D1Database binding. */
 export type D1Like = {

@@ -32,7 +32,7 @@ import type {
 } from "./types.js";
 import { renderConsentBody, waiverKeyboard } from "./waiver.js";
 
-const log = root.scope("bot/payments");
+const log = root.scope("bot").scope("payments");
 
 // Telegram caps from the Bot API (sendInvoice §):
 const TITLE_MAX = 32;

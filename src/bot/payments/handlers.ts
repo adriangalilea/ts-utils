@@ -40,7 +40,7 @@ import type {
 	VipRungResolved,
 } from "./types.js";
 
-const log = root.scope("bot/payments");
+const log = root.scope("bot").scope("payments");
 
 // ─── shared types ──────────────────────────────────────────────────
 

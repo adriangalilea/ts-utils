@@ -33,7 +33,7 @@
 import { log as root } from "../universal/log.js";
 import { notifyAdmins } from "./notify.js";
 
-const log = root.scope("bot/profile");
+const log = root.scope("bot").scope("profile");
 
 // Telegram caps, counted in code points so emoji are one glyph each.
 const NAME_MAX = 64;

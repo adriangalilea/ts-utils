@@ -59,7 +59,7 @@ import {
 	telegramUpdatePartition,
 } from "./update-identity.js";
 
-const log = root.scope("bot/worker");
+const log = root.scope("bot").scope("worker");
 
 /** The slice of a gramio `Bot` the worker cap drives — structural, so versions don't pin. */
 export type WorkerBot = {
@@ -501,7 +501,7 @@ export interface UpdateRunnerOptions {
 	attemptTimeoutMs?: number;
 }
 
-const runnerLog = root.scope("bot/update-runner");
+const runnerLog = root.scope("bot").scope("update-runner");
 
 /** The Durable Object surface the factory-built runner class exposes. */
 export type TelegramUpdateRunnerClass<Env> = new (
