@@ -427,15 +427,37 @@ assert(
 let hiddenTraceparent = "";
 log.span("hidden", (h) => {
 	hiddenTraceparent = h.traceparent();
+	h.error("in a hidden root");
+	h.span("hidden child", (c) => c.error("in its hidden child"));
 });
 log.join(TRACEPARENT).span("hidden", (h) => {
 	assert(
 		h.traceparent() === TRACEPARENT,
 		"hidden joined span hands on the remote",
 	);
+	h.error("in a hidden joined span");
 });
 runtime.deleteEnv("LOG_LEVEL");
-assert(events().length === 0, "hidden spans write nothing");
+{
+	// Lines in a hidden span with no shown ancestor carry no ids, as lines
+	// outside any span never do.
+	const shown = events();
+	assert(
+		shown.map((e) => e.msg).join("|") ===
+			"in a hidden root|in its hidden child|in a hidden joined span",
+		"hidden spans write only their lines, got",
+		shown.map((e) => e.msg).join("|"),
+	);
+	for (const e of shown)
+		assert(
+			e.phase === undefined &&
+				e.trace_id === undefined &&
+				e.span_id === undefined &&
+				!untimed(JSON.stringify(e)).includes("_id"),
+			"a line in a hidden span with no shown ancestor carries no ids:",
+			JSON.stringify(e),
+		);
+}
 assert(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/.test(hiddenTraceparent));
 runtime.deleteEnv("QUIET_LOG_LEVEL");
 runtime.deleteEnv("QUIET_LOUD_LOG_LEVEL");
