@@ -44,6 +44,10 @@
 			"types": "./dist/universal/log.d.ts",
 			"default": "./dist/universal/log.js"
 		},
+		"./log/next": {
+			"types": "./dist/next/log.d.ts",
+			"default": "./dist/next/log.js"
+		},
 		"./cli": {
 			"types": "./dist/cli/index.d.ts",
 			"default": "./dist/cli/index.js"
@@ -284,6 +288,9 @@
 		"@types/node": "^24.3.0",
 		"ai": "^7.0.22",
 		"gramio": "^0.15.1",
+		"next": "^16.3.8",
+		"react": "^19.3.0",
+		"react-dom": "^19.3.0",
 		"tsx": "^4.20.4",
 		"typescript": "^5.9.2",
 		"zod": "^4.4.3"
@@ -298,6 +305,7 @@
 		"@openrouter/ai-sdk-provider": "^3.0.0",
 		"ai": "^7.0.0",
 		"gramio": "^0.15.0",
+		"next": ">=15",
 		"zod": ">=3.22"
 	},
 	"peerDependenciesMeta": {
@@ -329,6 +337,9 @@
 			"optional": true
 		},
 		"@gramio/split": {
+			"optional": true
+		},
+		"next": {
 			"optional": true
 		}
 	},
