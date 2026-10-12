@@ -23,7 +23,7 @@
 
 import { panic, SourcedError } from "../../offensive.js";
 import { say } from "../../say/index.js";
-import { scope } from "../../universal/log.js";
+import { log as root } from "../../universal/log.js";
 import type { BotPaymentCtx, BotPreCheckoutCtx } from "../ctx.js";
 import { ctxLang, FALLBACK_LANG } from "../lang.js";
 import { decodePayload } from "./payload.js";
@@ -40,7 +40,7 @@ import type {
 	VipRungResolved,
 } from "./types.js";
 
-const log = scope("bot/payments");
+const log = root.scope("bot/payments");
 
 // ─── shared types ──────────────────────────────────────────────────
 
@@ -118,14 +118,18 @@ const kindOf = (
 export const buildPreCheckoutHandler =
 	(catalog: ProductCatalog) =>
 	async (ctx: PreCheckoutCtx): Promise<void> => {
-		log.success(
-			`pre_checkout_query received: user=${ctx.from.id} currency=${ctx.currency} amount=${ctx.totalAmount} payload="${ctx.invoicePayload}" id=${ctx.id}`,
-		);
+		log.success("pre_checkout_query received", {
+			user: ctx.from.id,
+			currency: ctx.currency,
+			amount: ctx.totalAmount,
+			payload: ctx.invoicePayload,
+			id: ctx.id,
+		});
 		const reject = async (
 			reasonEn: string,
 			reasonEs: string,
 		): Promise<void> => {
-			log.warn(`pre_checkout rejecting: ${reasonEn} (id=${ctx.id})`);
+			log.warn("pre_checkout rejecting", { reason: reasonEn, id: ctx.id });
 			try {
 				await ctx.bot.api.answerPreCheckoutQuery({
 					pre_checkout_query_id: ctx.id,
@@ -136,7 +140,7 @@ export const buildPreCheckoutHandler =
 					error_message: `${reasonEn} · ${reasonEs}`,
 				});
 			} catch (e) {
-				log.error(`answerPreCheckoutQuery(false) failed: ${e}`);
+				log.error("answerPreCheckoutQuery failed", { ok: false, err: e });
 			}
 		};
 
@@ -169,16 +173,18 @@ export const buildPreCheckoutHandler =
 			return;
 		}
 
-		log.success(
-			`pre_checkout approving: product=${decoded.productKey} user=${ctx.from.id} amount=${ctx.totalAmount}`,
-		);
+		log.success("pre_checkout approving", {
+			product: decoded.productKey,
+			user: ctx.from.id,
+			amount: ctx.totalAmount,
+		});
 		try {
 			await ctx.bot.api.answerPreCheckoutQuery({
 				pre_checkout_query_id: ctx.id,
 				ok: true,
 			});
 		} catch (e) {
-			log.error(`answerPreCheckoutQuery(true) failed: ${e}`);
+			log.error("answerPreCheckoutQuery failed", { ok: true, err: e });
 		}
 	};
 
@@ -261,21 +267,25 @@ export const buildSuccessfulPaymentHandler =
 		const payment = ctx.eventPayment?.payload;
 		if (!payment) {
 			log.warn(
-				"successful_payment handler fired but ctx.eventPayment.payload is undefined — gramio context shape changed?",
+				"successful_payment without ctx.eventPayment.payload, gramio context shape changed?",
 			);
 			return;
 		}
 		if (payment.currency !== "XTR") return; // fiat — not ours
 
-		log.success(
-			`successful_payment received: chargeId=${payment.telegram_payment_charge_id} amount=${payment.total_amount} payload="${payment.invoice_payload}" subExpires=${payment.subscription_expiration_date ?? "n/a"}`,
-		);
+		log.success("successful_payment received", {
+			charge_id: payment.telegram_payment_charge_id,
+			amount: payment.total_amount,
+			payload: payment.invoice_payload,
+			subscription_expires: payment.subscription_expiration_date,
+		});
 
 		const decoded = decodePayload(payment.invoice_payload);
 		if (!decoded) {
-			log.error(
-				`successful_payment un-decodable payload — fulfillment skipped: chargeId=${payment.telegram_payment_charge_id} payload="${payment.invoice_payload}"`,
-			);
+			log.error("successful_payment payload undecodable, fulfillment skipped", {
+				charge_id: payment.telegram_payment_charge_id,
+				payload: payment.invoice_payload,
+			});
 			return;
 		}
 		const userId = ctx.from?.id ?? decoded.userId;
@@ -291,17 +301,18 @@ export const buildSuccessfulPaymentHandler =
 			payment.telegram_payment_charge_id,
 		);
 		if (!claimed) {
-			log.info(
-				`successful_payment idempotent no-op: chargeId=${payment.telegram_payment_charge_id} already fulfilled`,
-			);
+			log.info("successful_payment already fulfilled, no-op", {
+				charge_id: payment.telegram_payment_charge_id,
+			});
 			return;
 		}
 
 		const product = opts.catalog.byKey.get(decoded.productKey);
 		if (!product) {
-			log.error(
-				`successful_payment for unknown productKey "${decoded.productKey}" — config drift? chargeId=${payment.telegram_payment_charge_id}`,
-			);
+			log.error("successful_payment for unknown productKey, config drift?", {
+				product_key: decoded.productKey,
+				charge_id: payment.telegram_payment_charge_id,
+			});
 			return;
 		}
 
@@ -315,7 +326,11 @@ export const buildSuccessfulPaymentHandler =
 			// intentionally after the persistence path on purpose to keep
 			// the user whole; the next event will crash.
 			log.error(
-				`CRITICAL: successful_payment without prior waiver — gate bypassed? userId=${userId} chargeId=${payment.telegram_payment_charge_id}`,
+				"CRITICAL: successful_payment without prior waiver, gate bypassed?",
+				{
+					user: userId,
+					charge_id: payment.telegram_payment_charge_id,
+				},
 			);
 		}
 
@@ -334,9 +349,13 @@ export const buildSuccessfulPaymentHandler =
 		// (Idempotency sentinel was already claimed above.)
 		await opts.stores.charges.set(ctx, charge.chargeId, charge);
 		await opts.stores.userCharges(userId).prepend(ctx, charge.chargeId);
-		log.info(
-			`charge persisted: chargeId=${charge.chargeId} product=${charge.productKey} user=${userId} xtr=${charge.xtr} creditsGranted=${charge.creditsGranted}`,
-		);
+		log.info("charge persisted", {
+			charge_id: charge.chargeId,
+			product: charge.productKey,
+			user: userId,
+			xtr: charge.xtr,
+			credits_granted: charge.creditsGranted,
+		});
 
 		// 2. Apply to session (cache). Capture the previous vip chargeId
 		// FIRST so we can cancel its renewal below if this was an upgrade.
@@ -364,13 +383,16 @@ export const buildSuccessfulPaymentHandler =
 					telegram_payment_charge_id: previousVipChargeId,
 					is_canceled: true,
 				});
-				log.info(
-					`auto-canceled previous vip rung ${previousVipRung} on upgrade to ${charge.vipRung} (user=${userId})`,
-				);
+				log.info("auto-canceled previous vip rung on upgrade", {
+					from_rung: previousVipRung,
+					to_rung: charge.vipRung,
+					user: userId,
+				});
 			} catch (e) {
 				// Already canceled, expired, etc. Log; don't block fulfillment.
 				log.warn(
-					`auto-cancel previous vip subscription failed (likely already canceled/expired): user=${userId} previousChargeId=${previousVipChargeId} err=${e instanceof Error ? e.message : String(e)}`,
+					"auto-cancel of the previous vip subscription failed, likely already canceled or expired",
+					{ user: userId, previous_charge_id: previousVipChargeId, err: e },
 				);
 			}
 		}
@@ -394,15 +416,17 @@ export const buildSuccessfulPaymentHandler =
 				try {
 					fn(event, ctx);
 				} catch (e) {
-					log.error(`onFulfilled handler for "${key}" threw: ${e}`);
+					log.error("onFulfilled handler threw", { key, err: e });
 				}
 			}
 		};
 		fireBucket(product.id);
 		fireBucket("*");
-		log.success(
-			`fulfillment complete: product=${product.id} user=${userId} chargeId=${charge.chargeId}`,
-		);
+		log.success("fulfillment complete", {
+			product: product.id,
+			user: userId,
+			charge_id: charge.chargeId,
+		});
 
 		// 6. Sanity-fail AFTER everything has been persisted + the user
 		// has their confirmation — defensive, see CRITICAL log above.

@@ -23,9 +23,9 @@
  * (prepare → bind → first/run), so any D1-shaped binding satisfies it.
  */
 import type { Storage } from "@gramio/storage";
-import { scope } from "../universal/log.js";
+import { log as root } from "../universal/log.js";
 
-const log = scope("bot/storage-d1");
+const log = root.scope("bot/storage-d1");
 
 /** The slice of D1's API this adapter touches — satisfied by a real D1Database binding. */
 export type D1Like = {
@@ -62,10 +62,7 @@ export function d1Storage(opts: D1StorageOptions): FlushableStorage {
 	const pending = new Set<Promise<unknown>>();
 	const track = <T>(promise: Promise<T>): Promise<T | undefined> => {
 		const settled = promise.catch((error) => {
-			log.error(
-				"write failed:",
-				error instanceof Error ? error.message : error,
-			);
+			log.error("write failed", { err: error });
 			return undefined;
 		});
 		pending.add(settled);
@@ -83,10 +80,7 @@ export function d1Storage(opts: D1StorageOptions): FlushableStorage {
 				if (!row) return undefined;
 				return JSON.parse(row.value);
 			} catch (error) {
-				log.error(
-					"read failed:",
-					error instanceof Error ? error.message : error,
-				);
+				log.error("read failed", { err: error });
 				return undefined;
 			}
 		},

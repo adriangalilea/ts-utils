@@ -8,33 +8,35 @@ import {
 
 console.log("\n=== Logger Examples ===\n");
 
-// Basic logging
-log.wait("Loading resources...");
-log.step("resolving config");
-log.info("This is an info message");
-log.success("Operation completed successfully");
-log.warn("This is a warning");
-log.error("This is an error");
-log.fail("Deploy failed");
-log.trace("Trace: function called");
-log.ready("Server is ready");
+// A message, then optional fields
+log.wait("loading resources");
+log.step("resolving config", { path: "./config.toml" });
+log.info("listening", { port: 8080 });
+log.success("migrated", { tables: 12 });
+log.warn("retrying", { attempt: 2 });
+log.error("charge failed", { err: new Error("card declined") });
+log.fail("deploy failed");
+log.trace("selector fired");
+log.ready("server ready");
 
-// Warn once
-log.warnOnce("This warning appears only once");
-log.warnOnce("This warning appears only once"); // Won't show again
+// Once per message and scope
+log.warnOnce("config uses a deprecated key");
+log.warnOnce("config uses a deprecated key");
 
-// Timer
-log.time("dataFetch");
-setTimeout(() => {
-	log.timeEnd("dataFetch");
-}, 100);
+// Scoped logger: lines carry [api], level reads API_LOG_LEVEL first
+const api = log.scope("api");
+api.info("request received", { path: "/charge" });
+api.scope("auth").warn("token expiring", { in_s: 30 }); // [api auth]
 
-// Scoped logger — lines carry [api], level reads API_LOG_LEVEL first
-const apiLogger = log.scope("api");
-apiLogger.info("Request received");
-apiLogger.success("Response sent");
-apiLogger.error("Connection failed");
-apiLogger.scope("auth").warn("token expiring"); // [api auth]
+// A span: what is written through it is indented under it and carries its id
+await log.span("sync", { repo: "ui" }, async (s) => {
+	s.info("cloned", { files: 3 });
+	await s.span("build", async (c) => {
+		c.step("compiling");
+		await new Promise((r) => setTimeout(r, 50));
+	});
+	s.set({ pushed: true });
+});
 
 console.log("\n=== Currency Examples ===\n");
 

@@ -19,7 +19,7 @@
 
 import { panic, SourcedError } from "../../offensive.js";
 import { say } from "../../say/index.js";
-import { scope } from "../../universal/log.js";
+import { log as root } from "../../universal/log.js";
 import { ctxLang, FALLBACK_LANG } from "../lang.js";
 import { encodePayload } from "./payload.js";
 import type {
@@ -32,7 +32,7 @@ import type {
 } from "./types.js";
 import { renderConsentBody, waiverKeyboard } from "./waiver.js";
 
-const log = scope("bot/payments");
+const log = root.scope("bot/payments");
 
 // Telegram caps from the Bot API (sendInvoice §):
 const TITLE_MAX = 32;
@@ -231,17 +231,22 @@ export const sendInvoiceForProduct = async (
 		params.subscription_period = (product as VipRungResolved).periodSeconds;
 	}
 
-	log.success(
-		`sendInvoice → telegram: product=${product.id} user=${userId} xtr=${product.xtr} title="${title}" subscription_period=${params.subscription_period ?? "none"}`,
-	);
+	log.success("sendInvoice sent to telegram", {
+		product: product.id,
+		user: userId,
+		xtr: product.xtr,
+		title,
+		subscription_period: params.subscription_period,
+	});
 	try {
 		await ctx.bot.api.sendInvoice(params);
-		log.success(
-			`sendInvoice accepted by telegram: product=${product.id} user=${userId}`,
-		);
+		log.success("sendInvoice accepted by telegram", {
+			product: product.id,
+			user: userId,
+		});
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e);
-		log.error(`sendInvoice rejected by telegram: ${msg}`);
+		log.error("sendInvoice rejected by telegram", { err: e });
 		// Hint on the specific subscription-export setup gotcha — there's
 		// no documented fix path in gramio/telegram docs, so surface ours.
 		if (msg.includes("SUBSCRIPTION_EXPORT_MISSING")) {
@@ -297,7 +302,7 @@ export const presentInvoice = async (
 ): Promise<PresentInvoiceResult> => {
 	const product = catalog.byKey.get(productKey);
 	if (!product) {
-		log.warn(`presentInvoice unknown productKey "${productKey}"`);
+		log.warn("presentInvoice unknown productKey", { product_key: productKey });
 		const lang = ctxLang(ctx);
 		await ctx.send(
 			say(
@@ -318,9 +323,13 @@ export const presentInvoice = async (
 	const stored = ctx.session?.pay?.waiver;
 	const fresh = stored && stored.version === cfg.waiver.version;
 	if (!fresh) {
-		log.info(
-			`presentInvoice: waiver ${stored ? `stale (${stored.version} ≠ ${cfg.waiver.version})` : "missing"} — sending consent prompt for ${product.id} user=${userId}`,
-		);
+		log.info("presentInvoice sending waiver consent prompt", {
+			waiver: stored ? "stale" : "missing",
+			stored_version: stored?.version,
+			current_version: cfg.waiver.version,
+			product: product.id,
+			user: userId,
+		});
 		const lang = ctxLang(ctx);
 		await ctx.send(renderConsentBody(cfg, lang), {
 			reply_markup: waiverKeyboard(cfg, product.id, lang),
@@ -328,9 +337,10 @@ export const presentInvoice = async (
 		return "waiver_prompt_sent";
 	}
 
-	log.info(
-		`presentInvoice: waiver fresh — going straight to sendInvoice for ${product.id} user=${userId}`,
-	);
+	log.info("presentInvoice waiver fresh, sending invoice", {
+		product: product.id,
+		user: userId,
+	});
 	await sendInvoiceForProduct(ctx, cfg, product, userId);
 	return "invoice_sent";
 };

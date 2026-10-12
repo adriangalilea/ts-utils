@@ -17,9 +17,9 @@ import {
 	table,
 	ui,
 } from "../src/cli/index.js";
-import { scope } from "../src/index.js";
+import { log as root } from "../src/index.js";
 
-const log = scope("sync");
+const log = root.scope("sync");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 type State = "running" | "cooling" | "done";
@@ -97,8 +97,8 @@ async function main(): Promise<void> {
 			set(`connecting ${i}/4 accounts`);
 		}
 	});
-	log.info("main/all: +12 new · 73,202 synced");
-	log.info("adrigd92/all: +31 new · 111,056 synced");
+	log.info("synced", { account: "main/all", new: 12, total: 73_202 });
+	log.info("synced", { account: "adrigd92/all", new: 31, total: 111_056 });
 
 	// Phase 2 — the pinned region. The frame is a plain string built with
 	// table()/ui/widgets; state mutates outside, render() reads it.
@@ -116,14 +116,18 @@ async function main(): Promise<void> {
 			a.done = Math.min(a.total, a.done + Math.random() * 1.5);
 			if (a.done >= a.total) {
 				a.state = "done";
-				log.ready(`${a.alias}: bodies complete`);
+				log.ready("bodies complete", { account: a.alias });
 			}
 		}
 	}, 150);
 
 	// Logs above the live region — the normal logger, no special API.
 	setTimeout(
-		() => log.warn("zapee87: throttled — cooling 3s then auto-retry"),
+		() =>
+			log.warn("throttled, cooling then auto-retry", {
+				account: "zapee87",
+				cool_s: 3,
+			}),
 		1500,
 	);
 	setTimeout(() => {

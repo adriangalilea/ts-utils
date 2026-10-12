@@ -32,7 +32,7 @@
 import { inMemoryStorage, type Storage } from "@gramio/storage";
 import { Bot } from "gramio";
 import { runtime } from "../runtime.js";
-import { scope } from "../universal/log.js";
+import { log as root } from "../universal/log.js";
 import { type AccessControlOptions, accessControl } from "./access-control.js";
 import { type Admins, adminContext } from "./admin.js";
 import { type LanguageOptions, language } from "./language.js";
@@ -47,7 +47,7 @@ import { botSession } from "./session.js";
 import { type D1Like, d1Storage } from "./storage-d1.js";
 import { type BotWorkerRuntime, botWorkerFetch } from "./worker.js";
 
-const log = scope("bot");
+const log = root.scope("bot");
 
 type EnvLike = Record<string, unknown>;
 
@@ -219,7 +219,7 @@ export function createBot<
 			const e = env ?? (runtime.isNode ? (process.env as EnvLike) : {});
 			const bot = new Bot(resolveToken(e));
 			const { storage, kind, flush } = await resolveStorage(e);
-			log.info(`session: ${kind}`);
+			log.info("session storage", { kind });
 
 			// ONE session, threaded everywhere — the composer's whole job.
 			const session = botSession({
@@ -292,7 +292,7 @@ export function createBot<
 							.join("+")})`
 					: null,
 			].filter(Boolean);
-			if (features.length > 0) log.info(`features: ${features.join(" · ")}`);
+			if (features.length > 0) log.info("features", { features });
 
 			return { bot, storage, flush };
 		})();
@@ -335,7 +335,10 @@ export function createBot<
 		async poll() {
 			const { bot } = await build();
 			await bot.start();
-			log.ready(`${opts.name ?? "bot"} polling as @${bot.info?.username}`);
+			log.ready("polling", {
+				bot: opts.name ?? "bot",
+				username: bot.info?.username,
+			});
 		},
 		isMain(meta: ImportMeta): boolean {
 			const main = (meta as { main?: boolean }).main;

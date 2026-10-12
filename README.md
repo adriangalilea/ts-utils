@@ -1,6 +1,6 @@
 # ts-utils
 
-TypeScript utilities - logger, currency, offensive programming, file operations, environment management, and more. The sibling of [swift-utils](https://github.com/adriangalilea/swift-utils), [py-utils](https://github.com/adriangalilea/py-utils), and [go-utils](https://github.com/adriangalilea/go-utils). The logging doctrine the three share, and the harness that proves they emit the same record line, live in [utils](https://github.com/adriangalilea/utils).
+TypeScript utilities - logger, currency, offensive programming, file operations, environment management, and more. The sibling of [swift-utils](https://github.com/adriangalilea/swift-utils), [py-utils](https://github.com/adriangalilea/py-utils), and [go-utils](https://github.com/adriangalilea/go-utils). The logging contract the three share, and the harness that proves they write the same event stream, live in [utils](https://github.com/adriangalilea/utils).
 
 ## Product metrics
 
@@ -87,49 +87,98 @@ pnpm add @adriangalilea/utils
 
 ### Logger
 
-Two renderings, one automatic decision: a TTY gets *human* (symbols, color), anything else gets *record* (level words, plain text, greppable). The same program prints `✓ synced` while you develop it and `2026-08-07T12:34:56Z INFO  synced` the moment launchd points it at a file. Detection happens on the stream actually written to (stderr in Node; stdout stays clean for data).
+A program's logs and traces are one stream of events. A line is an event; a span is a piece of work written as a start and an end; every line written through a span carries its id. go-utils and py-utils write the same stream byte for byte, so their output can be read, merged and traced together. The contract, its JSON schema and the harness that runs all three live in [utils](https://github.com/adriangalilea/utils).
 
 ```typescript
-import { wait, step, error, fail, warn, warnOnce, ready, info, success, debug, trace, scope, time, timeEnd } from '@adriangalilea/utils/log'
+import { log } from '@adriangalilea/utils/log'
 
-// Verbs express outcome; each renders at its level (fail is error-level, the rest info)
-wait('Loading...')          // ○
-step('resolving config')    //   • (indented sub-step)
-info('Information message')
-success('Operation successful')  // ✓
-ready('Server is ready')    // ▶
-warn('This is a warning')   // ⚠
-error('Something went wrong')    // ⨯
-fail('Deploy failed')       // ⨯
-debug('Cache miss')         // ◦
-trace('Trace message')      // »
-
-// Warn once (won't repeat same message)
-warnOnce('This warning appears only once')
-
-// Timer functionality (reports at trace level)
-time('operation')
-// ... do something
-timeEnd('operation') // operation: 123ms
-
-// Scoped logger — lines carry [api], and API_LOG_LEVEL controls it from env
-const api = scope('api')
-api.info('Request received')          //  [api] Request received
-api.scope('auth').warn('token old')   // ⚠ [api auth] token old
+log.info('ready')
+log.warn('retrying', { attempt: 2 })
+log.error('charge failed', { err })
 ```
 
-Levels filter (`silent < error < warn < info < debug < trace`); an unknown `LOG_LEVEL` throws. A scoped logger reads `{SCOPE}_LOG_LEVEL` before `LOG_LEVEL`, live: `GZIP_LOG_LEVEL=silent` shuts one subsystem up without touching code, `GZIP_LOG_LEVEL=trace` opens it wide while the rest stays quiet.
+Every verb takes a message, then optional fields. The message says what happened, the fields say with what. Fields are a plain object; anything else (an `Error`, a string, extra arguments) panics.
 
-Two knobs, both env + runtime setter, both with sane defaults:
+| verb | level | human |
+|---|---|---|
+| `error`, `fail` | error | `⨯` |
+| `warn` | warn | `⚠` |
+| `warnOnce` | warn, once per message and scope (bounded memory) | `⚠` |
+| `info` | info | |
+| `success` | info | `✓` |
+| `wait` | info | `○` |
+| `ready` | info | `▶` |
+| `step` | info | `•`, indented |
+| `debug` | debug | `◦` |
+| `trace` | trace | `»` |
 
-- `LOG_FORMAT=human|record` / `setLogFormat()` — how lines render. Default: TTY → human, otherwise record. Workers and browsers use level-mapped console methods; Node funnels everything to stderr.
-- `LOG_TIME=1|0` / `setLogTime()` — whether lines open with time. Default: on in Node record mode (a daemon's log file must answer "when"), off everywhere else (human eyes don't need stamps; Worker and browser consoles stamp lines themselves). Record time is UTC RFC3339; human time is a dim local `HH:MM:SS`.
+**Scopes.** `log.scope('api')` returns a child logger whose events carry `["api"]`; `log.scope('api').scope('auth')` carries `["api", "auth"]`.
 
-The record line format is identical across go-utils and py-utils by design:
+**Spans.** A span is a logger: what is written through it belongs to it, and nothing else does (there is no ambient context, a function that logs inside a span takes the span). `span` returns what the callback returns, a Promise when it is async; a throw ends the span failed, with the error in `fields.err`, and is rethrown.
+
+```typescript
+await log.span('sync', { repo }, async (s) => {
+  s.info('cloned', { files: 3 })
+  await s.span('build', async (c) => { c.step('compiling') })
+  s.set({ pushed: true })          // carried on the span's end event
+})
+
+// Work that does not fit a block: open it, end it once (twice panics).
+const up = log.begin('upload', { size })
+stream.on('end', () => up.end())
+stream.on('error', (err) => up.end(err))
+```
+
+**Traces cross processes explicitly.** `s.traceparent()` is the W3C value to hand on, in an HTTP `traceparent` header or the `TRACEPARENT` env of a child process. `log.join(req.headers.get('traceparent'))` returns a logger whose spans are children of that remote span; `null` or `undefined` returns the logger itself, and a malformed value is ignored with one warn per distinct value. A process started with `TRACEPARENT` set joins it for every root span, with no code.
+
+**Levels.** `silent < error < warn < info < debug < trace`, default `info`. A scoped event reads its threshold live from the most specific variable set: `["api", "auth"]` reads `API_AUTH_LOG_LEVEL`, then `API_LOG_LEVEL`, then `LOG_LEVEL`, then `setLogLevel()`, then `info`. `GZIP_LOG_LEVEL=silent` shuts one subsystem up without touching code. Whether a span is shown is decided once, when it begins; a hidden span writes no end, and what it holds (lines, child spans, `traceparent()`) attaches to the nearest shown span, so a viewer never meets a missing parent.
+
+**Renderings.** `json` is one event per line on stderr, keys in the contract's order, fields sorted at every depth, errors as `{type, message, stack, cause, …}`:
+
+```json
+{"time":"2026-10-12T12:20:39.123Z","level":"warn","verb":"warn","msg":"retrying","service":"checkout","scope":["payments"],"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","fields":{"attempt":2}}
+```
+
+`human` is symbols, colour (TTY, `NO_COLOR`, `FORCE_COLOR`), fields dim as `key=value`, an error's stack under its line, and spans with what they hold indented:
 
 ```
-2026-08-07T12:34:56Z WARN  [scope] message
+ ○ sync repo=ui
+     cloned files=3
+   ○ build
+       • compiling
+   ✓ build 51ms
+ ✓ sync 51ms pushed=true
 ```
+
+Node, Bun and Deno write every event through `console.error` (stdout stays data, and a `cli` live region keeps lines above it); browsers and Workers use the level's console method.
+
+**Configuration.** Each variable has a setter. The setter is the program's default and the variable, read live, overrides it. Values match without regard to case, an empty variable is unset, and an unknown value panics.
+
+| variable | setter | values | default |
+|---|---|---|---|
+| `LOG_FORMAT` | `setLogFormat` | `human`, `json` | Node: human when stderr is a TTY, else json. Browser: human. Worker: json |
+| `LOG_TIME` | `setLogTime` | `1`, `0` | off. Puts a dim local `HH:MM:SS` before human lines; json always carries `time` |
+| `LOG_LEVEL`, `{SCOPE}_LOG_LEVEL` | `setLogLevel` | the levels | `info` |
+| `LOG_SERVICE` | `setLogService` | a name | the entry script's name without extension. A Worker or browser has none: set it, or the first json event panics |
+
+**Reading the stream.** `LogEvent` is the wire shape as a type (a line, a span start, an ok end or a failed end, discriminated by `phase` and `status`), and `parseEvent(line)` reads one line back: an event, `null` for a line that is not one (pass it through), or a `Panic` for a JSON object with a `verb` key that breaks the shape.
+
+```typescript
+import { parseEvent, type LogEvent } from '@adriangalilea/utils/log'
+
+const e = parseEvent(line)
+if (e?.phase === 'end') e.dur_ms
+```
+
+#### Migrating from 8.x
+
+- Messages are one string plus fields: `log.warn('retry', n, err)` becomes `log.warn('retry', { attempt: n, err })`, and `log.scope(e.source).error(e.operation, e.toJSON())` becomes `log.scope(e.source).error(e.operation, { err: e })`.
+- Import `log` and call its verbs: the bare `info`, `warn`, `scope`, … exports are gone.
+- `time`/`timeEnd` are gone: wrap the work in `log.span(name, fn)`, which writes its duration.
+- `LOG_FORMAT=record` and `setLogFormat('record')` are gone: `json` replaces the record line, and `logs` from go-utils renders a file back into a greppable line.
+- The environment now wins over `setLogFormat` and `setLogTime`, and `LOG_TIME` is off by default.
+- A Worker that writes json must call `setLogService(name)`.
+- `SourcedError.message` is the message given, without the `[source:operation]` prefix.
 
 ### Currency
 
@@ -479,7 +528,7 @@ catch (e) {
     return { error: 'card declined' }
   }
   if (isSourcedError(e)) {
-    log.scope(e.source).error(e.operation, e.toJSON())  // structured forensics
+    log.scope(e.source).error(e.operation, { err: e })  // source, operation, status, context, cause
     throw e
   }
   throw e                                                     // unknown — re-throw
@@ -490,7 +539,7 @@ Every `SourcedError` carries `source`, `operation`, `status`, `context`, and the
 
 ## Features
 
-- **Logger**: human/record dual rendering (TTY-detected), scoped env-controlled levels, shared record format with go-utils and py-utils
+- **Logger**: one event stream shared byte for byte with go-utils and py-utils (lines and spans, W3C trace ids), json or human rendering, scoped env-controlled levels
 - **Currency**:
   - 13,750+ crypto symbols from CoinGecko (auto-updatable)
   - Alternative ticker support (XBT→BTC, wrapped tokens, etc.)
@@ -691,7 +740,7 @@ Telegram's [Threaded Mode](https://telegram.org/blog/threaded-conversations) for
 | `@adriangalilea/utils/metrics/sqlite` | Atomic SQLite driver, explicit provisioning schema, and inclusive UTC daily reports; libSQL is its own module (`metrics/libsql`) over the same driver shape. Connections and credentials belong to the application. |
 | `@adriangalilea/utils/bot/menu` | `botMenu({ command, description, items, privacy?, personalData?, adminContact })` — `/settings` command + InlineKeyboard router. Root view always renders a `🛡️ Privacy & data` submenu button that wraps the privacy policy link plus (if `personalData: { storage }`) 🗑 Forget + 📥 Export buttons. Items take `keepRow` (render on the same row as the next item — e.g. a two-per-row language picker) and `rootExtra` (render at the bottom of the root menu, below Privacy & data). `label` / `header` / `style` / `visible` resolvers may be **async** (read your db at render time — never cache render strings in the session); `parseMode: 'HTML'` renders the header formatted (you own escaping); `personalData.onForget(ctx, userId)` wipes YOUR tables inside the same try as the session delete, so Forget either forgets everything or reports failure. `toggleMenuItem({ id, read, write, label: { off, on }, toast? })` — convenience factory for boolean-toggle items with dynamic label + optional toast, storage-agnostic via `read`/`write` closures. |
 | `@adriangalilea/utils/bot/payments` | `botPayments({ session, storage, paysupport, paysupportHint?, legal, waiver, vip?, credits?, perks? })` — Telegram Stars monetization in one drop-in plugin. **Three axes, all optional:** `vip` (positional tier ladder — single rung in v1 is just `vip: [{...}]`, ladder is `vip: [{...}, {...}]`; ids are `vip.1`, `vip.2`, …), `credits` (consumable balance + top-up packs `credits.1`, `credits.2`, …), `perks` (orthogonal one-shot unlocks `perks.<key>`). **Surface:** `ctx.payments.atLeast('vip')` / `atLeast('vip.2')` (typed rank check), `ctx.payments.tier()` / `.tier.level()` / `.tier.label()`, `ctx.payments.credits.{balance, consume, tryConsume}` (throws `InsufficientCredits`), `ctx.payments.has(perkId)`, `await ctx.payments.require('vip', { feature? })` (gate that sends a localized upgrade prompt deep-linked to `/settings → 💎 VIP`), `await ctx.payments.invoice(productKey)` (threads Art. 103(m) TRLGDCU consent inline before `sendInvoice`). **Owns:** waiver consent flow (versioned text → forces re-consent on bump, snapshotted on every charge for audit), `/paysupport` slash command (Telegram ToS §6.5; `paysupportHint` overrides the where-to-manage-charges line when your menu isn't `/settings`), idempotent `successful_payment` fulfillment via `pay:idempotency:{chargeId}` sentinel, lazy subscription expiry (no cron needed), tier upgrade auto-cancel of the lower rung's renewal, and admin-DM refund approval (mirror of `accessControl`'s [✅ Aprobar][❌ Denegar] pattern). **Returns:** `{ plugin, menuItem, payouts, admin, onFulfilled, onRefunded }` — `menuItem` is the drop-in `💎 VIP` entry for `botMenu`; `admin.{listCharges, getCharge}` backs custom admin commands; `payouts.{record, list, export, exportForUsers}` is the Fragment payout ledger (you receive TON, log the EUR conversion, export time-windowed CSV/JSON for your gestor); `onFulfilled(productKey \| '*', handler)` / `onRefunded(...)` register fire-and-forget hooks (purchase applied / admin-approved refund — a revenue ledger writes on one, reverses on the other). **Stars-only by design** — Telegram ToS §6.2 forbids third-party payment providers for digital goods. Crypto Pay deferred (MiCA risk); Stripe-outside-Telegram is a future v2 channel. Full compliance memo (Spanish-autónomo seller-of-record analysis, Verifactu vs Crea y Crece, MiCA, Art. 103(m) waiver text, GDPR retention) in `src/bot/payments/CLAUDE.md`. |
-| `@adriangalilea/utils/bot/create` | `createBot<S>({ token?, storage?, initial?, admins?, language?, menu?, access?, payments?, handlers?, worker? })` — the composer (see "One bot file, ideation → production" above). Returns `{ build, session, poll, isMain, fetch }`: `poll()` long-polls, `export default app` is a complete Worker, `app.session(ctx)` / the `handlers` callback's `session(ctx)` is the TYPED accessor for your `S` fields. Owns storage+session wiring; resolves storage per environment (D1 binding → `bot/storage-d1`; `BOT_PERSIST` path → sqlite, `redis://` → redis, lazily-imported optional peers; else announced-ephemeral memory) — or pass `storage: (env) => Storage` when the choice is env-dependent (e.g. a D1 binding not named `DB`). Boot NARRATES the composition (`session: memory …`, `features: language(en,es) · menu(/settings)`) so every implicit decision is visible where you're looking. Runnable demo: `pnpm demo:bot`. |
+| `@adriangalilea/utils/bot/create` | `createBot<S>({ token?, storage?, initial?, admins?, language?, menu?, access?, payments?, handlers?, worker? })` — the composer (see "One bot file, ideation → production" above). Returns `{ build, session, poll, isMain, fetch }`: `poll()` long-polls, `export default app` is a complete Worker, `app.session(ctx)` / the `handlers` callback's `session(ctx)` is the TYPED accessor for your `S` fields. Owns storage+session wiring; resolves storage per environment (D1 binding → `bot/storage-d1`; `BOT_PERSIST` path → sqlite, `redis://` → redis, lazily-imported optional peers; else announced-ephemeral memory) — or pass `storage: (env) => Storage` when the choice is env-dependent (e.g. a D1 binding not named `DB`). Boot NARRATES the composition (`session storage kind="memory (ephemeral …)"`, `features features=["language(en,es)","menu(/settings)"]`) so every implicit decision is visible where you're looking. Runnable demo: `pnpm demo:bot`. |
 | `@adriangalilea/utils/bot/worker` | `botWorkerFetch(resolve)` — the Cloudflare Worker cap: secret-checked webhook (ack fast, work + storage flush ride `ctx.waitUntil`, errors DM admins throttled), `POST /setup` (webhook registration with handler-derived `allowed_updates` + a commit-narrating 🚀 deploy DM from the request body), `POST /deploy-started` (the 🛳 "what is shipping" DM — curl it from your deploy script on the still-live version, body `{sha, author, message, etaSeconds?}`), operator-authed `/pause` `/resume` `/webhook-status` (+ `statusExtra`), and a `routes` escape hatch tried before the built-ins. Structural bot type — no workers-types dependency. |
 | `@adriangalilea/utils/bot/flags` | `defineFlags(spec, { read, write? })` — feature flags declared ONCE in code, resolved LIVE from the bot's operator-config record (D1 json row, Redis hash — storage-agnostic, Worker-safe, zero deps). Each flag: `{ kind: 'bool'\|'number'\|'string', label, help?, default }`, where `default` is a scalar or a **tier map** `{ free, vip?, 'vip.N'? }` resolved off `ctx.payments.tier()` — "free users get this limit, premium users get that model" is one declaration, zero branching at the call site (ladder walks down: exact rung → lower rungs → `vip` → `free`). Read sites: `await flags.<key>(ctx)` — stored override wins over the code default, per-ctx reads coalesce into one config fetch. `flags.describe()` is the JSON schema admin panels render generically, so a new flag appears in every panel with zero panel edits; `flags.set(ctx, key, value)` writes a kind-checked live override (`null` clears it — RFC 7386 null-delete, matching SQLite `json_patch`); `flags.overrides(ctx)` lists what's overridden. Corrupt stored values scream (`SourcedError`); bad specs panic at construction. |
 | `@adriangalilea/utils/bot/storage-d1` | `d1Storage({ db, table? })` — `@gramio/storage` adapter over a D1 `session` table (schema in the module doc). `flush()` matters: the session plugin writes un-awaited and workerd freezes the isolate the instant `fetch()` returns — hand `flush` to `bot/worker` (automatic via `createBot`) so writes survive. |

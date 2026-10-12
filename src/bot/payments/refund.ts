@@ -29,7 +29,7 @@ import type { Storage } from "@gramio/storage";
 import { InlineKeyboard } from "gramio";
 
 import { say } from "../../say/index.js";
-import { scope } from "../../universal/log.js";
+import { log as root } from "../../universal/log.js";
 import { coarseSpan } from "../../universal/time.js";
 import { callbackNs } from "../callbacks.js";
 import type { BotCallbackCtx } from "../ctx.js";
@@ -45,7 +45,7 @@ import type {
 	SessionLike,
 } from "./types.js";
 
-const log = scope("bot/payments");
+const log = root.scope("bot/payments");
 
 const cb = callbackNs("pay");
 
@@ -251,9 +251,11 @@ export const buildRefundRequestHandler =
 
 		charge.paysupportState = "opened";
 		await opts.stores.charges.set(ctx, charge.chargeId, charge);
-		log.success(
-			`refund requested by user: chargeId=${charge.chargeId} product=${charge.productKey} xtr=${charge.xtr}`,
-		);
+		log.success("refund requested by user", {
+			charge_id: charge.chargeId,
+			product: charge.productKey,
+			xtr: charge.xtr,
+		});
 
 		const adminLang = await langOfUser(opts.storage, ctx, ctx.adminId);
 		try {
@@ -263,7 +265,7 @@ export const buildRefundRequestHandler =
 				reply_markup: adminKeyboard(charge.chargeId, adminLang),
 			});
 		} catch (e) {
-			log.error(`failed to DM admin: ${e}`);
+			log.error("failed to DM admin", { err: e });
 			// Roll back the open state so the user can try again later.
 			charge.paysupportState = "none";
 			await opts.stores.charges.set(ctx, charge.chargeId, charge);
@@ -304,16 +306,18 @@ export const buildRefundApproveHandler =
 			return;
 		}
 
-		log.success(
-			`admin approving refund: chargeId=${charge.chargeId} user=${charge.userId} xtr=${charge.xtr}`,
-		);
+		log.success("admin approving refund", {
+			charge_id: charge.chargeId,
+			user: charge.userId,
+			xtr: charge.xtr,
+		});
 		try {
 			await ctx.bot.api.refundStarPayment({
 				user_id: charge.userId,
 				telegram_payment_charge_id: charge.chargeId,
 			});
 		} catch (e) {
-			log.error(`refundStarPayment failed: ${e}`);
+			log.error("refundStarPayment failed", { err: e });
 			await ctx.answer({
 				text: say(
 					{
@@ -340,7 +344,8 @@ export const buildRefundApproveHandler =
 				});
 			} catch (e) {
 				log.warn(
-					`post-refund cancel renewal failed (probably already canceled): ${e}`,
+					"post-refund renewal cancel failed, probably already canceled",
+					{ err: e },
 				);
 			}
 		}
@@ -372,7 +377,7 @@ export const buildRefundApproveHandler =
 				try {
 					fn(refundEvent, ctx);
 				} catch (e) {
-					log.error(`onRefunded handler for "${key}" threw: ${e}`);
+					log.error("onRefunded handler threw", { key, err: e });
 				}
 			}
 		};
@@ -393,7 +398,7 @@ export const buildRefundApproveHandler =
 				),
 			});
 		} catch (e) {
-			log.error(`failed to notify user of approval: ${e}`);
+			log.error("failed to notify user of approval", { err: e });
 		}
 
 		await ctx.answer({
@@ -445,7 +450,7 @@ export const buildRefundDenyHandler =
 				),
 			});
 		} catch (e) {
-			log.error("failed to notify user of denial", e);
+			log.error("failed to notify user of denial", { err: e });
 		}
 
 		await ctx.answer({

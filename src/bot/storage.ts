@@ -46,10 +46,10 @@
 import type { Storage } from "@gramio/storage";
 
 import { SourcedError } from "../offensive.js";
-import { scope } from "../universal/log.js";
+import { log as root } from "../universal/log.js";
 import type { BotIdCtx } from "./ctx.js";
 
-const log = scope("bot/storage");
+const log = root.scope("bot/storage");
 
 // ─── shared ────────────────────────────────────────────────────────
 
@@ -304,16 +304,16 @@ export const withTracing = <T>(
 	keyFor: record.keyFor,
 	get: async (ctx, id) => {
 		const result = await record.get(ctx, id);
-		log.trace(`${label}.get(${id}) → ${result === undefined ? "miss" : "hit"}`);
+		log.trace("get", { record: label, id, hit: result !== undefined });
 		return result;
 	},
 	set: async (ctx, id, value) => {
 		await record.set(ctx, id, value);
-		log.trace(`${label}.set(${id})`);
+		log.trace("set", { record: label, id });
 	},
 	delete: async (ctx, id) => {
 		await record.delete(ctx, id);
-		log.trace(`${label}.delete(${id})`);
+		log.trace("delete", { record: label, id });
 	},
 	has: (ctx, id) => record.has(ctx, id),
 });

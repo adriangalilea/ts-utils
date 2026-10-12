@@ -30,10 +30,10 @@
  *   adminIds: () => store.readAdminIds(ctx, []),              // live resolver or plain array
  * })
  */
-import { scope } from "../universal/log.js";
+import { log as root } from "../universal/log.js";
 import { notifyAdmins } from "./notify.js";
 
-const log = scope("bot/profile");
+const log = root.scope("bot/profile");
 
 // Telegram caps, counted in code points so emoji are one glyph each.
 const NAME_MAX = 64;
@@ -153,9 +153,11 @@ function overLimit(
 ): boolean {
 	for (const [lang, value] of Object.entries(values)) {
 		if (glyphs(value) > max) {
-			log.error(
-				`${field} (${lang}) exceeds ${max} chars — skipping ${field} sync`,
-			);
+			log.error("profile field over the limit, sync skipped", {
+				field,
+				lang,
+				max,
+			});
 			return true;
 		}
 	}
@@ -190,7 +192,7 @@ export async function syncBotProfile(
 			const current = await bot.api.getMyName(langParam(lang));
 			if (current.name === value) return;
 			await bot.api.setMyName({ name: value, ...langParam(lang) });
-			log.info(`name synced${lang ? ` (${lang})` : ""}`);
+			log.info("name synced", { lang });
 		});
 	}
 	if (
@@ -204,7 +206,7 @@ export async function syncBotProfile(
 				description: value,
 				...langParam(lang),
 			});
-			log.info(`description synced${lang ? ` (${lang})` : ""}`);
+			log.info("description synced", { lang });
 		});
 	}
 	if (opts.about && !overLimit("about", opts.about, ABOUT_MAX)) {
@@ -215,7 +217,7 @@ export async function syncBotProfile(
 				short_description: value,
 				...langParam(lang),
 			});
-			log.info(`about synced${lang ? ` (${lang})` : ""}`);
+			log.info("about synced", { lang });
 		});
 	}
 	if (opts.commands) {
@@ -223,7 +225,7 @@ export async function syncBotProfile(
 			const current = await bot.api.getMyCommands(langParam(lang));
 			if (commandsEqual(current, list)) return;
 			await bot.api.setMyCommands({ commands: [...list], ...langParam(lang) });
-			log.info(`commands synced${lang ? ` (${lang})` : ""} (${list.length})`);
+			log.info("commands synced", { lang, count: list.length });
 		});
 	}
 	const photo = opts.photo;
@@ -248,7 +250,7 @@ export async function syncBotProfile(
 				);
 				await setPhoto({ photo: { type: "static", photo: blob } });
 				await photo.applied.set(photo.version);
-				log.info(`profile photo synced (${photo.version})`);
+				log.info("profile photo synced", { version: photo.version });
 			})(),
 		);
 	}
@@ -256,13 +258,11 @@ export async function syncBotProfile(
 	try {
 		await Promise.all(jobs);
 	} catch (e) {
-		log.error(`profile sync failed: ${e instanceof Error ? e.message : e}`);
+		log.error("profile sync failed", { err: e });
 	}
 
 	await checkExpectations(bot, opts).catch((e) =>
-		log.error(
-			`expectation check failed: ${e instanceof Error ? e.message : e}`,
-		),
+		log.error("expectation check failed", { err: e }),
 	);
 }
 
@@ -358,7 +358,11 @@ async function checkExpectations(
 	if (drift.length === 0) return;
 
 	const handle = bot.info?.username ? `@${bot.info.username}` : "this bot";
-	for (const message of drift) log.warn(`${handle}: ${message.split("\n")[0]}`);
+	for (const message of drift)
+		log.warn("capability drift", {
+			bot: handle,
+			drift: message.split("\n")[0],
+		});
 	const ids =
 		typeof opts.adminIds === "function"
 			? await opts.adminIds()

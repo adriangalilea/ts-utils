@@ -47,7 +47,7 @@
  */
 import { buildAllowedUpdates } from "gramio";
 import { escapeHtml } from "../tg-html/index.js";
-import { scope } from "../universal/log.js";
+import { log as root } from "../universal/log.js";
 import {
 	type AlertThrottle,
 	alertAdminError,
@@ -59,7 +59,7 @@ import {
 	telegramUpdatePartition,
 } from "./update-identity.js";
 
-const log = scope("bot/worker");
+const log = root.scope("bot/worker");
 
 /** The slice of a gramio `Bot` the worker cap drives — structural, so versions don't pin. */
 export type WorkerBot = {
@@ -229,17 +229,14 @@ export function botWorkerFetch<Env>(
 								body: JSON.stringify(update),
 							});
 						if (!queued.ok) {
-							log.error(`update enqueue failed · ${queued.status}`);
+							log.error("update enqueue failed", { status: queued.status });
 							return new Response("update queue unavailable", {
 								status: 503,
 							});
 						}
 						return new Response("OK");
 					} catch (error) {
-						log.error(
-							"update enqueue failed:",
-							error instanceof Error ? error.message : error,
-						);
+						log.error("update enqueue failed", { err: error });
 						return new Response("update queue unavailable", { status: 503 });
 					}
 				}
@@ -250,10 +247,7 @@ export function botWorkerFetch<Env>(
 						await bot.updates.handleUpdate(update);
 						if (rt.flush) await rt.flush();
 					})().catch(async (error) => {
-						log.error(
-							"update failed:",
-							error instanceof Error ? error.message : error,
-						);
+						log.error("update failed", { err: error });
 						// awaited so the DM rides the same waitUntil, not a frozen isolate
 						await alertAdminError(
 							bot,
@@ -279,9 +273,9 @@ export function botWorkerFetch<Env>(
 				const meta = await request.json().catch(() => ({}));
 				const commit = parseCommitMeta(meta);
 				const eta = etaSeconds(meta);
-				log.info(
-					`deploy started${commit ? ` · ${describeCommit(commit)}` : ""}`,
-				);
+				log.info("deploy started", {
+					commit: commit ? describeCommit(commit) : undefined,
+				});
 				ctx.waitUntil(
 					adminIds().then((ids) =>
 						notifyAdmins(
@@ -311,9 +305,9 @@ export function botWorkerFetch<Env>(
 					url.origin,
 					webhookSecret,
 				);
-				log.success(
-					`deployed${commit ? ` · ${describeCommit(commit)}` : ""} — webhook registered`,
-				);
+				log.success("deployed, webhook registered", {
+					commit: commit ? describeCommit(commit) : undefined,
+				});
 				ctx.waitUntil(
 					adminIds().then((ids) =>
 						notifyAdmins(
@@ -377,10 +371,7 @@ export function botWorkerFetch<Env>(
 
 			return new Response("Not Found", { status: 404 });
 		} catch (error) {
-			log.error(
-				"worker request failed:",
-				error instanceof Error ? error.message : error,
-			);
+			log.error("worker request failed", { err: error });
 			return new Response("internal error", { status: 500 });
 		}
 	};
@@ -510,7 +501,7 @@ export interface UpdateRunnerOptions {
 	attemptTimeoutMs?: number;
 }
 
-const runnerLog = scope("bot/update-runner");
+const runnerLog = root.scope("bot/update-runner");
 
 /** The Durable Object surface the factory-built runner class exposes. */
 export type TelegramUpdateRunnerClass<Env> = new (
@@ -638,10 +629,12 @@ export function telegramUpdateRunner<Env>(
 				]);
 			} catch (error) {
 				job.attempts += 1;
-				runnerLog.error(
-					`queued update ${job.updateId} failed · attempt ${job.attempts}/${maxAttempts}:`,
-					error instanceof Error ? error.message : error,
-				);
+				runnerLog.error("queued update failed", {
+					update_id: job.updateId,
+					attempt: job.attempts,
+					max_attempts: maxAttempts,
+					err: error,
+				});
 				if (rt) {
 					const runtime = rt;
 					await (runtime.adminIds?.() ?? Promise.resolve([]))
@@ -675,9 +668,10 @@ export function telegramUpdateRunner<Env>(
 			// state instead of misclassifying the completed Telegram update as an
 			// application failure and rebuilding a retired job.
 			await this.finish(sequence, job.updateId);
-			runnerLog.info(
-				`queued update ${job.updateId} completed · ${Date.now() - job.enqueuedAt}ms`,
-			);
+			runnerLog.info("queued update completed", {
+				update_id: job.updateId,
+				queued_ms: Date.now() - job.enqueuedAt,
+			});
 			await this.scheduleNext();
 		}
 

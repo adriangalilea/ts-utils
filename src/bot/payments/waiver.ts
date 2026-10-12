@@ -22,7 +22,7 @@
 import { InlineKeyboard } from "gramio";
 
 import { say } from "../../say/index.js";
-import { scope } from "../../universal/log.js";
+import { log as root } from "../../universal/log.js";
 import { callbackNs } from "../callbacks.js";
 import { FALLBACK_LANG } from "../lang.js";
 import { DEFAULT_PRIVACY_URL } from "../menu.js";
@@ -32,7 +32,7 @@ import type {
 	WaiverRecord,
 } from "./types.js";
 
-const log = scope("bot/payments");
+const log = root.scope("bot/payments");
 
 const cb = callbackNs("pay");
 
@@ -156,6 +156,6 @@ export const persistWaiverOnSession = (
 	};
 	ctx.session.pay ??= {};
 	ctx.session.pay.waiver = record;
-	log.success(`waiver consent persisted: version=${version} locale=${locale}`);
+	log.success("waiver consent persisted", { version, locale });
 	return record;
 };

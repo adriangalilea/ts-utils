@@ -66,10 +66,9 @@ try {
 	log.info("Panic would exit process in Node or throw in browser");
 } catch (e) {
 	if (e instanceof ProcessExitError) {
-		log.warn("Caught panic in browser:", e.message);
-		console.log("  Exit code:", e.exitCode);
+		log.warn("Caught panic in browser", { err: e, exit_code: e.exitCode });
 	} else if (e instanceof Error) {
-		log.warn("Caught error:", e.message);
+		log.warn("Caught error", { err: e });
 	}
 }
 
