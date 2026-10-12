@@ -47,6 +47,7 @@ const route = visitsRoute({
 	db,
 	site: "untitled.garden",
 	services: ["garden-web"],
+	staff: (request) => request.headers.get("x-staff") === "1",
 	now: () => clock,
 });
 
@@ -276,6 +277,12 @@ res = await post(
 	},
 );
 assert.equal(res.status, 204);
+clock += 60_000;
+res = await post([start(trace(), span(), page("/", "studio"))], {
+	"cf-connecting-ip": "192.0.2.2",
+	"x-staff": "1",
+});
+assert.equal(res.status, 204);
 
 // --- reading -----------------------------------------------------------------------------
 let visits = await readVisits(db, {
@@ -290,7 +297,7 @@ assert.deepEqual(
 		[["chill"], null],
 		[["studio"], null],
 	],
-	"places in order, the probe left out",
+	"places in order, the probe and the staff left out",
 );
 visits = await readVisits(db, {
 	site: "untitled.garden",
@@ -298,8 +305,18 @@ visits = await readVisits(db, {
 	flagged: true,
 	now: clock,
 });
-assert.equal(visits.length, 4);
-assert.equal(visits.at(-1)?.probe, true);
+assert.equal(visits.length, 5);
+assert.deepEqual(
+	visits
+		.filter((v) => v.probe || v.staff)
+		.map((v) => [v.probe, v.staff])
+		.sort(),
+	[
+		[false, true],
+		[true, false],
+	],
+	"a page's own probe flag, and the route's staff answer",
+);
 const one = await readVisit(db, String(v1?.id));
 assert.equal(one.pages.length, 2);
 assert.equal(

@@ -74,6 +74,12 @@ export interface VisitsOptions {
 	readonly services: readonly string[];
 	/** Who called, from the request. The default reads Cloudflare's, then Vercel's, then any proxy's headers. */
 	readonly caller?: (request: Request) => Caller;
+	/**
+	 * The site's own people reading (its signed-in owner, a development host): the
+	 * pages a batch starts are flagged staff, as a page saying so itself is. Asked
+	 * only of a batch that starts a page, on the server, where the session is.
+	 */
+	readonly staff?: (request: Request) => boolean | Promise<boolean>;
 	readonly now?: () => number;
 }
 
@@ -208,7 +214,22 @@ export function visitsRoute(
 			statements.push(...pruning(at));
 			pruned = day;
 		}
-		const visitOf = await assign(db, site, caller, day, at, events, statements);
+		const starting = events.some(
+			({ e }) => e.msg === "page" && e.phase === "start",
+		);
+		const staff =
+			starting && options.staff !== undefined
+				? await options.staff(request)
+				: false;
+		const visitOf = await assign(
+			db,
+			site,
+			{ caller, staff },
+			day,
+			at,
+			events,
+			statements,
+		);
 		let accepted = 0;
 		for (const { n, line, e } of events) {
 			const visit = visitOf(e.trace_id as string);
@@ -262,7 +283,7 @@ function refusal(line: string, services: readonly string[]): string | LogEvent {
 async function assign(
 	db: MetricsDriver,
 	site: string,
-	caller: Caller,
+	{ caller, staff }: { caller: Caller; staff: boolean },
 	day: string,
 	at: number,
 	events: readonly { e: LogEvent }[],
@@ -299,7 +320,8 @@ async function assign(
 	for (const { e } of starts) {
 		if (known.has(e.trace_id as string)) continue;
 		const f = e.fields ?? {};
-		const flag = (k: string) => (f[k] === true ? 1 : 0);
+		const flag = (k: "probe" | "staff") =>
+			f[k] === true || (k === "staff" && staff) ? 1 : 0;
 		if (visit === null) {
 			const referrer = str(f.referrer);
 			visit = { id: hex(crypto.getRandomValues(new Uint8Array(8))), pages: 0 };
