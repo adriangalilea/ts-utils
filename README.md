@@ -169,7 +169,21 @@ Node, Bun and Deno write every event through `console.error` (stdout stays data,
 LOG_SHIP=https://events.untitled.garden/ingest LOG_SHIP_TOKEN=… node server.js
 ```
 
-What ships is the stream's json line, byte for byte, whatever the console renders (human at a terminal included). A batch is lines joined by `\n`, `Content-Type: text/plain;charset=utf-8`, at most 64 KB and 50 events. It leaves 2s after its first event, at 50 events, when a span opened outside any local span ends (a root span, or a request joined from its caller: its whole trace leaves together), before a Node or Bun process exits on its own (`beforeExit`), and in a browser on `visibilitychange: hidden` and `pagehide` through `sendBeacon`. `flushLog()` sends what waits and resolves when nothing is in flight: a Worker hands it to `ctx.waitUntil(flushLog())`, a serverless function to its runtime's `after`, and a process that calls `process.exit()` awaits it first (nothing else runs after `exit`). Shipping never throws and never blocks a write: a refused or lost batch is one `warnOnce` under scope `ship`, an event over 64 KB stays on the console and warns once. The wire and the collector's answers are the contract's, in [utils](https://github.com/adriangalilea/utils#shipping).
+What ships is the stream's json line, byte for byte, whatever the console renders (human at a terminal included). A batch is lines joined by `\n`, `Content-Type: text/plain;charset=utf-8`, at most 64 KB and 50 events. It leaves 2s after its first event, at 50 events, when a span opened outside any local span ends (a root span, or a request joined from its caller: its whole trace leaves together), before a Node or Bun process exits on its own (`beforeExit`), and in a browser on `visibilitychange: hidden` and `pagehide`; whatever a hidden page sends goes through `sendBeacon`, the one request a browser finishes after the page is gone. `flushLog()` sends what waits and resolves when nothing is in flight: a Worker hands it to `ctx.waitUntil(flushLog())`, a serverless function to its runtime's `after`, and a process that calls `process.exit()` awaits it first (nothing else runs after `exit`). Shipping never throws and never blocks a write: a refused or lost batch is one `warnOnce` under scope `ship`, an event over 64 KB stays on the console and warns once. The wire and the collector's answers are the contract's, in [utils](https://github.com/adriangalilea/utils#shipping).
+
+**A page's trace on a Next.js server** (`@adriangalilea/utils/log/next`, `next` an optional peer). A page that writes the stream (utils README, "Web pages") puts its `traceparent` on every same-origin request; these wrappers make the server's work a child of that request, in the page's trace, and hand `flushLog` to Next's `after` so a frozen instance holds nothing unsent. A request with no `traceparent` is a root span of its own.
+
+```typescript
+import { traced, tracedAction } from '@adriangalilea/utils/log/next'
+
+export const POST = traced('POST /api/vote', async (s, request) => {
+  await s.span('turso insert vote', () => db.execute(insert))
+  return Response.json({ ok: true })
+})
+
+// in a "use server" file
+export const vote = tracedAction('vote', async (s, id: string) => { … })
+```
 
 **Reading the stream.** `LogEvent` is the wire shape as a type (a line, a span start, an ok end or a failed end, discriminated by `phase` and `status`), and `parseEvent(line)` reads one line back: an event, `null` for a line that is not one (pass it through), or a `Panic` for a JSON object with a `verb` key that breaks the shape.
 

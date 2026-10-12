@@ -83,7 +83,8 @@
  *     64 KB and 50 events). A batch leaves 2s after its first event, at 50,
  *     when a span opened outside any local span ends (a request's trace
  *     leaves together), before a Node/Bun process exits (beforeExit), and in
- *     a browser on hidden or pagehide (sendBeacon). LOG_SHIP_TOKEN
+ *     a browser on hidden or pagehide; whatever a hidden page sends goes
+ *     through sendBeacon, which outlives the page. LOG_SHIP_TOKEN
  *     (setLogShipToken) is a bearer for servers; a browser sends none.
  *     flushLog() sends what waits and resolves when nothing is in flight:
  *     a Worker hands it to waitUntil, a process that calls process.exit()
@@ -762,6 +763,15 @@ function takeBatch(): Batch | undefined {
 }
 
 function send(): void {
+	// A hidden page may be gone before a fetch answers: the beacon outlives it.
+	if (
+		sink === "browser" &&
+		(globalThis as unknown as BrowserGlobal).document.visibilityState ===
+			"hidden"
+	) {
+		beacon();
+		return;
+	}
 	const b = takeBatch();
 	if (b === undefined) return;
 	const p: Promise<void> = post(b.target, b.lines.join("\n")).finally(() =>
