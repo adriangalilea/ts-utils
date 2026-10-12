@@ -76,6 +76,20 @@
  *     log, stdout stays data, and cli/live's console patch keeps lines above
  *     a live region. Browsers and Workers use the level's console method.
  *
+ * Shipping
+ *     LOG_SHIP=<url> (setLogShip) also POSTs every event that passes its
+ *     threshold there: the json line, whatever the console renders, in
+ *     batches of lines joined by "\n" (text/plain;charset=utf-8, at most
+ *     64 KB and 50 events). A batch leaves 2s after its first event, at 50,
+ *     when a span opened outside any local span ends (a request's trace
+ *     leaves together), before a Node/Bun process exits (beforeExit), and in
+ *     a browser on hidden or pagehide (sendBeacon). LOG_SHIP_TOKEN
+ *     (setLogShipToken) is a bearer for servers; a browser sends none.
+ *     flushLog() sends what waits and resolves when nothing is in flight:
+ *     a Worker hands it to waitUntil, a process that calls process.exit()
+ *     awaits it first. Shipping never throws and never blocks a write: a
+ *     refused or lost batch is one warnOnce, scope ["ship"].
+ *
  * The wire shape is exported as LogEvent, and parseEvent(line) reads one back.
  */
 
@@ -636,12 +650,203 @@ function emit(d: Draft): void {
 	// Every knob is read on every event, so a bad value screams whichever rendering is on.
 	const format = currentFormat();
 	const clock = timeEnabled();
+	const target = shipTarget();
 	const text = format === "json" ? json(d, now) : human(d, now, clock);
 	// Node: everything to stderr through console.error, which cli/live patches
 	// to keep lines above an active region. Elsewhere the level's method, so
 	// platform consoles classify the line.
 	if (sink === "node") console.error(text);
 	else console[CONSOLE_METHOD[VERBS[d.verb].level]](text);
+	// What ships is the stream's json line, whatever the console renders.
+	if (target !== undefined)
+		ship(target, format === "json" ? text : json(d, now));
+}
+
+// --- shipping ----------------------------------------------------------------
+
+/** A batch's ceiling in UTF-8 bytes: navigator.sendBeacon's. */
+const SHIP_MAX_BYTES = 64 * 1024;
+const SHIP_MAX_EVENTS = 50;
+const SHIP_AFTER_MS = 2000;
+
+let shipSetting: string | undefined;
+let shipTokenSetting: string | undefined;
+
+function parseShip(raw: string, source: string): string {
+	if (!URL.canParse(raw)) panic(`unknown ${source}:`, raw, "(want a URL)");
+	const url = new URL(raw);
+	if (url.protocol !== "https:" && url.protocol !== "http:")
+		panic(`unknown ${source}:`, raw, "(want an http(s) URL)");
+	return url.href;
+}
+
+/** Where events are also POSTed, in batches. LOG_SHIP overrides it. */
+export function setLogShip(url: string): void {
+	shipSetting = parseShip(url, "log ship");
+}
+
+/** The bearer sent with each batch (servers only). LOG_SHIP_TOKEN overrides it. */
+export function setLogShipToken(token: string): void {
+	assert(
+		sink !== "browser",
+		"a browser ships without a token: any token in a page is public",
+	);
+	if (typeof token !== "string" || token.length === 0)
+		panic("setLogShipToken wants a non-empty token, got:", token);
+	shipTokenSetting = token;
+}
+
+// LOG_SHIP is read live like every variable; the parse is kept per value.
+let shipParsed: { readonly raw: string; readonly href: string } | undefined;
+
+function shipTarget(): string | undefined {
+	const fromEnv = env("LOG_SHIP");
+	const raw = fromEnv ?? shipSetting;
+	if (raw === undefined) return undefined;
+	if (shipParsed?.raw !== raw)
+		shipParsed = {
+			raw,
+			href: fromEnv === undefined ? raw : parseShip(raw, "LOG_SHIP"),
+		};
+	return shipParsed.href;
+}
+
+interface Batch {
+	readonly target: string;
+	readonly lines: string[];
+	/** UTF-8 bytes of the lines joined by "\n". */
+	bytes: number;
+}
+
+const shipLog = (): Logger => log.scope("ship");
+const utf8 = new TextEncoder();
+let batch: Batch | undefined;
+let batchTimer: ReturnType<typeof setTimeout> | undefined;
+const inflight = new Set<Promise<void>>();
+let exitHooked = false;
+
+function ship(target: string, text: string): void {
+	hookExit();
+	const bytes = utf8.encode(text).length;
+	if (bytes > SHIP_MAX_BYTES) {
+		shipLog().warnOnce("event too large to ship", {
+			bytes,
+			limit: SHIP_MAX_BYTES,
+		});
+		return;
+	}
+	if (
+		batch !== undefined &&
+		(batch.target !== target || batch.bytes + 1 + bytes > SHIP_MAX_BYTES)
+	)
+		send();
+	if (batch === undefined) {
+		batch = { target, lines: [], bytes: -1 };
+		// A pending batch never keeps a process alive: beforeExit sends it.
+		const timer = setTimeout(send, SHIP_AFTER_MS);
+		(timer as { unref?: () => void }).unref?.();
+		batchTimer = timer;
+	}
+	batch.lines.push(text);
+	batch.bytes += 1 + bytes;
+	if (batch.lines.length >= SHIP_MAX_EVENTS) send();
+}
+
+/** Take the waiting batch, if any, and stop its timer. */
+function takeBatch(): Batch | undefined {
+	if (batchTimer !== undefined) clearTimeout(batchTimer);
+	batchTimer = undefined;
+	const taken = batch;
+	batch = undefined;
+	return taken;
+}
+
+function send(): void {
+	const b = takeBatch();
+	if (b === undefined) return;
+	const p: Promise<void> = post(b.target, b.lines.join("\n")).finally(() =>
+		inflight.delete(p),
+	);
+	inflight.add(p);
+}
+
+async function post(target: string, body: string): Promise<void> {
+	const token =
+		sink === "browser"
+			? undefined
+			: (env("LOG_SHIP_TOKEN") ?? shipTokenSetting);
+	const headers: Record<string, string> = {
+		"content-type": "text/plain;charset=utf-8",
+	};
+	if (token !== undefined) headers.authorization = `Bearer ${token}`;
+	try {
+		const res = await fetch(target, {
+			method: "POST",
+			headers,
+			body,
+			keepalive: sink === "browser",
+		});
+		if (res.status === 204) return;
+		shipLog().warnOnce("log batch refused", {
+			status: res.status,
+			answer: (await res.text()).slice(0, 1000),
+		});
+	} catch (err) {
+		shipLog().warnOnce("log batch not delivered", { err });
+	}
+}
+
+interface BrowserDocument {
+	readonly visibilityState: string;
+	addEventListener(type: string, fn: () => void): void;
+}
+
+interface BrowserGlobal {
+	readonly document: BrowserDocument;
+	readonly navigator: { sendBeacon(url: string, body: string): boolean };
+	addEventListener(type: string, fn: () => void): void;
+}
+
+// Hidden is the last moment a page reliably sends anything; sendBeacon is the
+// one request the browser finishes after the page is gone.
+function beacon(): void {
+	const b = takeBatch();
+	if (b === undefined) return;
+	const page = globalThis as unknown as BrowserGlobal;
+	if (!page.navigator.sendBeacon(b.target, b.lines.join("\n")))
+		shipLog().warnOnce("log batch refused by the browser", {
+			events: b.lines.length,
+		});
+}
+
+// Hooked on the first shipped event, so importing the logger has no effect.
+function hookExit(): void {
+	if (exitHooked) return;
+	exitHooked = true;
+	if (runtime.isNode || runtime.isBun) {
+		process.on("beforeExit", () => send());
+		return;
+	}
+	if (sink !== "browser") return;
+	const page = globalThis as unknown as BrowserGlobal;
+	page.document.addEventListener("visibilitychange", () => {
+		if (page.document.visibilityState === "hidden") beacon();
+	});
+	page.addEventListener("pagehide", beacon);
+}
+
+/**
+ * Send what waits to LOG_SHIP and resolve when no batch is in flight. A
+ * Worker hands it to waitUntil; a process that calls process.exit() awaits it
+ * first. Never rejects: a lost batch is a warnOnce.
+ */
+export async function flushLog(): Promise<void> {
+	send();
+	while (inflight.size > 0) {
+		await Promise.all(inflight);
+		// A refused batch's warning is an event too: it ships next.
+		send();
+	}
 }
 
 // --- loggers and spans -----------------------------------------------------
@@ -774,6 +979,49 @@ function open(ctx: Ctx, name: string, initial: Fields | undefined): Span {
 			fields,
 		});
 
+	function finish(err: unknown): void {
+		const dur = performance.now() - began;
+		const failed = err !== undefined && err !== null;
+		const printed = err instanceof Error && caught.has(err) ? err : undefined;
+		// What spans inside this one printed stays printed for the spans around it.
+		for (const e of caught) ctx.caught?.add(e);
+		if (!shown) {
+			// The end follows the decision made at begin: no end without its
+			// start. A failure is never lost to it: one line of the nearest
+			// shown span says the span failed.
+			if (!failed || !admits(ctx.scope, "error")) return;
+			if (err instanceof Error) ctx.caught?.add(err);
+			emit({
+				verb: "fail",
+				msg: name,
+				scope: ctx.scope,
+				depth: inner.depth,
+				trace: inner.owner === undefined ? undefined : trace,
+				span: inner.owner,
+				fields: { ...fields, ...added, err, dur_ms: round3(dur) },
+				printed,
+			});
+			return;
+		}
+		if (failed && err instanceof Error) ctx.caught?.add(err);
+		const shows: Fields = failed ? { ...added, err } : added;
+		emit({
+			verb: failed ? "fail" : "success",
+			msg: name,
+			scope: ctx.scope,
+			depth: ctx.depth,
+			phase: "end",
+			trace,
+			span: id,
+			parent,
+			status: failed ? "error" : "ok",
+			dur,
+			fields: { ...fields, ...shows },
+			shows,
+			printed,
+		});
+	}
+
 	// A hidden span is transparent: its lines and children attach to the nearest
 	// shown span, a joined remote one included (it is shown in its own process's
 	// stream). With none, its lines carry no ids, as lines outside any span.
@@ -809,46 +1057,10 @@ function open(ctx: Ctx, name: string, initial: Fields | undefined): Span {
 		end(err?: unknown): void {
 			assert(!ended, "span", name, "ended twice");
 			ended = true;
-			const dur = performance.now() - began;
-			const failed = err !== undefined && err !== null;
-			const printed = err instanceof Error && caught.has(err) ? err : undefined;
-			// What spans inside this one printed stays printed for the spans around it.
-			for (const e of caught) ctx.caught?.add(e);
-			if (!shown) {
-				// The end follows the decision made at begin: no end without its
-				// start. A failure is never lost to it: one line of the nearest
-				// shown span says the span failed.
-				if (!failed || !admits(ctx.scope, "error")) return;
-				if (err instanceof Error) ctx.caught?.add(err);
-				emit({
-					verb: "fail",
-					msg: name,
-					scope: ctx.scope,
-					depth: inner.depth,
-					trace: inner.owner === undefined ? undefined : trace,
-					span: inner.owner,
-					fields: { ...fields, ...added, err, dur_ms: round3(dur) },
-					printed,
-				});
-				return;
-			}
-			if (failed && err instanceof Error) ctx.caught?.add(err);
-			const shows: Fields = failed ? { ...added, err } : added;
-			emit({
-				verb: failed ? "fail" : "success",
-				msg: name,
-				scope: ctx.scope,
-				depth: ctx.depth,
-				phase: "end",
-				trace,
-				span: id,
-				parent,
-				status: failed ? "error" : "ok",
-				dur,
-				fields: { ...fields, ...shows },
-				shows,
-				printed,
-			});
+			finish(err);
+			// A span opened outside any local span (a root, or a request joined
+			// from its caller) ends its trace here: what it wrote ships together.
+			if (ctx.caught === undefined) send();
 		},
 	});
 }
