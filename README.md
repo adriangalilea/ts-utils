@@ -184,7 +184,7 @@ Node, Bun and Deno write every event through `console.error` (stdout stays data,
 **Shipping.** With `LOG_SHIP` set, the logger also POSTs its events to that URL, so a process ships its stream with no code:
 
 ```sh
-LOG_SHIP=https://events.untitled.garden/ingest LOG_SHIP_TOKEN=… node server.js
+LOG_SHIP=https://logs.example.com/ingest LOG_SHIP_TOKEN=… node server.js
 ```
 
 What ships is the stream's json line, byte for byte, whatever the console renders (human at a terminal included). A batch is lines joined by `\n`, `Content-Type: text/plain;charset=utf-8`, at most 64 KB and 50 events. It leaves 2s after its first event, at 50 events, when a span opened outside any local span ends (a root span, or a request joined from its caller: its whole trace leaves together), before a Node or Bun process exits on its own (`beforeExit`), and in a browser on `visibilitychange: hidden` and `pagehide`; whatever a hidden page sends goes through `sendBeacon`, the one request a browser finishes after the page is gone. `flushLog()` sends what waits and resolves when nothing is in flight: a Worker hands it to `ctx.waitUntil(flushLog())`, a serverless function to its runtime's `after`, and a process that calls `process.exit()` awaits it first (nothing else runs after `exit`). Shipping never throws and never blocks a write: a refused or lost batch is one `warnOnce` under scope `ship`, an event over 64 KB stays on the console and warns once. The wire and the collector's answers are the contract's, in [utils](https://github.com/adriangalilea/utils#shipping).
