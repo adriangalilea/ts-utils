@@ -214,11 +214,11 @@ export function visitsRoute(
 			statements.push(...pruning(at));
 			pruned = day;
 		}
-		const starting = events.some(
-			({ e }) => e.msg === "page" && e.phase === "start",
+		const paging = events.some(
+			({ e }) => e.msg === "page" && e.phase !== undefined,
 		);
 		const staff =
-			starting && options.staff !== undefined
+			paging && options.staff !== undefined
 				? await options.staff(request)
 				: false;
 		const visitOf = await assign(
@@ -276,9 +276,12 @@ function refusal(line: string, services: readonly string[]): string | LogEvent {
 }
 
 /**
- * Puts each page span starting in the batch in a visit (the caller's open one,
- * else a new one) and adds its rows to `statements`; returns each trace's
- * visit, the batch's pages first, then pages kept before.
+ * Puts each page the batch names and no earlier batch kept in a visit (the
+ * caller's open one, else a new one) and adds its rows to `statements`;
+ * returns each trace's visit, the batch's pages first, then pages kept
+ * before. Batches arrive in any order (a hidden page's beacon can overtake
+ * the fetch carrying its start), and a page span's end carries every field of
+ * its start, so whichever of the two arrives first keeps the page.
  */
 async function assign(
 	db: MetricsDriver,
@@ -290,9 +293,16 @@ async function assign(
 	statements: SqlStatement[],
 ): Promise<(trace: string) => string | undefined> {
 	const traces = [...new Set(events.map(({ e }) => e.trace_id as string))];
-	const starts = events.filter(
-		({ e }) => e.msg === "page" && e.phase === "start",
-	);
+	// One event per page, its start where the batch has it.
+	const opened = new Map<string, LogEvent>();
+	for (const { e } of events)
+		if (
+			e.msg === "page" &&
+			e.phase !== undefined &&
+			(e.phase === "start" || !opened.has(e.trace_id as string))
+		)
+			opened.set(e.trace_id as string, e);
+	const starts = [...opened.values()];
 	const known = new Map<string, string>();
 	if (traces.length > 0) {
 		const rows = await db.query({
@@ -317,7 +327,7 @@ async function assign(
 		open && at - Number(open.last) <= VISIT_GAP_MS
 			? { id: String(open.visit), pages: Number(open.pages) }
 			: null;
-	for (const { e } of starts) {
+	for (const e of starts) {
 		if (known.has(e.trace_id as string)) continue;
 		const f = e.fields ?? {};
 		const flag = (k: "probe" | "staff") =>
@@ -441,11 +451,16 @@ function pruning(at: number): SqlStatement[] {
 
 // --- reading -----------------------------------------------------------------
 
-/** One visit, as the views read it: its places in order (a page's place, else its path). */
+/**
+ * One visit, as the views read it: the places it moved through in order (a
+ * page's place, else its path), a move within a place being no new one, and
+ * how many pages it saw.
+ */
 export interface VisitRow {
 	readonly id: string;
 	readonly started: number;
 	readonly places: readonly string[];
+	readonly pages: number;
 	/** The outside host it landed from. */
 	readonly referrer?: string;
 	readonly source?: string;
@@ -475,7 +490,10 @@ export async function readVisits(
 			args,
 		})),
 	];
-	const visits = new Map<string, VisitRow & { places: string[] }>();
+	const visits = new Map<
+		string,
+		VisitRow & { places: string[]; pages: number }
+	>();
 	for (const r of rows) {
 		const id = String(r.id);
 		let v = visits.get(id);
@@ -484,6 +502,7 @@ export async function readVisits(
 				id,
 				started: Number(r.started),
 				places: [],
+				pages: 0,
 				referrer: str(r.referrer) ?? undefined,
 				source: str(r.source) ?? undefined,
 				country: str(r.country) ?? undefined,
@@ -493,7 +512,9 @@ export async function readVisits(
 			};
 			visits.set(id, v);
 		}
-		v.places.push(str(r.place) ?? String(r.path));
+		const place = str(r.place) ?? String(r.path);
+		if (v.places.at(-1) !== place) v.places.push(place);
+		v.pages += 1;
 	}
 	return [...visits.values()];
 }

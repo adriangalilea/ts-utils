@@ -218,6 +218,36 @@ assert.equal(pages[0]?.dur_ms, 1234.5);
 assert.equal(pages[0]?.reached, '["hero","features"]');
 assert.equal(pages[0]?.lcp_ms, 820);
 
+// --- a page's end overtakes its start (a hidden page's beacon beats a fetch) ---------
+clock += 60_000;
+const t3 = trace();
+const p3 = span();
+res = await post([
+	end(t3, p3, {
+		...page("/lore/requests/4", "lore", { nav: "soft", from: "/lore" }),
+		reached: ["board"],
+	}),
+]);
+assert.equal(res.status, 204, await res.clone().text());
+res = await post([
+	start(
+		t3,
+		p3,
+		page("/lore/requests/4", "lore", { nav: "soft", from: "/lore" }),
+	),
+]);
+assert.equal(res.status, 204, "the late start is the page already kept");
+const late = sqlite
+	.prepare("SELECT seq, dur_ms, reached FROM visits_page WHERE span_id = ?")
+	.all(p3) as Record<string, unknown>[];
+assert.deepEqual(
+	late.map((p) => [p.seq, p.dur_ms, p.reached]),
+	[[3, 1234.5, '["board"]']],
+	"kept once, from its end, in the same visit",
+);
+assert.equal(count("visits_visit"), 1);
+// The visit's later pages are named "lore" too, by place.
+
 // --- past the gap: a new visit; another caller: a new visit -------------------------
 clock += 31 * 60_000;
 res = await post([start(trace(), span(), page("/chill", "chill"))]);
@@ -291,13 +321,13 @@ let visits = await readVisits(db, {
 	now: clock,
 });
 assert.deepEqual(
-	visits.map((v) => [v.places, v.referrer ?? null]),
+	visits.map((v) => [v.places, v.pages, v.referrer ?? null]),
 	[
-		[["studio", "lore"], "news.ycombinator.com"],
-		[["chill"], null],
-		[["studio"], null],
+		[["studio", "lore"], 3, "news.ycombinator.com"],
+		[["chill"], 1, null],
+		[["studio"], 1, null],
 	],
-	"places in order, the probe and the staff left out",
+	"places in order (two pages in lore are one stop), the probe and the staff left out",
 );
 visits = await readVisits(db, {
 	site: "untitled.garden",
@@ -318,7 +348,7 @@ assert.deepEqual(
 	"a page's own probe flag, and the route's staff answer",
 );
 const one = await readVisit(db, String(v1?.id));
-assert.equal(one.pages.length, 2);
+assert.equal(one.pages.length, 3);
 assert.equal(
 	one.lines.length,
 	4,
