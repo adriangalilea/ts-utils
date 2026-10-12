@@ -21,6 +21,7 @@ interface BrowserWindow {
 interface DenoNamespace {
 	exit(code?: number): never;
 	cwd(): string;
+	mainModule: string;
 	env: {
 		get(key: string): string | undefined;
 		set(key: string, value: string): void;
@@ -79,6 +80,7 @@ interface RuntimeCapabilities {
 	hasEnv(key: string): boolean;
 	allEnv(): Record<string, string>;
 	cwd(): string;
+	entry(): string | undefined;
 	stdout: {
 		write(message: string): void;
 		isTTY: boolean;
@@ -207,6 +209,17 @@ class RuntimeOps implements RuntimeCapabilities {
 		const Deno = getDeno();
 		if (Deno) return Deno.cwd();
 		return "/"; // Default for browser
+	}
+
+	/**
+	 * The program's entry: the script's path or URL, else the executable
+	 * (a REPL, `node -e`). undefined in browsers and Workers, which have none.
+	 */
+	entry(): string | undefined {
+		if (this.isNode || this.isBun) return process.argv[1] ?? process.execPath;
+		const Deno = getDeno();
+		if (Deno) return Deno.mainModule;
+		return undefined;
 	}
 
 	get stdout() {
