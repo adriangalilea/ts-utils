@@ -392,29 +392,77 @@ log.span("outer", (o) => {
 	assert(iLine?.span_id === iStart.span_id && iEnd?.phase === "end");
 	assert(oEnd?.phase === "end" && oEnd.span_id === oStart.span_id);
 }
-// Visibility is decided at begin: a hidden span writes no end, even failed,
-// and its traceparent hands on the nearest shown span.
+// Visibility is decided at begin: a hidden span writes no end, and its
+// traceparent hands on the nearest shown span. A failure is never lost to
+// that: the hidden span's failure is one fail line of the nearest shown span.
 let midTraceparent = "";
 let outerTraceparent = "";
 try {
 	log.span("outer", (o) => {
 		outerTraceparent = o.traceparent();
-		o.scope("quiet").span("mid", (m) => {
+		o.scope("quiet").span("mid", { table: "users" }, (m) => {
 			midTraceparent = m.traceparent();
+			m.set({ rows: 3 });
 			throw boom;
 		});
 	});
 } catch {}
 {
-	const [oStart, oEnd, ...rest] = events();
+	const [oStart, fail, oEnd, ...rest] = events();
 	assert(rest.length === 0, "a hidden span that fails writes no end");
 	assert(oStart?.phase === "start" && oEnd?.phase === "end");
 	assert(oEnd.status === "error");
+	assert(
+		fail?.verb === "fail" &&
+			fail.level === "error" &&
+			fail.msg === "mid" &&
+			fail.phase === undefined &&
+			!("parent_id" in fail) &&
+			!("dur_ms" in fail) &&
+			fail.scope?.join() === "quiet" &&
+			fail.span_id === oStart.span_id &&
+			fail.trace_id === oStart.trace_id,
+		"a hidden span's failure is a fail line of the nearest shown span:",
+		JSON.stringify(fail),
+	);
+	const f = fail.fields as Record<string, unknown>;
+	assert(
+		Object.keys(f).join() === "dur_ms,err,rows,table" &&
+			typeof f.dur_ms === "number" &&
+			(f.err as { message?: string }).message === "boom" &&
+			f.rows === 3 &&
+			f.table === "users",
+		"the fail line carries the span's fields with err and dur_ms:",
+		JSON.stringify(f),
+	);
 	assert(
 		midTraceparent === outerTraceparent,
 		"hidden span hands on its shown ancestor",
 	);
 }
+// With no shown ancestor the fail line carries no ids; a silent scope writes nothing.
+try {
+	log.scope("quiet").span("vacuum", () => {
+		throw boom;
+	});
+} catch {}
+{
+	const fail = events();
+	assert(
+		fail.length === 1 &&
+			fail[0]?.verb === "fail" &&
+			fail[0].msg === "vacuum" &&
+			!JSON.stringify(fail[0]).includes("_id"),
+		"a hidden root's failure is a fail line with no ids:",
+		JSON.stringify(fail),
+	);
+}
+runtime.setEnv("QUIET_LOG_LEVEL", "silent");
+log.scope("quiet").begin("vacuum").end(boom);
+assert(take().length === 0, "a silent scope's failed span writes nothing");
+runtime.setEnv("QUIET_LOG_LEVEL", "warn");
+log.scope("quiet").begin("vacuum").end();
+assert(take().length === 0, "a hidden span that succeeds writes nothing");
 // A span shown at begin writes its end even if the threshold rises meanwhile.
 log.span("long", () => runtime.setEnv("LOG_LEVEL", "error"));
 assert(
@@ -809,6 +857,103 @@ try {
 		firstFrame,
 	);
 }
+// A stack prints once: the same error passed up through nested spans shows its
+// stack under the innermost failure only, the spans around it its message.
+const stacked = (text: string): number =>
+	text.split("\n").filter((l) => /^\s+at /.test(l)).length > 0 ? 1 : 0;
+try {
+	log.span("deploy", (d) =>
+		d.span("push", (p) =>
+			p.span("upload", () => {
+				throw boom;
+			}),
+		),
+	);
+} catch {}
+{
+	const ends = take().filter((l) => l.includes("⨯"));
+	assert(
+		ends.map(stacked).join() === "1,0,0",
+		"one stack, under the innermost failure:\n",
+		ends.join("\n"),
+	);
+	assert(
+		ends.every((l) => l.includes('err="Error: boom"')),
+		"every failure still names the error",
+	);
+}
+// A hidden span's fail line counts as the failure that printed it.
+runtime.setEnv("QUIET_LOG_LEVEL", "warn");
+try {
+	log.span("deploy", (d) =>
+		d.scope("quiet").span("upload", () => {
+			throw boom;
+		}),
+	);
+} catch {}
+{
+	const fails = take().filter((l) => l.includes("⨯"));
+	assert(
+		fails.length === 2 && fails.map(stacked).join() === "1,0",
+		"a hidden span's fail line prints the stack, its shown parent does not:\n",
+		fails.join("\n"),
+	);
+}
+runtime.deleteEnv("QUIET_LOG_LEVEL");
+// Spans that do not hold each other each print it: once is per nesting, not per process.
+for (const name of ["first", "second"])
+	try {
+		log.span(name, () => {
+			throw boom;
+		});
+	} catch {}
+assert(
+	take()
+		.filter((l) => l.includes("⨯"))
+		.map(stacked)
+		.join() === "1,1",
+	"unrelated spans failing with one error each print its stack",
+);
+// A new error wrapping the first is a different error: its stack prints.
+try {
+	log.span("deploy", (d) => {
+		try {
+			d.span("upload", () => {
+				throw boom;
+			});
+		} catch (e) {
+			throw new Error("deploy failed", { cause: e });
+		}
+	});
+} catch {}
+assert(
+	take()
+		.filter((l) => l.includes("⨯"))
+		.map(stacked)
+		.join() === "1,1",
+	"a wrapping error prints its own stack",
+);
+// JSON writes err in full on both ends: they are two facts.
+setLogFormat("json");
+try {
+	log.span("deploy", (d) =>
+		d.span("upload", () => {
+			throw boom;
+		}),
+	);
+} catch {}
+{
+	const errs = events()
+		.filter((e) => e.phase === "end")
+		.map((e) => JSON.stringify((e.fields as { err: unknown }).err));
+	assert(
+		errs.length === 2 &&
+			errs[0] === errs[1] &&
+			unwrap(errs[0]).includes("stack"),
+		"json writes the error with its stack on both ends",
+	);
+}
+setLogFormat("human");
 setLogTime(true);
 log.wait("connecting");
 assert(

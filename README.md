@@ -131,7 +131,7 @@ stream.on('error', (err) => up.end(err))
 
 **Traces cross processes explicitly.** `s.traceparent()` is the W3C value to hand on, in an HTTP `traceparent` header or the `TRACEPARENT` env of a child process. `log.join(req.headers.get('traceparent'))` returns a logger whose spans are children of that remote span; `null` or `undefined` returns the logger itself, and a malformed value is ignored with one warn per distinct value. A process started with `TRACEPARENT` set joins it for every root span, with no code.
 
-**Levels.** `silent < error < warn < info < debug < trace`, default `info`. A scoped event reads its threshold live from the most specific variable set: `["api", "auth"]` reads `API_AUTH_LOG_LEVEL`, then `API_LOG_LEVEL`, then `LOG_LEVEL`, then `setLogLevel()`, then `info`. `GZIP_LOG_LEVEL=silent` shuts one subsystem up without touching code. Whether a span is shown is decided once, when it begins; a hidden span writes no end, and what it holds (lines, child spans, `traceparent()`) attaches to the nearest shown span, so a viewer never meets a missing parent. A remote span joined through `join` or `TRACEPARENT` counts as shown. With no shown ancestor, a hidden span's lines carry no ids, as lines outside any span.
+**Levels.** `silent < error < warn < info < debug < trace`, default `info`. A scoped event reads its threshold live from the most specific variable set: `["api", "auth"]` reads `API_AUTH_LOG_LEVEL`, then `API_LOG_LEVEL`, then `LOG_LEVEL`, then `setLogLevel()`, then `info`. `GZIP_LOG_LEVEL=silent` shuts one subsystem up without touching code. Whether a span is shown is decided once, when it begins; a hidden span writes no end, but a failure is never lost to that: a hidden span that fails writes one `fail` line (its name, its fields with `err` and `dur_ms`) as a line of the nearest shown span. What it holds (lines, child spans, `traceparent()`) attaches to the nearest shown span, so a viewer never meets a missing parent. A remote span joined through `join` or `TRACEPARENT` counts as shown. With no shown ancestor, a hidden span's lines carry no ids, as lines outside any span.
 
 **Renderings.** `json` is one event per line on stderr, keys in the contract's order, fields sorted at every depth, errors as `{type, message, stack, cause, …}`:
 
@@ -139,7 +139,7 @@ stream.on('error', (err) => up.end(err))
 {"time":"2026-10-12T12:20:39.123Z","level":"warn","verb":"warn","msg":"retrying","service":"checkout","scope":["payments"],"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","fields":{"attempt":2}}
 ```
 
-`human` is symbols, colour (TTY, `NO_COLOR`, `FORCE_COLOR`), fields dim as `key=value`, an error's stack under its line, and spans with what they hold indented:
+`human` is symbols, colour (TTY, `NO_COLOR`, `FORCE_COLOR`), fields dim as `key=value`, an error's stack under its line (once: a span failing with the error a span inside it already failed with shows the message only; json writes it on both ends), and spans with what they hold indented:
 
 ```
  ○ sync repo=ui

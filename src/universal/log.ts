@@ -36,7 +36,9 @@
  *     s.end(err). Ending twice, or set() after the end, panics.
  *     Whether a span is shown is decided once, at begin, by its start's level
  *     against its scope's threshold; the end follows, so a hidden span writes
- *     no end, failed or not. What a hidden span holds attaches to the nearest
+ *     no end. A failure is never lost to that: a hidden span that fails
+ *     writes one fail line (its name; its fields with err and dur_ms) as a
+ *     line of the nearest shown span. What a hidden span holds attaches to the nearest
  *     shown span, a joined remote one included: its lines carry that id, its
  *     children and its traceparent() name it. With no shown ancestor its
  *     lines carry no ids. A viewer never meets a missing parent.
@@ -52,7 +54,9 @@
  * Renderings
  *     json: one event per line, keys in the contract's order, fields sorted
  *     at every depth. human: symbols, colour (TTY, NO_COLOR, FORCE_COLOR),
- *     fields dim as key=value, an error's stack under its line, spans as
+ *     fields dim as key=value, an error's stack under its line once (a span
+ *     failing with the error a span inside it failed with shows the message;
+ *     json writes it on both ends), spans as
  *     "○ name" ... "✓ name 254ms" with what they hold indented.
  *     Default: Node/Bun/Deno human when stderr is a TTY, else json; browser
  *     human; Worker json.
@@ -528,6 +532,8 @@ interface Draft {
 	readonly fields?: Fields;
 	/** human: what the line shows when it differs from fields (a span's end shows what set() added). */
 	readonly shows?: Fields;
+	/** human: an error a span inside this one already failed with, its stack printed there. */
+	readonly printed?: Error;
 }
 
 const round3 = (ms: number): number => Math.round(ms * 1000) / 1000;
@@ -605,8 +611,9 @@ function human(d: Draft, now: Date, clock: boolean): string {
 			? ` ${paint(DIM, pairs.map(([k, x]) => `${k}=${humanValue(x)}`).join(" "))}`
 			: "";
 	const head = `${stamp}${pad}${v.indent} ${paint(v.style, v.symbol)} ${scope}${d.msg}${dur}${tail}`;
+	// A stack prints once: an error passed up from an inner span shows its message only.
 	const stacks = pairs.flatMap(([, x]) =>
-		x instanceof Error
+		x instanceof Error && x !== d.printed
 			? stackLines(x).map((l) => paint(DIM, `${pad}    ${l}`))
 			: [],
 	);
@@ -653,6 +660,11 @@ interface Ctx {
 	 * any span, and on a joined logger itself: only spans join, lines do not.
 	 */
 	readonly owner: string | undefined;
+	/**
+	 * Errors spans inside the enclosing local span failed with, their stacks
+	 * already printed. undefined outside any local span.
+	 */
+	readonly caught: Set<Error> | undefined;
 }
 
 export interface Logger {
@@ -765,9 +777,24 @@ function open(ctx: Ctx, name: string, initial: Fields | undefined): Span {
 	// A hidden span is transparent: its lines and children attach to the nearest
 	// shown span, a joined remote one included (it is shown in its own process's
 	// stream). With none, its lines carry no ids, as lines outside any span.
+	const caught = new Set<Error>();
 	const inner: Ctx = shown
-		? { scope: ctx.scope, depth: ctx.depth + 1, trace, parent: id, owner: id }
-		: { scope: ctx.scope, depth: ctx.depth, trace, parent, owner: parent };
+		? {
+				scope: ctx.scope,
+				depth: ctx.depth + 1,
+				trace,
+				parent: id,
+				owner: id,
+				caught,
+			}
+		: {
+				scope: ctx.scope,
+				depth: ctx.depth,
+				trace,
+				parent,
+				owner: parent,
+				caught,
+			};
 
 	return Object.assign(makeLogger(inner), {
 		set(more: Fields): void {
@@ -782,10 +809,30 @@ function open(ctx: Ctx, name: string, initial: Fields | undefined): Span {
 		end(err?: unknown): void {
 			assert(!ended, "span", name, "ended twice");
 			ended = true;
-			// The end follows the decision made at begin: no end without its start.
-			if (!shown) return;
 			const dur = performance.now() - began;
 			const failed = err !== undefined && err !== null;
+			const printed = err instanceof Error && caught.has(err) ? err : undefined;
+			// What spans inside this one printed stays printed for the spans around it.
+			for (const e of caught) ctx.caught?.add(e);
+			if (!shown) {
+				// The end follows the decision made at begin: no end without its
+				// start. A failure is never lost to it: one line of the nearest
+				// shown span says the span failed.
+				if (!failed || !admits(ctx.scope, "error")) return;
+				if (err instanceof Error) ctx.caught?.add(err);
+				emit({
+					verb: "fail",
+					msg: name,
+					scope: ctx.scope,
+					depth: inner.depth,
+					trace: inner.owner === undefined ? undefined : trace,
+					span: inner.owner,
+					fields: { ...fields, ...added, err, dur_ms: round3(dur) },
+					printed,
+				});
+				return;
+			}
+			if (failed && err instanceof Error) ctx.caught?.add(err);
 			const shows: Fields = failed ? { ...added, err } : added;
 			emit({
 				verb: failed ? "fail" : "success",
@@ -800,6 +847,7 @@ function open(ctx: Ctx, name: string, initial: Fields | undefined): Span {
 				dur,
 				fields: { ...fields, ...shows },
 				shows,
+				printed,
 			});
 		},
 	});
@@ -909,6 +957,7 @@ function makeLogger(ctx: Ctx): Logger {
 				trace: remote.trace,
 				parent: remote.span,
 				owner: undefined,
+				caught: ctx.caught,
 			});
 		},
 	};
@@ -922,6 +971,7 @@ export const log: Logger = makeLogger({
 	trace: undefined,
 	parent: undefined,
 	owner: undefined,
+	caught: undefined,
 });
 
 // --- reading the stream ----------------------------------------------------
