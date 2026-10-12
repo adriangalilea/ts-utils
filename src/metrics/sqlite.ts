@@ -7,7 +7,7 @@ import {
 	metricWindows,
 } from "./report.js";
 
-export type SqlValue = string | number;
+export type SqlValue = string | number | null;
 export interface SqlStatement {
 	sql: string;
 	args: SqlValue[];

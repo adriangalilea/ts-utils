@@ -1,0 +1,500 @@
+/**
+ * Visits, kept by the site itself: the server half of a page in the event
+ * stream (utils README, "Web pages"). ui's page-sensor posts the page's lines
+ * to the site's own route; this module reads them, puts each page in a visit
+ * and keeps the rows the views read (ui's user-flows). Framework-free: a
+ * route is a Request in and a Response out, and the store is the app's own
+ * SQLite through the metrics drivers (libSQL / Turso, D1).
+ *
+ *     // app/api/events/route.ts
+ *     export const POST = visitsRoute({ db: libsqlDriver(client), site: "untitled.garden", services: ["garden-web"] })
+ *
+ *     // a view
+ *     const visits = await readVisits(libsqlDriver(client), { site: "untitled.garden", days: 14 })
+ *
+ * A VISIT is one caller's pages, each within VISIT_GAP_MS of the one before,
+ * within one UTC day. The caller is a hash of its IP and user agent with a
+ * random salt of the day, the salt deleted once the day is over: a visitor is
+ * recognisable within a day, never across two, and once the salt is gone by no
+ * one. The IP and user agent are never stored; nothing is kept in the browser.
+ *
+ * ROWS: `visits_visit` (one per visit: when, how many pages, where it came
+ * from, coarse country and viewport, whether a probe or the site's staff made
+ * it), `visits_page` (one per page span: its place, path, how it was reached,
+ * how long it was on screen, the sections it reached, the vitals) and
+ * `visits_event` (the page's other lines: fetch spans, named events, errors,
+ * as written). Pages and visits are kept VISIT_DAYS, events EVENT_DAYS, a
+ * probe's or staff's FLAGGED_DAYS; old rows go on the first write of each
+ * day. Provision VISITS_SCHEMA once, never on a request.
+ *
+ * REFUSED: a line that is no event, a service the site did not name, a line
+ * outside a page's trace, a field named like a person (ip, user_agent, email,
+ * user, name, phone). A crawler's batch is dropped whole and answered 204.
+ */
+
+import type {
+	MetricsDriver,
+	MetricsReader,
+	SqlStatement,
+	SqlValue,
+} from "../metrics/sqlite.js";
+import { type LogEvent, parseEvent } from "../universal/log.js";
+
+/** Pages further apart than this are two visits, as every analytics tool counts them. */
+export const VISIT_GAP_MS = 30 * 60_000;
+export const VISIT_DAYS = 180;
+export const EVENT_DAYS = 30;
+/** A probe's or the staff's visits: the developer's view, kept a week. */
+export const FLAGGED_DAYS = 7;
+
+const MAX_BYTES = 64 * 1024;
+const DAY_MS = 86_400_000;
+
+/** Run explicitly during provisioning, never on a request. */
+export const VISITS_SCHEMA = [
+	"CREATE TABLE IF NOT EXISTS visits_salt (day TEXT PRIMARY KEY, salt TEXT NOT NULL)",
+	"CREATE TABLE IF NOT EXISTS visits_caller (day TEXT NOT NULL, caller TEXT NOT NULL, visit TEXT NOT NULL, last INTEGER NOT NULL, PRIMARY KEY (day, caller))",
+	"CREATE TABLE IF NOT EXISTS visits_visit (id TEXT PRIMARY KEY, site TEXT NOT NULL, day TEXT NOT NULL, started INTEGER NOT NULL, last INTEGER NOT NULL, pages INTEGER NOT NULL, referrer TEXT, source TEXT, country TEXT, viewport TEXT, probe INTEGER NOT NULL, staff INTEGER NOT NULL)",
+	"CREATE INDEX IF NOT EXISTS visits_visit_day ON visits_visit (site, day)",
+	"CREATE TABLE IF NOT EXISTS visits_page (span_id TEXT PRIMARY KEY, trace_id TEXT NOT NULL, visit TEXT NOT NULL, seq INTEGER NOT NULL, site TEXT NOT NULL, day TEXT NOT NULL, at INTEGER NOT NULL, host TEXT NOT NULL, path TEXT NOT NULL, place TEXT, route TEXT, nav TEXT NOT NULL, from_path TEXT, build TEXT, dur_ms REAL, reached TEXT, ttfb_ms REAL, lcp_ms REAL, inp_ms REAL, cls REAL)",
+	"CREATE INDEX IF NOT EXISTS visits_page_visit ON visits_page (visit, seq)",
+	"CREATE INDEX IF NOT EXISTS visits_page_trace ON visits_page (trace_id)",
+	"CREATE INDEX IF NOT EXISTS visits_page_day ON visits_page (site, day)",
+	"CREATE TABLE IF NOT EXISTS visits_event (id INTEGER PRIMARY KEY, visit TEXT NOT NULL, trace_id TEXT NOT NULL, day TEXT NOT NULL, at INTEGER NOT NULL, line TEXT NOT NULL)",
+	"CREATE INDEX IF NOT EXISTS visits_event_visit ON visits_event (visit, id)",
+	"CREATE INDEX IF NOT EXISTS visits_event_day ON visits_event (day)",
+] as const;
+
+export interface VisitsOptions {
+	/** The site's own SQLite, VISITS_SCHEMA provisioned. */
+	readonly db: MetricsDriver;
+	/** The registrable domain whose pages these are: its subdomains share its visits. */
+	readonly site: string;
+	/** The services the site's pages write as (`garden-web`); any other line is refused. */
+	readonly services: readonly string[];
+	/** Who called, from the request. The default reads Cloudflare's, then Vercel's, then any proxy's headers. */
+	readonly caller?: (request: Request) => Caller;
+	readonly now?: () => number;
+}
+
+/** The request's caller: hashed with the day's salt, never stored. `country` is two letters, kept. */
+export interface Caller {
+	readonly ip: string;
+	readonly agent: string;
+	readonly country?: string;
+}
+
+export function callerOf(request: Request): Caller {
+	const h = request.headers;
+	const ip =
+		h.get("cf-connecting-ip") ??
+		h.get("x-real-ip") ??
+		h.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+		"";
+	const country = (
+		h.get("cf-ipcountry") ?? h.get("x-vercel-ip-country")
+	)?.toUpperCase();
+	return {
+		ip,
+		agent: h.get("user-agent") ?? "",
+		country: country && /^[A-Z]{2}$/.test(country) ? country : undefined,
+	};
+}
+
+/** Crawlers are no visitors: dropped, never stored. A probe (an automated browser) says so itself and is kept, flagged. */
+const CRAWLER =
+	/bot|crawl|spider|slurp|facebookexternalhit|embedly|preview|monitor|curl|wget|python-requests|go-http-client/i;
+
+/** A field named like a person: refused, so no page or server ever writes one. */
+const PERSONAL = new Set([
+	"ip",
+	"user_agent",
+	"email",
+	"user",
+	"name",
+	"phone",
+]);
+
+const utcDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+const daysBefore = (ms: number, days: number): string =>
+	utcDay(ms - days * DAY_MS);
+
+function hex(bytes: ArrayBuffer | Uint8Array): string {
+	return Array.from(new Uint8Array(bytes), (b) =>
+		b.toString(16).padStart(2, "0"),
+	).join("");
+}
+
+async function sha256(text: string): Promise<string> {
+	return hex(
+		await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)),
+	);
+}
+
+/** Inside the site: the domain, a subdomain, or a local development host. */
+function inside(host: string, site: string): boolean {
+	const name = host.replace(/:\d+$/, "");
+	return (
+		name === site ||
+		name.endsWith(`.${site}`) ||
+		name === "localhost" ||
+		name.endsWith(".localhost")
+	);
+}
+
+export interface Rejection {
+	readonly line: number;
+	readonly why: string;
+}
+
+const json = (status: number, body: unknown): Response =>
+	new Response(`${JSON.stringify(body)}\n`, {
+		status,
+		headers: { "content-type": "application/json" },
+	});
+
+const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+const num = (v: unknown): number | null =>
+	typeof v === "number" && Number.isFinite(v) ? v : null;
+
+/** The day pruning last ran, per process: old rows go on the first write of each day. */
+let pruned = "";
+
+/** The route: a page's batch in, `204`, or `400 {accepted, rejected}` with the accepted lines kept. */
+export function visitsRoute(
+	options: VisitsOptions,
+): (request: Request) => Promise<Response> {
+	const { db, site, services } = options;
+	if (!/^[a-z0-9.-]+$/.test(site))
+		throw new Error(`visits: a site is a domain, got ${site}`);
+	if (services.length === 0)
+		throw new Error("visits: name the services the site's pages write as");
+	const now = options.now ?? Date.now;
+	const callerFrom = options.caller ?? callerOf;
+
+	return async (request) => {
+		if (request.method !== "POST")
+			return json(405, { why: "a batch is a POST" });
+		const type = (request.headers.get("content-type") ?? "")
+			.toLowerCase()
+			.replaceAll(" ", "");
+		if (!type.startsWith("text/plain"))
+			return json(415, { why: "want Content-Type: text/plain;charset=utf-8" });
+		const origin = request.headers.get("origin");
+		if (origin && !inside(new URL(origin).host, site))
+			return json(403, { why: "a page of another site" });
+		const body = await request.arrayBuffer();
+		if (body.byteLength > MAX_BYTES)
+			return json(413, { why: "a batch is at most 64 KB" });
+		const caller = callerFrom(request);
+		if (CRAWLER.test(caller.agent)) return new Response(null, { status: 204 });
+
+		const rejected: Rejection[] = [];
+		const events: { n: number; line: string; e: LogEvent }[] = [];
+		new TextDecoder()
+			.decode(body)
+			.split("\n")
+			.forEach((line, i) => {
+				const n = i + 1;
+				const why = refusal(line, services);
+				if (typeof why === "string") rejected.push({ line: n, why });
+				else events.push({ n, line, e: why });
+			});
+
+		const at = now();
+		const day = utcDay(at);
+		const statements: SqlStatement[] = [];
+		if (pruned !== day) {
+			statements.push(...pruning(at));
+			pruned = day;
+		}
+		const visitOf = await assign(db, site, caller, day, at, events, statements);
+		let accepted = 0;
+		for (const { n, line, e } of events) {
+			const visit = visitOf(e.trace_id as string);
+			if (visit === undefined) {
+				rejected.push({ line: n, why: "no page of this trace was kept" });
+				continue;
+			}
+			accepted++;
+			if (e.msg === "page" && e.phase === "start") continue;
+			if (e.msg === "page" && e.phase === "end") {
+				statements.push(pageEnd(e));
+				continue;
+			}
+			statements.push({
+				sql: "INSERT INTO visits_event (visit, trace_id, day, at, line) VALUES (?, ?, ?, ?, ?)",
+				args: [visit, e.trace_id as string, day, at, line],
+			});
+		}
+		if (statements.length > 0) await db.transact(statements);
+		if (rejected.length === 0) return new Response(null, { status: 204 });
+		rejected.sort((a, b) => a.line - b.line);
+		return json(400, { accepted, rejected });
+	};
+}
+
+/** Why a line is refused, or its event. */
+function refusal(line: string, services: readonly string[]): string | LogEvent {
+	if (line.length === 0) return "empty line";
+	let e: LogEvent | null;
+	try {
+		e = parseEvent(line);
+	} catch (err) {
+		return (err as Error).message.slice(0, 300);
+	}
+	if (e === null) return "not an event";
+	if (!services.includes(e.service))
+		return `service ${e.service} is not one of the site's pages`;
+	if (e.trace_id === undefined) return "outside any page's trace";
+	const personal = Object.keys(e.fields ?? {}).find((k) => PERSONAL.has(k));
+	if (personal !== undefined) return `a field named like a person: ${personal}`;
+	if (e.msg === "page" && e.phase !== undefined && e.parent_id !== undefined)
+		return "a page span is the root of its trace";
+	return e;
+}
+
+/**
+ * Puts each page span starting in the batch in a visit (the caller's open one,
+ * else a new one) and adds its rows to `statements`; returns each trace's
+ * visit, the batch's pages first, then pages kept before.
+ */
+async function assign(
+	db: MetricsDriver,
+	site: string,
+	caller: Caller,
+	day: string,
+	at: number,
+	events: readonly { e: LogEvent }[],
+	statements: SqlStatement[],
+): Promise<(trace: string) => string | undefined> {
+	const traces = [...new Set(events.map(({ e }) => e.trace_id as string))];
+	const starts = events.filter(
+		({ e }) => e.msg === "page" && e.phase === "start",
+	);
+	const known = new Map<string, string>();
+	if (traces.length > 0) {
+		const rows = await db.query({
+			sql: `SELECT trace_id, visit FROM visits_page WHERE site = ? AND trace_id IN (${traces.map(() => "?").join(",")})`,
+			args: [site, ...traces],
+		});
+		for (const r of rows) known.set(String(r.trace_id), String(r.visit));
+	}
+	if (starts.length === 0) return (t) => known.get(t);
+
+	const hash = await sha256(
+		`${await saltOf(db, day)}\0${caller.ip}\0${caller.agent}`,
+	);
+	const id = hash.slice(0, 32);
+	const [open] = [
+		...(await db.query({
+			sql: "SELECT c.visit, c.last, v.pages FROM visits_caller c JOIN visits_visit v ON v.id = c.visit WHERE c.day = ? AND c.caller = ?",
+			args: [day, id],
+		})),
+	];
+	let visit =
+		open && at - Number(open.last) <= VISIT_GAP_MS
+			? { id: String(open.visit), pages: Number(open.pages) }
+			: null;
+	for (const { e } of starts) {
+		if (known.has(e.trace_id as string)) continue;
+		const f = e.fields ?? {};
+		const flag = (k: string) => (f[k] === true ? 1 : 0);
+		if (visit === null) {
+			const referrer = str(f.referrer);
+			visit = { id: hex(crypto.getRandomValues(new Uint8Array(8))), pages: 0 };
+			statements.push({
+				sql: "INSERT INTO visits_visit (id, site, day, started, last, pages, referrer, source, country, viewport, probe, staff) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)",
+				args: [
+					visit.id,
+					site,
+					day,
+					at,
+					at,
+					referrer !== null && !inside(referrer, site) ? referrer : null,
+					str(f.source),
+					caller.country ?? null,
+					str(f.viewport),
+					flag("probe"),
+					flag("staff"),
+				],
+			});
+		}
+		visit.pages += 1;
+		known.set(e.trace_id as string, visit.id);
+		statements.push(
+			{
+				sql: "INSERT OR IGNORE INTO visits_page (span_id, trace_id, visit, seq, site, day, at, host, path, place, route, nav, from_path, build) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+				args: [
+					e.span_id as string,
+					e.trace_id as string,
+					visit.id,
+					visit.pages,
+					site,
+					day,
+					at,
+					str(f.host) ?? "",
+					str(f.path) ?? "/",
+					str(f.place),
+					str(f.route),
+					str(f.nav) ?? "navigate",
+					str(f.from),
+					str(f.build),
+				],
+			},
+			{
+				sql: "UPDATE visits_visit SET last = ?, pages = ?, probe = max(probe, ?), staff = max(staff, ?) WHERE id = ?",
+				args: [at, visit.pages, flag("probe"), flag("staff"), visit.id],
+			},
+		);
+	}
+	if (visit !== null)
+		statements.push({
+			sql: "INSERT INTO visits_caller (day, caller, visit, last) VALUES (?, ?, ?, ?) ON CONFLICT (day, caller) DO UPDATE SET visit = excluded.visit, last = excluded.last",
+			args: [day, id, visit.id, at],
+		});
+	return (t) => known.get(t);
+}
+
+/** What a page span's end adds to its row. */
+function pageEnd(e: LogEvent): SqlStatement {
+	const f = e.fields ?? {};
+	const reached = Array.isArray(f.reached)
+		? JSON.stringify(f.reached.filter((s) => typeof s === "string"))
+		: null;
+	return {
+		sql: "UPDATE visits_page SET dur_ms = ?, reached = ?, ttfb_ms = ?, lcp_ms = ?, inp_ms = ?, cls = ? WHERE span_id = ?",
+		args: [
+			num(e.dur_ms),
+			reached,
+			num(f.ttfb_ms),
+			num(f.lcp_ms),
+			num(f.inp_ms),
+			num(f.cls),
+			e.span_id as string,
+		],
+	};
+}
+
+/** The day's salt: random, made on the day's first page, deleted once the day is over. */
+async function saltOf(db: MetricsDriver, day: string): Promise<string> {
+	await db.transact([
+		{
+			sql: "INSERT INTO visits_salt (day, salt) VALUES (?, ?) ON CONFLICT (day) DO NOTHING",
+			args: [day, hex(crypto.getRandomValues(new Uint8Array(32)))],
+		},
+		{ sql: "DELETE FROM visits_salt WHERE day < ?", args: [day] },
+		{ sql: "DELETE FROM visits_caller WHERE day < ?", args: [day] },
+	]);
+	const [row] = [
+		...(await db.query({
+			sql: "SELECT salt FROM visits_salt WHERE day = ?",
+			args: [day],
+		})),
+	];
+	const salt = row?.salt;
+	if (typeof salt !== "string") throw new Error(`visits: no salt for ${day}`);
+	return salt;
+}
+
+function pruning(at: number): SqlStatement[] {
+	const kept = daysBefore(at, VISIT_DAYS);
+	const flagged = daysBefore(at, FLAGGED_DAYS);
+	const events = daysBefore(at, EVENT_DAYS);
+	return [
+		{
+			sql: "DELETE FROM visits_page WHERE day < ? OR (day < ? AND visit IN (SELECT id FROM visits_visit WHERE probe = 1 OR staff = 1))",
+			args: [kept, flagged],
+		},
+		{
+			sql: "DELETE FROM visits_event WHERE day < ? OR (day < ? AND visit IN (SELECT id FROM visits_visit WHERE probe = 1 OR staff = 1))",
+			args: [events, flagged],
+		},
+		{
+			sql: "DELETE FROM visits_visit WHERE day < ? OR (day < ? AND (probe = 1 OR staff = 1))",
+			args: [kept, flagged],
+		},
+	];
+}
+
+// --- reading -----------------------------------------------------------------
+
+/** One visit, as the views read it: its places in order (a page's place, else its path). */
+export interface VisitRow {
+	readonly id: string;
+	readonly started: number;
+	readonly places: readonly string[];
+	/** The outside host it landed from. */
+	readonly referrer?: string;
+	readonly source?: string;
+	readonly country?: string;
+	readonly viewport?: string;
+	readonly probe: boolean;
+	readonly staff: boolean;
+}
+
+/**
+ * The visits of the last `days` UTC days, today included, oldest first. A
+ * probe's and the staff's are left out unless `flagged`: they are no product
+ * number.
+ */
+export async function readVisits(
+	db: MetricsReader,
+	q: { site: string; days: number; flagged?: boolean; now?: number },
+): Promise<VisitRow[]> {
+	if (!(Number.isInteger(q.days) && q.days >= 1))
+		throw new Error(`visits: days is a whole number of days, got ${q.days}`);
+	const since = daysBefore(q.now ?? Date.now(), q.days - 1);
+	const args: SqlValue[] = [q.site, since];
+	const flags = q.flagged ? "" : " AND v.probe = 0 AND v.staff = 0";
+	const rows = [
+		...(await db.query({
+			sql: `SELECT v.id, v.started, v.referrer, v.source, v.country, v.viewport, v.probe, v.staff, p.place, p.path FROM visits_visit v JOIN visits_page p ON p.visit = v.id WHERE v.site = ? AND v.day >= ?${flags} ORDER BY v.started, v.id, p.seq`,
+			args,
+		})),
+	];
+	const visits = new Map<string, VisitRow & { places: string[] }>();
+	for (const r of rows) {
+		const id = String(r.id);
+		let v = visits.get(id);
+		if (v === undefined) {
+			v = {
+				id,
+				started: Number(r.started),
+				places: [],
+				referrer: str(r.referrer) ?? undefined,
+				source: str(r.source) ?? undefined,
+				country: str(r.country) ?? undefined,
+				viewport: str(r.viewport) ?? undefined,
+				probe: Number(r.probe) === 1,
+				staff: Number(r.staff) === 1,
+			};
+			visits.set(id, v);
+		}
+		v.places.push(str(r.place) ?? String(r.path));
+	}
+	return [...visits.values()];
+}
+
+/** One visit's page rows and its other lines as written, for a visit's trace. */
+export async function readVisit(
+	db: MetricsReader,
+	id: string,
+): Promise<{
+	pages: Record<string, unknown>[];
+	lines: string[];
+}> {
+	const pages = [
+		...(await db.query({
+			sql: "SELECT * FROM visits_page WHERE visit = ? ORDER BY seq",
+			args: [id],
+		})),
+	];
+	const lines = [
+		...(await db.query({
+			sql: "SELECT line FROM visits_event WHERE visit = ? ORDER BY id",
+			args: [id],
+		})),
+	].map((r) => String(r.line));
+	return { pages, lines };
+}

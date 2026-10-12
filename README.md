@@ -77,6 +77,24 @@ Enable it only with a deletion and retention policy; no identity is inferred.
 `overlaps: [["a", "b"]]` declares unordered audience overlap, not an ordered funnel.
 Daily totals support counts and averages, not percentile latency or event ordering.
 
+## Visits
+
+A site keeps its own visits: ui's `page-sensor` posts each page's lines (the utils contract, "Web pages") to the site's own route, and `@adriangalilea/utils/visits` puts each page in a visit and keeps the rows the views read (ui's `user-flows`). No other server, no cookie, nothing kept in the browser.
+
+```typescript
+// app/api/events/route.ts
+import { libsqlDriver } from '@adriangalilea/utils/metrics/libsql'
+import { visitsRoute } from '@adriangalilea/utils/visits'
+
+export const POST = visitsRoute({ db: libsqlDriver(client), site: 'untitled.garden', services: ['garden-web'] })
+
+// a view
+const visits = await readVisits(libsqlDriver(client), { site: 'untitled.garden', days: 14 })
+// [{ id, started, places: ['studio', 'lore'], referrer: 'news.ycombinator.com', country: 'ES', … }]
+```
+
+A visit is one caller's pages, each within 30 minutes of the one before, within one UTC day. The caller is a hash of its IP and user agent with a random salt of the day, deleted when the day is over: a visitor is recognisable within a day, never across two, and once the salt is gone by no one, the site's owner included. The IP and user agent are never stored; the country (two letters, from the platform's header) is. Pages and visits are kept 180 days, a page's other lines (requests, named events, errors) 30, a probe's (an automated browser) and the staff's 7, and both are left out of `readVisits` unless `flagged`. Refused, by line: a service the site did not name, a line outside a page's trace, a field named like a person (`ip`, `user_agent`, `email`, `user`, `name`, `phone`). A crawler's batch is dropped whole. Provision `VISITS_SCHEMA` once (the tables are prefixed `visits_`); the route updates and deletes, so its credential needs both. `readVisit(db, id)` returns one visit's pages and lines, for its trace.
+
 ## Installation
 
 ```bash
