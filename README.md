@@ -180,6 +180,15 @@ if (e?.phase === 'end') e.dur_ms
 - A Worker that writes json must call `setLogService(name)`.
 - `SourcedError.message` is the message given, without the `[source:operation]` prefix.
 
+#### Migrating from 9.0
+
+Library code writes every diagnostic through the logger (`pnpm test:raw-writes` refuses a raw `console.*`), so the per-module switches are gone and the environment does their job:
+
+- `gracefulStart`'s `log` option: its lines are scope `["bot", "kit"]`, `BOT_KIT_LOG_LEVEL=silent` quiets them.
+- `coalesceLongMessages`'s `log` option: `BOT_COALESCE_LOG_LEVEL=debug`.
+- `kev.debug = true`: `KEV_LOG_LEVEL=debug`. The trace names each lookup's source, never its value.
+- Bot modules log under `["bot", "<module>"]` (was `["bot/<module>"]`), so `BOT_LOG_LEVEL` governs them all; the per-module variable names are unchanged.
+
 ### Currency
 
 Currency utilities with comprehensive crypto support (500+ symbols):

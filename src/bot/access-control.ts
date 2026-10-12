@@ -147,6 +147,7 @@ import {
 } from "gramio";
 
 import { say } from "../say/index.js";
+import { log as root } from "../universal/log.js";
 import { coarseSpan } from "../universal/time.js";
 import { botStorageKey, botSubKey } from "./keys.js";
 import {
@@ -156,6 +157,8 @@ import {
 	langOfUser,
 	loadFullRecord,
 } from "./lang.js";
+
+const log = root.scope("bot").scope("access-control");
 
 const FIRST_MSG_LIMIT = 200;
 const DEFAULT_THROTTLE_MS = 6 * 60 * 60 * 1000;
@@ -726,11 +729,11 @@ export const accessControl = (opts: AccessControlOptions) => {
 					text: groupRequestText(rec, adminLang),
 					reply_markup: groupRequestKeyboard(chat.id, adminLang),
 				});
-			} catch (e) {
-				console.error(
-					"[access-control] failed to notify admin of a group request",
-					e,
-				);
+			} catch (err) {
+				log.error("admin not notified of a group request", {
+					chat: chat.id,
+					err,
+				});
 			}
 			if (isFirst) opts.onGroupRequest?.({ chat, addedBy });
 		}
@@ -992,10 +995,10 @@ export const accessControl = (opts: AccessControlOptions) => {
 							),
 							reply_markup: requestKeyboard(userId, adminLang),
 						});
-					} catch (e) {
-						console.error(
-							"[access-control] failed to notify admin (have you /started the bot from your account?)",
-							e,
+					} catch (err) {
+						log.error(
+							"admin not notified of an access request (has the admin /started the bot?)",
+							{ user: userId, err },
 						);
 					}
 					opts.onAccessRequest?.({

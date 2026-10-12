@@ -33,7 +33,10 @@
  */
 import type { AnyBot } from "gramio";
 import { kev } from "../platform/kev.js";
+import { log as root } from "../universal/log.js";
 import { notifyAdmins } from "./notify.js";
+
+const log = root.scope("bot").scope("kit");
 
 // ─── gracefulStart ─────────────────────────────────────────────────
 
@@ -44,8 +47,6 @@ export type GracefulStartOptions = {
 	exitCode?: number;
 	/** Hard-kill after this many ms if shutdown hangs. Default 10000. */
 	forceExitAfterMs?: number;
-	/** Logger. Default `console.log`. Set `false` to silence. */
-	log?: ((msg: string) => void) | false;
 	/**
 	 * DM the admin on `bot.start()` and `bot.stop()` so you see lifecycle
 	 * events on your own Telegram. Body: `@<bot-username> started.` and
@@ -73,8 +74,6 @@ export const gracefulStart = async (
 	bot: AnyBot,
 	opts: GracefulStartOptions = {},
 ): Promise<void> => {
-	const log =
-		opts.log === false ? () => {} : (opts.log ?? ((m) => console.log(m)));
 	const forceMs = opts.forceExitAfterMs ?? 10_000;
 
 	let stopping = false;
@@ -82,10 +81,10 @@ export const gracefulStart = async (
 	const stop = async (signal: string) => {
 		if (stopping) return;
 		stopping = true;
-		log(`[bot] ${signal} received, shutting down…`);
+		log.wait("shutting down", { signal });
 
 		const force = setTimeout(() => {
-			console.error(`[bot] forced exit after ${forceMs}ms`);
+			log.error("forced exit, shutdown hung", { after_ms: forceMs });
 			process.exit(1);
 		}, forceMs);
 		force.unref?.();
@@ -93,9 +92,9 @@ export const gracefulStart = async (
 		try {
 			await bot.stop();
 			await opts.onShutdown?.();
-			log("[bot] shutdown clean");
-		} catch (e) {
-			console.error("[bot] shutdown error", e);
+			log.success("shutdown clean");
+		} catch (err) {
+			log.error("shutdown failed", { err });
 		} finally {
 			clearTimeout(force);
 			process.exit(opts.exitCode ?? 0);

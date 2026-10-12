@@ -5,7 +5,7 @@
  * Worker).
  *
  * Everything here is FIRE-AND-FORGET BY CONTRACT: a notification must
- * never take the bot down, so failures are logged (console.error —
+ * never take the bot down, so failures are logged (scope bot/notify,
  * visible in a Worker tail and a Node terminal alike) and swallowed.
  *
  *   `notifyAdmins(bot, adminIds, text, extra?)` — DM each admin.
@@ -23,6 +23,9 @@
  * bot.onError(({ kind, error }) => void alertAdminError(bot, adminIds, `error [${kind}]`, error, errorAlerts))
  * await notifyAdmins(bot, adminIds, `@${bot.info.username} deployed.`)
  */
+import { log as root } from "../universal/log.js";
+
+const log = root.scope("bot").scope("notify");
 
 /** The one API surface a notification needs — satisfied by any gramio `Bot`. */
 export type NotifyBot = {
@@ -56,7 +59,7 @@ export async function notifyAdmins(
 			.map((id) =>
 				bot.api
 					.sendMessage({ ...extra, chat_id: id, text: body })
-					.catch((e) => console.error(`[bot/notify] admin ${id} failed:`, e)),
+					.catch((err) => log.error("admin DM failed", { admin: id, err })),
 			),
 	);
 }

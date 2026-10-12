@@ -35,6 +35,7 @@
 
 import type { Polyglot } from "../../say/index.js";
 import { say } from "../../say/index.js";
+import { log as root } from "../../universal/log.js";
 import { narrow } from "../ctx.js";
 import { FALLBACK_LANG, type Lang, ctxLang as sessionLang } from "../lang.js";
 import type { MenuCtx, MenuItem } from "../menu.js";
@@ -44,6 +45,8 @@ import type {
 	PaymentsSession,
 	ProductCatalog,
 } from "./types.js";
+
+const log = root.scope("bot").scope("payments");
 
 /**
  * `MenuCtx` is deliberately narrow + plugin-agnostic (see `bot/menu.ts`
@@ -290,8 +293,12 @@ export const buildPaymentsMenuItem = (args: {
 					telegram_payment_charge_id: pay.vip.chargeId,
 					is_canceled: wantCanceled,
 				});
-			} catch (e) {
-				console.error("[bot/payments/menu] editUserStarSubscription failed", e);
+			} catch (err) {
+				log.error("editUserStarSubscription failed", {
+					user: userId,
+					cancel: wantCanceled,
+					err,
+				});
 				return say(
 					{ en: "Failed — try later.", es: "Falló — prueba luego." },
 					lang,

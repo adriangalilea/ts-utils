@@ -16,6 +16,9 @@
 
 import type { FormattableString } from "@gramio/format";
 import type { Bot, MessageContext } from "gramio";
+import { log as root } from "../universal/log.js";
+
+const log = root.scope("bot").scope("draft");
 
 // Telegram animates draft repaints; one frame per second is smooth and stays
 // clear of rate limits.
@@ -46,17 +49,21 @@ export function streamForensics(label: string) {
 		/** Call per outgoing frame with the accumulated-markdown and rendered lengths. */
 		frame(accLen: number, renderedLen: number) {
 			if (renderedLen < lastRenderedLen && accLen >= lastAccLen)
-				console.warn(
-					`[bot/llm] ${label} render regressed · rendered ${lastRenderedLen}→${renderedLen} · acc ${accLen}`,
-				);
+				log.warn("render regressed", {
+					label,
+					rendered_was: lastRenderedLen,
+					rendered: renderedLen,
+					acc: accLen,
+				});
 			lastAccLen = accLen;
 			lastRenderedLen = renderedLen;
 		},
 		/** Call from the upstream reset path with the length being dropped. */
 		reset(droppedChars: number) {
-			console.warn(
-				`[bot/llm] ${label} reset (provider failover) · dropped ${droppedChars} chars`,
-			);
+			log.warn("reset by provider failover", {
+				label,
+				dropped_chars: droppedChars,
+			});
 		},
 	};
 }

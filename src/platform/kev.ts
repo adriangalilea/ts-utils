@@ -30,15 +30,18 @@
  * SOURCE TRACKING & OBSERVABILITY:
  *   const [value, source] = KEV.getWithSource("API_KEY")  // Returns value + where it came from
  *   source = KEV.sourceOf("API_KEY")                      // "/path/to/project/.env"
- *   KEV.debug = true                                       // Shows lookup chain
+ *   KEV_LOG_LEVEL=debug                                    // Traces each lookup's source (never its value)
  *   KEV.export("backup.env")                              // Includes # from: comments
  */
 
 import { panic } from "../offensive.js";
 import { runtime } from "../runtime.js";
+import { log as root } from "../universal/log.js";
 import { file } from "./file.js";
 import { path } from "./path.js";
 import { findMonorepoRoot, findProjectRoot } from "./project.js";
+
+const log = root.scope("kev");
 
 interface MemEntry {
 	value: string;
@@ -88,7 +91,6 @@ export class KevOps {
 	memory = new Map<string, MemEntry>();
 	sources: string[] = ["os", ".env"];
 	source: SourceOps;
-	debug = false;
 
 	constructor() {
 		this.source = new SourceOps(this);
@@ -98,41 +100,22 @@ export class KevOps {
 	initializeSmartDefaults(): void {
 		// Check for monorepo root first (turborepo)
 		const monorepoRoot = findMonorepoRoot();
-		if (monorepoRoot) {
-			const monorepoEnv = path.join(monorepoRoot, ".env");
-			this.sources.push(monorepoEnv);
-
-			if (this.debug) {
-				console.log("KEV: Auto-discovered monorepo root:", monorepoRoot);
-				console.log("KEV: Added monorepo .env to sources:", monorepoEnv);
-			}
-		}
+		if (monorepoRoot) this.sources.push(path.join(monorepoRoot, ".env"));
 
 		// Then check for project root
 		const projectRoot = findProjectRoot();
 		if (projectRoot) {
 			const projectEnv = path.join(projectRoot, ".env");
 			// Only add if it's different from monorepo env
-			if (!monorepoRoot || projectEnv !== path.join(monorepoRoot, ".env")) {
+			if (!monorepoRoot || projectEnv !== path.join(monorepoRoot, ".env"))
 				this.sources.push(projectEnv);
-
-				if (this.debug) {
-					console.log("KEV: Auto-discovered project root:", projectRoot);
-					console.log("KEV: Added project .env to sources:", projectEnv);
-				}
-			}
 		}
 
-		if (this.debug) {
-			if (!monorepoRoot && !projectRoot) {
-				console.log(
-					"KEV: No project or monorepo root found, using standard sources:",
-					this.sources,
-				);
-			} else {
-				console.log("KEV: Default sources:", this.sources);
-			}
-		}
+		log.debug("sources", {
+			monorepo: monorepoRoot ?? null,
+			project: projectRoot ?? null,
+			sources: this.sources,
+		});
 	}
 
 	parseKey(key: string): [string, string] {
@@ -159,78 +142,54 @@ export class KevOps {
 	get(key: string, defaultValue?: string): string {
 		const [namespace, realKey] = this.parseKey(key);
 
-		const debug = this.debug && key !== "LOG_LEVEL";
-
-		if (debug) {
-			console.log(`KEV: Looking for ${key}`);
-		}
-
+		// Values stay out of the trace: they are secrets as often as not.
 		// Namespaced - direct access
 		if (namespace) {
 			const val = this.getFromNamespace(namespace, realKey);
 			if (val !== "") {
-				if (debug) {
-					console.log(`  ✓ ${namespace}: found ${val}`);
-				}
+				log.debug("get", { key, source: namespace });
 				return val;
 			}
-			if (debug) {
-				console.log(`  ✗ ${namespace}: not found`);
-			}
 			if (defaultValue !== undefined) {
-				if (debug) {
-					console.log(`  → using default: ${defaultValue}`);
-				}
+				log.debug("get", { key, source: "default", missed: [namespace] });
 				return defaultValue;
 			}
+			log.debug("get missed", { key, missed: [namespace] });
 			return "";
 		}
 
 		// Unnamespaced - check memory first
 		const entry = this.memory.get(realKey);
 		if (entry) {
-			if (debug) {
-				console.log(`  ✓ memory: ${entry.value} (from ${entry.source})`);
-			}
+			log.debug("get", { key, source: "memory", from: entry.source });
 			return entry.value;
 		}
 
-		if (debug) {
-			console.log("  ✗ memory: not found");
-		}
-
 		// Search through sources
+		const missed: string[] = [];
 		for (const source of this.sources) {
 			const val = this.getFromNamespace(source, realKey);
 			if (val !== "") {
-				if (debug) {
-					console.log(`  ✓ ${source}: found ${val} (caching)`);
-				}
 				// Cache in memory for next time with source info
 				const absoluteSource =
 					source !== "os" && source !== "default" && source !== "set"
 						? path.absolute(source)
 						: source;
 				this.memory.set(realKey, { value: val, source: absoluteSource });
+				log.debug("get", { key, source: absoluteSource, missed });
 				return val;
 			}
-			if (debug) {
-				console.log(`  ✗ ${source}: not found`);
-			}
+			missed.push(source);
 		}
 
 		// Use default and cache it
 		if (defaultValue !== undefined) {
-			if (debug) {
-				console.log(`  → using default: ${defaultValue} (caching)`);
-			}
 			this.memory.set(realKey, { value: defaultValue, source: "default" });
+			log.debug("get", { key, source: "default", missed });
 			return defaultValue;
 		}
 
-		if (debug) {
-			console.log("  → not found, returning empty");
-		}
+		log.debug("get missed", { key, missed });
 		return "";
 	}
 

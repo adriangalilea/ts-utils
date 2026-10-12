@@ -218,7 +218,7 @@ const bot = new Bot(token)
 	.extend(adminContext(190202471))
 	.extend(userSession) // session first
 	.extend(accessControl({ session: userSession, storage, defaults: [] }))
-	.extend(coalesceLongMessages({ log: true }))
+	.extend(coalesceLongMessages()) // BOT_COALESCE_LOG_LEVEL=debug traces each fragment
 	.extend(chat.plugin)
 	.extend(lang.plugin)
 	.extend(payments.plugin)

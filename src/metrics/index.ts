@@ -1,3 +1,7 @@
+import { log as root } from "../universal/log.js";
+
+const log = root.scope("metrics");
+
 /** Product measurement with declared keys and bounded dimensions. No runtime or store dependency. */
 export type MetricSpec = {
 	kind: "counter" | "timing";
@@ -105,8 +109,8 @@ export function defineMetrics<const Spec extends Record<string, MetricSpec>>(
 		});
 	const report =
 		opts.onError ??
-		((_error: unknown, key: string) =>
-			console.warn(`metrics: measurement failed (${key})`));
+		((err: unknown, key: string) =>
+			log.warn("measurement failed", { key, err }));
 	// The schema reaches the store once per process, ahead of the first sample. A failed
 	// declaration is retried by the next sample, so a store that was briefly away recovers
 	// and a store that refuses the schema (a changed kind) fails every sample, loudly.

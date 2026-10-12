@@ -66,8 +66,11 @@ import type {
 	ModelMessage,
 } from "../llm/index.js";
 import type { Polyglot } from "../say/index.js";
+import { log as root } from "../universal/log.js";
 import { createDraftPreview } from "./draft.js";
 import type { MenuItem } from "./menu.js";
+
+const log = root.scope("bot").scope("llm");
 
 // ─── OUTPUT: render an LLM event stream into the chat ──────────────
 
@@ -506,19 +509,22 @@ export const llmHistory = (opts: LLMHistoryOptions): LLMHistoryFeature => {
 						message_thread_id: tid,
 					});
 					threadDeleted = true;
-				} catch (e) {
+				} catch (err) {
 					// Thread already gone (404), supergroup-without-admin (400),
 					// chat type doesn't support it, etc. History is already
 					// cleared so the user has a clean conversation, but we
 					// log so the failure isn't invisible.
-					console.error(
-						`[llm-history] deleteForumTopic failed (chat=${chatId} thread=${tid} user=${userId ?? "?"}):`,
-						e,
-					);
+					log.error("deleteForumTopic failed, history cleared", {
+						chat: chatId,
+						thread: tid,
+						user: userId,
+						err,
+					});
 				}
 			} else {
-				console.warn(
-					`[llm-history] skipping deleteForumTopic (chat=${chatId ?? "?"} thread=${tid ?? "none"} user=${userId ?? "?"}) — history cleared, thread stays visible`,
+				log.warn(
+					"deleteForumTopic skipped, history cleared, thread stays visible",
+					{ chat: chatId, thread: tid, user: userId },
 				);
 			}
 			return threadDeleted ? deletedToast : historyOnlyToast;

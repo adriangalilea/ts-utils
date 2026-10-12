@@ -80,10 +80,13 @@ import type { Storage } from "@gramio/storage";
 import { CallbackData, InlineKeyboard, Plugin } from "gramio";
 
 import { type Polyglot, say } from "../say/index.js";
+import { log as root } from "../universal/log.js";
 import { isPrivateChat } from "./groups.js";
 import { botStorageKey } from "./keys.js";
 import { FALLBACK_LANG } from "./lang.js";
 import { langHintOf } from "./language.js";
+
+const log = root.scope("bot").scope("menu");
 
 // ─── public types ──────────────────────────────────────────────────
 
@@ -1123,8 +1126,8 @@ const buildMenuPlugin = (menu: BotMenu) => {
 					} catch {
 						// message too old to edit
 					}
-				} catch (e) {
-					console.error("[menu] /forget failed", e);
+				} catch (err) {
+					log.error("/forget failed", { user: userId, err });
 					await ctx.answer({
 						text: say({ en: "Failed.", es: "Falló." }, lang),
 					});
@@ -1193,8 +1196,8 @@ const buildMenuPlugin = (menu: BotMenu) => {
 							lang,
 						),
 					});
-				} catch (e) {
-					console.error("[menu] /export sendDocument failed", e);
+				} catch (err) {
+					log.error("/export sendDocument failed", { user: userId, err });
 					await ctx.send(
 						say(
 							{

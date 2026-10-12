@@ -61,6 +61,9 @@
  * }
  */
 import { Plugin } from "gramio";
+import { log as root } from "../universal/log.js";
+
+const log = root.scope("bot").scope("coalesce");
 
 // Current guess. Real Telegram clients split at natural boundaries
 // (newline / paragraph / sentence) before the 4096 cap, but we don't
@@ -97,13 +100,8 @@ export type CoalesceCriteria = {
 	acrossUsers?: boolean;
 };
 
-export type CoalesceLongMessagesOptions = CoalesceCriteria & {
-	/**
-	 * Log each fragment + buffer transition to stderr for debugging.
-	 * Off by default.
-	 */
-	log?: boolean;
-};
+/** Each fragment and buffer transition is a debug line: BOT_COALESCE_LOG_LEVEL=debug. */
+export type CoalesceLongMessagesOptions = CoalesceCriteria;
 
 /**
  * Pure check: are these two fragments part of the same client-split
@@ -152,12 +150,6 @@ export const coalesceLongMessages = (
 	const minLeadingLength = opts.minLeadingLength ?? DEFAULT_MIN_LEADING_LENGTH;
 	const windowMs = opts.windowMs ?? DEFAULT_WINDOW_MS;
 	const acrossUsers = opts.acrossUsers ?? DEFAULT_ACROSS_USERS;
-	const log = opts.log ?? false;
-
-	const dbg = (msg: string) => {
-		if (log) console.error(`[coalesce] ${msg}`);
-	};
-
 	// Keyed per `<chatId>:<userId>` (or `<chatId>` when acrossUsers).
 	// Buffer lives only as long as fragments are still arriving — gets
 	// deleted on flush.
@@ -185,9 +177,12 @@ export const coalesceLongMessages = (
 				// split is typically short). We don't call next(); this update
 				// is swallowed. The first fragment held by `existing.flush`
 				// will eventually fire next() with the combined text.
-				dbg(
-					`join key=${key} len=${text.length} buffered=${existing.text.length}→${existing.text.length + text.length}`,
-				);
+				log.debug("join", {
+					key,
+					len: text.length,
+					buffered: existing.text.length,
+					total: existing.text.length + text.length,
+				});
 				clearTimeout(existing.timer);
 				existing.text += text;
 				existing.timer = setTimeout(existing.flush, windowMs);
@@ -197,7 +192,11 @@ export const coalesceLongMessages = (
 			if (text.length < minLeadingLength) {
 				// Short message → can never be the leading fragment of a real
 				// client split. Zero-latency passthrough.
-				dbg(`passthrough key=${key} len=${text.length} (<${minLeadingLength})`);
+				log.debug("passthrough", {
+					key,
+					len: text.length,
+					min_leading: minLeadingLength,
+				});
 				return next();
 			}
 
@@ -205,9 +204,12 @@ export const coalesceLongMessages = (
 			// Returns a Promise that only resolves after the buffer flushes
 			// (next() of THIS ctx is called with the combined text). This
 			// keeps gramio's middleware chain awaiting until we're done.
-			dbg(
-				`open key=${key} len=${text.length} (≥${minLeadingLength}, wait ${windowMs}ms)`,
-			);
+			log.debug("open", {
+				key,
+				len: text.length,
+				min_leading: minLeadingLength,
+				window_ms: windowMs,
+			});
 			return new Promise<void>((resolve, reject) => {
 				const buffered: FragmentBuffer = {
 					text,
@@ -215,7 +217,7 @@ export const coalesceLongMessages = (
 					flush: () => {
 						// Detach from the map FIRST so any fragment arriving mid-flush
 						// starts a fresh buffer instead of re-entering this one.
-						dbg(`flush key=${key} total=${buffered.text.length}`);
+						log.debug("flush", { key, total: buffered.text.length });
 						buffers.delete(key);
 
 						// gramio's MessageContext exposes `text` as an accessor

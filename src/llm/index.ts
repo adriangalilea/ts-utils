@@ -70,6 +70,9 @@ import {
 	type ToolChoice,
 	type ToolSet,
 } from "ai";
+import { log as root } from "../universal/log.js";
+
+const log = root.scope("llm").scope("health");
 
 // One import surface for consumers: the tool helper and its types ride along.
 export {
@@ -418,7 +421,7 @@ export class Llm {
 				provider.id,
 				health,
 				classifyError(attempt.error),
-				msg,
+				attempt.error,
 			);
 
 			// Whatever this attempt painted is now stale; order a repaint before
@@ -644,12 +647,14 @@ export class Llm {
 		label: string,
 		prev: KeyHealth | null,
 		cls: FailureClass,
-		errMsg: string,
+		err: unknown,
 	): Promise<void> {
 		if (cls === "client") {
-			console.error(
-				`[llm:health] ${label} rejected our request (${errMsg}); not marking unhealthy`,
-			);
+			log.error("request rejected, key stays healthy", {
+				provider: label,
+				key: storeKey,
+				err,
+			});
 			return;
 		}
 		const now = Date.now();
@@ -682,10 +687,14 @@ export class Llm {
 				// best-effort
 			}
 		}
-		const until = new Date(health.recoveryAt).toISOString();
-		console.error(
-			`[llm:health] ${label} ${cls} (${errMsg}); cooling down until ${until} (failure #${failures})`,
-		);
+		log.warn("key cooling down", {
+			provider: label,
+			key: storeKey,
+			class: cls,
+			until: new Date(health.recoveryAt),
+			failures,
+			err,
+		});
 	}
 
 	private async clearHealth(storeKey: string): Promise<void> {
