@@ -634,6 +634,11 @@ and tools all live in the `llm` module — nothing here talks to a model.
 
 ## Conventions
 
+- **Diagnostics go through the logger, scoped `["bot", "<module>"]`**
+  (`root.scope("bot").scope("payments")`), never `console.*`. One
+  variable governs the family: `BOT_LOG_LEVEL=silent` quiets every bot
+  module, `BOT_PAYMENTS_LOG_LEVEL=debug` opens one. A plugin takes no
+  `log` option for this; `pnpm test:raw-writes` refuses a new raw write.
 - **Spanish copy by default** in user-facing strings (deny messages, admin
   menu labels). Overridable per-bot via plugin options.
 - **Emojis as button labels** — Telegram inline buttons have no native color
