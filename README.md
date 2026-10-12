@@ -150,7 +150,7 @@ stream.on('error', (err) => up.end(err))
  ✓ sync 51ms pushed=true
 ```
 
-Node, Bun and Deno write every event through `console.error` (stdout stays data, and a `cli` live region keeps lines above it); browsers and Workers use the level's console method.
+Node, Bun and Deno write every event through `console.error` (stdout stays data, and a `cli` live region keeps lines above it); browsers and Workers use the level's console method, so Workers Logs files each event at its level. A Worker is recognised by its user agent, so `nodejs_compat`'s `process` does not pass it off as Node; its `LOG_SERVICE` and other vars are read from that `process.env`.
 
 **Configuration.** Each variable has a setter. The setter is the program's default and the variable, read live, overrides it. Values match without regard to case, an empty variable is unset, and an unknown value panics.
 

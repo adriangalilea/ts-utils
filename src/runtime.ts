@@ -43,6 +43,12 @@ const hasBun = (): boolean =>
 const getBrowserWindow = (): BrowserWindow | undefined =>
 	(globalThis as { window?: BrowserWindow }).window;
 
+// workerd names itself here, and only here: `nodejs_compat` polyfills `process`
+// (versions.node included), so a Worker that asked for Node APIs looks like Node.
+const isWorkerdRuntime = (): boolean =>
+	(globalThis as { navigator?: { userAgent?: string } }).navigator
+		?.userAgent === "Cloudflare-Workers";
+
 /**
  * Thrown by `runtime.exit(code)` in environments without process exit
  * (i.e. browsers). Carries the requested exit code on `.exitCode` so
@@ -60,6 +66,7 @@ export class ProcessExitError extends Error {
 interface RuntimeCapabilities {
 	// Environment detection
 	readonly isBrowser: boolean;
+	readonly isWorkerd: boolean;
 	readonly isNode: boolean;
 	readonly isDeno: boolean;
 	readonly isBun: boolean;
@@ -109,10 +116,20 @@ class RuntimeOps implements RuntimeCapabilities {
 		typeof globalThis !== "undefined" &&
 		"window" in globalThis &&
 		"document" in globalThis;
+	readonly isWorkerd = isWorkerdRuntime();
 	readonly isNode =
-		typeof process !== "undefined" && process.versions?.node !== undefined;
+		!this.isWorkerd &&
+		typeof process !== "undefined" &&
+		process.versions?.node !== undefined;
 	readonly isDeno = getDeno() !== undefined;
 	readonly isBun = hasBun();
+
+	/** `process.env`: Node and Bun, and a Worker whose `nodejs_compat` puts its vars there. */
+	private get processEnv(): Record<string, string | undefined> | undefined {
+		if (this.isNode || this.isBun) return process.env;
+		if (this.isWorkerd && typeof process !== "undefined") return process.env;
+		return undefined;
+	}
 
 	// Capability checking
 	canExit(): boolean {
@@ -150,15 +167,17 @@ class RuntimeOps implements RuntimeCapabilities {
 	}
 
 	env(key: string): string | undefined {
-		if (this.isNode || this.isBun) return process.env[key];
+		const env = this.processEnv;
+		if (env) return env[key];
 		const Deno = getDeno();
 		if (Deno) return Deno.env.get(key);
 		return browserEnv()?.[key];
 	}
 
 	setEnv(key: string, value: string): void {
-		if (this.isNode || this.isBun) {
-			process.env[key] = value;
+		const env = this.processEnv;
+		if (env) {
+			env[key] = value;
 			return;
 		}
 		const Deno = getDeno();
@@ -174,8 +193,9 @@ class RuntimeOps implements RuntimeCapabilities {
 	}
 
 	deleteEnv(key: string): void {
-		if (this.isNode || this.isBun) {
-			delete process.env[key];
+		const processEnv = this.processEnv;
+		if (processEnv) {
+			delete processEnv[key];
 			return;
 		}
 		const Deno = getDeno();
@@ -188,7 +208,8 @@ class RuntimeOps implements RuntimeCapabilities {
 	}
 
 	hasEnv(key: string): boolean {
-		if (this.isNode || this.isBun) return key in process.env;
+		const processEnv = this.processEnv;
+		if (processEnv) return key in processEnv;
 		const Deno = getDeno();
 		if (Deno) return Deno.env.has(key);
 		const env = browserEnv();
@@ -196,8 +217,8 @@ class RuntimeOps implements RuntimeCapabilities {
 	}
 
 	allEnv(): Record<string, string> {
-		if (this.isNode || this.isBun)
-			return { ...process.env } as Record<string, string>;
+		const processEnv = this.processEnv;
+		if (processEnv) return { ...processEnv } as Record<string, string>;
 		const Deno = getDeno();
 		if (Deno) return { ...Deno.env.toObject() };
 		const env = browserEnv();
