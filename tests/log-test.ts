@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { assert, Panic, SourcedError, unwrap } from "../src/offensive.js";
 import { runtime } from "../src/runtime.js";
 import {
+	humanReader,
 	type LogEvent,
 	type Logger,
 	log,
@@ -856,6 +857,74 @@ try {
 		"the stack under the line:",
 		firstFrame,
 	);
+}
+// humanReader: a stored stream reads as the live console of the run that wrote it,
+// line for line (durations aside, two runs take their own time).
+{
+	const scenario = (): void => {
+		log.span("sync", { repo: "ui" }, (s) => {
+			s.info("cloned", { files: 3, note: "two words" });
+			s.span("build", (c) => c.warn("slow step", { ms: 1200 }));
+			s.set({ pushed: true });
+		});
+		try {
+			log.span("deploy", (d) =>
+				d.span("upload", () => {
+					throw boom;
+				}),
+			);
+		} catch {}
+		log.scope("api").success("served");
+	};
+	const timeless = (text: string): string[] =>
+		text.replace(/ \d+(\.\d)?m?s\b/g, " Tms").split("\n");
+	scenario();
+	const live = timeless(take().join("\n"));
+	setLogFormat("json");
+	scenario();
+	const show = humanReader();
+	const read = timeless(
+		take()
+			.map((l) => show(unwrap(parseEvent(l))))
+			.join("\n"),
+	);
+	// A span's traceId is the trace_id its events carry, joined or not
+	let id = "";
+	log.span("filed", (s) => {
+		id = s.traceId;
+		s.info("inside");
+	});
+	assert(
+		events().every((e) => e.trace_id === id) && /^[0-9a-f]{32}$/.test(id),
+		"a span's traceId is its events' trace_id",
+	);
+	log
+		.join(TRACEPARENT)
+		.span("joined", (s) =>
+			assert(
+				s.traceId === REMOTE_TRACE,
+				"a joined span's traceId is the remote trace",
+			),
+		);
+	take();
+	setLogFormat("human");
+	assert(
+		live.length === read.length,
+		"humanReader lines:\nlive:\n",
+		live.join("\n"),
+		"\nread:\n",
+		read.join("\n"),
+	);
+	for (const [i, want] of live.entries())
+		assert(
+			read[i] === want,
+			"humanReader line",
+			i,
+			"\n  read",
+			JSON.stringify(read[i]),
+			"\n  live",
+			JSON.stringify(want),
+		);
 }
 // A stack prints once: the same error passed up through nested spans shows its
 // stack under the innermost failure only, the spans around it its message.

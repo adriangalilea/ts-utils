@@ -940,6 +940,9 @@ export interface Span extends Logger {
 	set(fields: Fields): void;
 	/** The W3C traceparent value to hand to a child process or request. */
 	traceparent(): string;
+	/** The id of the trace it belongs to, as every event of it carries in `trace_id`:
+	 *  what a reader of the stream files and finds it under. */
+	readonly traceId: string;
 	/** End the span: ok with no error, failed with one (in fields.err). Twice panics. */
 	end(err?: unknown): void;
 }
@@ -1077,6 +1080,7 @@ function open(ctx: Ctx, name: string, initial: Fields | undefined): Span {
 			};
 
 	return Object.assign(makeLogger(inner), {
+		traceId: trace,
 		set(more: Fields): void {
 			assert(!ended, "span", name, "got set() after it ended");
 			assertFields(more);
@@ -1230,6 +1234,115 @@ const HEX16 = /^[0-9a-f]{16}$/;
  * through. A JSON object with a "verb" key claims to be an event: if it
  * breaks the contract's shape, that is a bug in a writer and it panics.
  */
+/** A stored error (`{type, message, stack, cause, …}`, as `json` wrote it) as an
+ *  Error of that type again, so a reader prints its line and stack as the console did. */
+function revive(v: unknown): unknown {
+	if (
+		!isPlainObject(v) ||
+		typeof v.type !== "string" ||
+		typeof v.message !== "string"
+	)
+		return v;
+	const cause = v.cause === undefined ? undefined : revive(v.cause);
+	const error =
+		typeof v.source === "string" && typeof v.operation === "string"
+			? new SourcedError({
+					source: v.source,
+					operation: v.operation,
+					message: v.message,
+					...(typeof v.status === "number" ? { status: v.status } : {}),
+					...(cause === undefined ? {} : { cause }),
+					...(isPlainObject(v.context) ? { context: v.context } : {}),
+				})
+			: // A class named as the stored type: an error's type is its constructor's name
+				new (
+					{ [v.type]: class extends Error {} } as Record<
+						string,
+						ErrorConstructor
+					>
+				)[v.type](v.message, cause === undefined ? undefined : { cause });
+	if (typeof v.stack === "string") error.stack = v.stack;
+	return error;
+}
+
+/**
+ * A reader of a stream of events that renders each one the way the `human` format shows
+ * it live: a span's start and end at its depth, a line under the span that wrote it,
+ * durations, fields dim, an error as its type and message with its stack under it. The
+ * depth comes from the stream (each span's `parent_id`), so a stored file, or a stream
+ * another process shipped, reads like the console of the process that wrote it. Call it
+ * with every event in order; `clock` puts each event's own local HH:MM:SS first.
+ *
+ * ```typescript
+ * const show = humanReader({ clock: true })
+ * for (const line of text.split('\n')) {
+ *   const e = parseEvent(line)
+ *   if (e) console.log(show(e))
+ * }
+ * ```
+ */
+export function humanReader({
+	clock = false,
+}: {
+	clock?: boolean;
+} = {}): (e: LogEvent) => string {
+	const depth = new Map<string, number>();
+	/** Each open span's start fields: its end shows only what set() added, as live. */
+	const started = new Map<string, Readonly<Record<string, JsonValue>>>();
+	/** Stacks already printed: an error passed up through spans prints its stack once. */
+	const stacks = new Set<string>();
+	return (e) => {
+		let d = 0;
+		let fields = e.fields;
+		let printed: Error | undefined;
+		if (e.phase === "start") {
+			d = e.parent_id === undefined ? 0 : (depth.get(e.parent_id) ?? -1) + 1;
+			depth.set(e.span_id, d);
+			started.set(e.span_id, e.fields ?? {});
+		} else if (e.phase === "end") {
+			d = depth.get(e.span_id) ?? 0;
+			const before = started.get(e.span_id) ?? {};
+			depth.delete(e.span_id);
+			started.delete(e.span_id);
+			fields = Object.fromEntries(
+				Object.entries(e.fields ?? {}).filter(
+					([k, v]) =>
+						!(k in before) || JSON.stringify(before[k]) !== JSON.stringify(v),
+				),
+			);
+		} else if (e.span_id !== undefined) d = (depth.get(e.span_id) ?? -1) + 1;
+		const shown =
+			fields === undefined
+				? undefined
+				: Object.fromEntries(
+						Object.entries(fields).map(([k, v]) => {
+							const value = revive(v);
+							if (value instanceof Error && typeof value.stack === "string") {
+								if (stacks.has(value.stack)) printed = value;
+								else stacks.add(value.stack);
+							}
+							return [k, value];
+						}),
+					);
+		return human(
+			{
+				verb: e.verb,
+				msg: e.msg,
+				scope: e.scope ?? [],
+				depth: d,
+				...(e.phase === undefined ? {} : { phase: e.phase }),
+				...(e.phase === "end" ? { dur: e.dur_ms } : {}),
+				...(shown === undefined || Object.keys(shown).length === 0
+					? {}
+					: { fields: shown }),
+				...(printed === undefined ? {} : { printed }),
+			},
+			new Date(e.time),
+			clock,
+		);
+	};
+}
+
 export function parseEvent(text: string): LogEvent | null {
 	const trimmed = text.trim();
 	if (!trimmed.startsWith("{")) return null;

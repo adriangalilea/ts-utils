@@ -138,6 +138,8 @@ stream.on('end', () => up.end())
 stream.on('error', (err) => up.end(err))
 ```
 
+`s.traceId` is the id of the trace it belongs to, the `trace_id` its events carry: what a reader of the stream files and finds it under.
+
 **Traces cross processes explicitly.** `s.traceparent()` is the W3C value to hand on, in an HTTP `traceparent` header or the `TRACEPARENT` env of a child process. `log.join(req.headers.get('traceparent'))` returns a logger whose spans are children of that remote span; `null` or `undefined` returns the logger itself, and a malformed value is ignored with one warn per distinct value. A process started with `TRACEPARENT` set joins it for every root span, with no code.
 
 **Levels.** `silent < error < warn < info < debug < trace`, default `info`. A scoped event reads its threshold live from the most specific variable set: `["api", "auth"]` reads `API_AUTH_LOG_LEVEL`, then `API_LOG_LEVEL`, then `LOG_LEVEL`, then `setLogLevel()`, then `info`. `GZIP_LOG_LEVEL=silent` shuts one subsystem up without touching code. Whether a span is shown is decided once, when it begins; a hidden span writes no end, but a failure is never lost to that: a hidden span that fails writes one `fail` line (its name, its fields with `err` and `dur_ms`) as a line of the nearest shown span. What it holds (lines, child spans, `traceparent()`) attaches to the nearest shown span, so a viewer never meets a missing parent. A remote span joined through `join` or `TRACEPARENT` counts as shown. With no shown ancestor, a hidden span's lines carry no ids, as lines outside any span.
@@ -202,6 +204,16 @@ import { parseEvent, type LogEvent } from '@adriangalilea/utils/log'
 
 const e = parseEvent(line)
 if (e?.phase === 'end') e.dur_ms
+```
+
+`humanReader({ clock? })` renders a stream the way the `human` format shows it live: spans at their depth, lines under the span that wrote them, durations, an error's stack once. The depth comes from the stream's own `parent_id`s, so a stored file, or a stream another process shipped, reads like that process's console.
+
+```typescript
+const show = humanReader({ clock: true })
+for (const line of text.split('\n')) {
+  const e = parseEvent(line)
+  if (e) console.log(show(e))
+}
 ```
 
 #### Migrating from 8.x
