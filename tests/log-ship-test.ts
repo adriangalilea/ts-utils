@@ -23,6 +23,7 @@ import {
 	flushLog,
 	log,
 	parseEvent,
+	setLogConsole,
 	setLogFormat,
 	setLogService,
 	setLogShip,
@@ -163,6 +164,35 @@ async function main(): Promise<void> {
 		);
 	}
 	setLogFormat("json");
+
+	// --- the console off: nothing written, the event still ships ---------------
+	setLogConsole(false);
+	log.info("only shipped", { k: "quiet" });
+	await flushLog();
+	{
+		const shown = takeWritten();
+		const shipped = unwrap(bodies()[0]);
+		assert(shown.length === 0, "console off writes nothing", shown);
+		assert(
+			unwrap(parseEvent(shipped)).msg === "only shipped",
+			"console off still ships",
+			shipped,
+		);
+	}
+	runtime.setEnv("LOG_CONSOLE", "1");
+	log.info("the variable wins");
+	await flushLog();
+	assert(takeWritten().length === 1, "LOG_CONSOLE=1 overrides setLogConsole");
+	takeBatches();
+	runtime.setEnv("LOG_CONSOLE", "maybe");
+	assert(
+		panics(() => log.info("x")),
+		"a bad LOG_CONSOLE panics on the next event",
+	);
+	runtime.deleteEnv("LOG_CONSOLE");
+	setLogConsole(true);
+	takeWritten();
+	takeBatches();
 
 	// --- 50 events send at once, without waiting for the timer ---------------
 	for (let i = 0; i < 50; i++) log.info("tick", { i });

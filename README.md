@@ -176,6 +176,7 @@ Node, Bun and Deno write every event through `console.error` (stdout stays data,
 |---|---|---|---|
 | `LOG_FORMAT` | `setLogFormat` | `human`, `json` | Node: human when stderr is a TTY, else json. Browser: human. Worker: json |
 | `LOG_TIME` | `setLogTime` | `1`, `0` | off. Puts a dim local `HH:MM:SS` before human lines; json always carries `time` |
+| `LOG_CONSOLE` | `setLogConsole` | `1`, `0` | on. Off, events are not written to the console (stderr, a browser's console) and only ship: a page that ships its stream shows a visitor nothing |
 | `LOG_LEVEL`, `{SCOPE}_LOG_LEVEL` | `setLogLevel` | the levels | `info` |
 | `LOG_SERVICE` | `setLogService` | a name | the entry script's name without extension. A Worker or browser has none: set it, or the first json event panics |
 | `LOG_SHIP` | `setLogShip` | an http(s) URL | unset. Every event that passes its threshold is also POSTed there (Shipping) |

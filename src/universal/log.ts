@@ -66,7 +66,8 @@
  *     variable, read live, overrides it: LOG_FORMAT=human|json (setLogFormat),
  *     LOG_TIME=1|0 (setLogTime, a dim local HH:MM:SS before human lines, off
  *     by default), LOG_LEVEL and {SCOPE}_LOG_LEVEL (setLogLevel), LOG_SERVICE
- *     (setLogService). Values match without regard to case, an empty variable
+ *     (setLogService), LOG_CONSOLE=1|0 (setLogConsole, on by default; off,
+ *     events only ship). Values match without regard to case, an empty variable
  *     is unset, an unknown value panics. The service defaults to the entry
  *     script's name without extension; in a Worker or browser it must be
  *     set, or the first json event panics.
@@ -269,6 +270,7 @@ function parseFormat(raw: string, source: string): LogFormat {
 let levelSetting: LogLevel | undefined;
 let formatSetting: LogFormat | undefined;
 let timeSetting: boolean | undefined;
+let consoleSetting: boolean | undefined;
 let serviceSetting: string | undefined;
 
 /** The program's default level. LOG_LEVEL and {SCOPE}_LOG_LEVEL override it. */
@@ -285,6 +287,16 @@ export function setLogFormat(format: LogFormat): void {
 export function setLogTime(on: boolean): void {
 	if (typeof on !== "boolean") panic("setLogTime wants a boolean, got:", on);
 	timeSetting = on;
+}
+
+/**
+ * Whether events are written to the console (stderr, a browser's console) as well
+ * as shipped: off, they only ship. A page that ships its stream needs no console
+ * a visitor can read. LOG_CONSOLE overrides it.
+ */
+export function setLogConsole(on: boolean): void {
+	if (typeof on !== "boolean") panic("setLogConsole wants a boolean, got:", on);
+	consoleSetting = on;
 }
 
 /** The program's name in every event. LOG_SERVICE overrides it. */
@@ -326,6 +338,14 @@ function timeEnabled(): boolean {
 	if (raw === "1") return true;
 	if (raw === "0") return false;
 	return panic("unknown LOG_TIME:", raw, "(want 1|0)");
+}
+
+function consoleEnabled(): boolean {
+	const raw = env("LOG_CONSOLE");
+	if (raw === undefined) return consoleSetting ?? true;
+	if (raw === "1") return true;
+	if (raw === "0") return false;
+	return panic("unknown LOG_CONSOLE:", raw, "(want 1|0)");
 }
 
 function service(): string {
@@ -656,8 +676,10 @@ function emit(d: Draft): void {
 	// Node: everything to stderr through console.error, which cli/live patches
 	// to keep lines above an active region. Elsewhere the level's method, so
 	// platform consoles classify the line.
-	if (sink === "node") console.error(text);
-	else console[CONSOLE_METHOD[VERBS[d.verb].level]](text);
+	if (consoleEnabled()) {
+		if (sink === "node") console.error(text);
+		else console[CONSOLE_METHOD[VERBS[d.verb].level]](text);
+	}
 	// What ships is the stream's json line, whatever the console renders.
 	if (target !== undefined)
 		ship(target, format === "json" ? text : json(d, now));
