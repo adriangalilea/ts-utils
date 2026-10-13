@@ -6,6 +6,7 @@
 // Run: pnpm test:llm-reset
 import assert from "node:assert/strict";
 import { jsonSchema, tool } from "ai";
+// (jsonSchema also declares the structured-output tests' schema)
 import { createLlm } from "../src/llm/index.js";
 import { setLogFormat } from "../src/universal/log.js";
 
@@ -232,4 +233,138 @@ assert.ok(
 	`the system text did not reach the server: ${JSON.stringify(wire)}`,
 );
 console.log("  PASS extraBody and a system message reach the server");
-console.log("\n3 passed");
+
+// Structured output: a server answering `text`, recording what it was sent.
+const answering =
+	(
+		text: string,
+		into: { body?: Record<string, unknown> },
+	): typeof globalThis.fetch =>
+	async (_url, init) => {
+		into.body = JSON.parse(String(init?.body));
+		return sse([
+			JSON.stringify({
+				id: "s",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: "fake",
+				choices: [{ index: 0, delta: { content: text }, finish_reason: null }],
+			}),
+			JSON.stringify({
+				id: "s",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: "fake",
+				choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+			}),
+		]);
+	};
+// A plain JSON Schema checks nothing by itself: `validate` is what refuses a wrong shape
+// (a zod schema validates on its own)
+const step = jsonSchema<{ ref: string }>(
+	{
+		type: "object",
+		properties: { ref: { type: "string" } },
+		required: ["ref"],
+		additionalProperties: false,
+	},
+	{
+		validate: (value) =>
+			typeof (value as { ref?: unknown })?.ref === "string"
+				? { success: true, value: value as { ref: string } }
+				: {
+						success: false,
+						error: new Error(`no ref in ${JSON.stringify(value)}`),
+					},
+	},
+);
+{
+	const seen: { body?: Record<string, unknown> } = {};
+	const enforcing = createLlm({
+		providers: [
+			{
+				id: "enforcing",
+				type: "openai",
+				baseUrl: "http://fake.d/v1",
+				defaultModel: "fake",
+				structuredOutputs: true,
+				fetch: answering('{"ref":"e3"}', seen),
+			},
+		],
+	});
+	const r = await enforcing.complete({ prompt: "which?", schema: step });
+	assert.deepEqual(r.object, { ref: "e3" });
+	const format = seen.body?.response_format as {
+		type: string;
+		json_schema?: { schema: unknown };
+	};
+	assert.equal(format.type, "json_schema", JSON.stringify(format));
+	assert.deepEqual(
+		(format.json_schema?.schema as { required: string[] }).required,
+		["ref"],
+	);
+	console.log(
+		"  PASS a structuredOutputs provider gets the schema and the answer comes back parsed",
+	);
+}
+{
+	const seen: { body?: Record<string, unknown> } = {};
+	const plain = createLlm({
+		providers: [
+			{
+				id: "plain",
+				type: "openai",
+				baseUrl: "http://fake.e/v1",
+				defaultModel: "fake",
+				fetch: answering('{"ref":"e4"}', seen),
+			},
+		],
+	});
+	const r = await plain.complete({ prompt: "which?", schema: step });
+	assert.deepEqual(r.object, { ref: "e4" });
+	assert.equal(
+		(seen.body?.response_format as { type: string }).type,
+		"json_object",
+	);
+	const system = (
+		seen.body?.messages as { role: string; content: string }[]
+	).find((m) => m.role === "system");
+	assert.ok(
+		system?.content.includes('"required":["ref"]'),
+		`the schema is not stated: ${JSON.stringify(seen.body?.messages)}`,
+	);
+	console.log(
+		"  PASS a provider without structuredOutputs is told the schema in its instructions",
+	);
+}
+{
+	const wrong: { body?: Record<string, unknown> } = {};
+	const right: { body?: Record<string, unknown> } = {};
+	const pair = createLlm({
+		providers: [
+			{
+				id: "wrong",
+				type: "openai",
+				baseUrl: "http://fake.f/v1",
+				defaultModel: "fake",
+				priority: 1,
+				fetch: answering('{"verb":"click"}', wrong),
+			},
+			{
+				id: "right",
+				type: "openai",
+				baseUrl: "http://fake.g/v1",
+				defaultModel: "fake",
+				priority: 2,
+				fetch: answering('{"ref":"e5"}', right),
+			},
+		],
+	});
+	const r = await pair.complete({ prompt: "which?", schema: step });
+	assert.deepEqual(r.object, { ref: "e5" });
+	assert.equal(r.usage === null || r.usage.provider === "right", true);
+	console.log(
+		"  PASS an answer that does not match the schema fails its provider, the next answers",
+	);
+}
+console.log("\n6 passed");

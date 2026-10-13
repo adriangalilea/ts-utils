@@ -64,8 +64,11 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import {
 	APICallError,
+	asSchema,
+	type FlexibleSchema,
 	type LanguageModel,
 	type ModelMessage,
+	Output,
 	streamText,
 	type ToolChoice,
 	type ToolSet,
@@ -128,6 +131,12 @@ export interface ProviderConfig {
 	 */
 	disableThinking?: boolean;
 	/**
+	 * The server enforces a JSON schema while it decodes (`response_format` of type
+	 * `json_schema`), so a request's `schema` is sent to it. Without it the answer is
+	 * asked for as JSON and validated after. `openai` dialect only.
+	 */
+	structuredOutputs?: boolean;
+	/**
 	 * Transport override for this provider: every request to it goes through
 	 * this function instead of the global fetch. How a Worker reaches an
 	 * endpoint it has no route to (a self-hosted engine behind a relay
@@ -188,7 +197,7 @@ export type LlmStreamEvent =
 	/** A tool call's arguments arriving as text; `tool-call` follows with the parsed whole. */
 	| { kind: "tool-input-delta"; toolCallId: string; delta: string }
 	| { kind: "tool-call"; toolCallId: string; toolName: string; input: unknown }
-	| { kind: "end"; usage: LlmUsage | null };
+	| { kind: "end"; usage: LlmUsage | null; object?: unknown };
 
 export interface LlmToolCall {
 	/** The provider's id for this call: what a later turn must echo back to replay it (ds4 keys its exact-DSML replay on it). */
@@ -202,6 +211,8 @@ export interface LlmResult {
 	reasoning: string;
 	toolCalls: LlmToolCall[];
 	usage: LlmUsage | null;
+	/** The answer parsed and validated against `schema`, when the request gave one. */
+	object?: unknown;
 }
 
 export class LlmError extends Error {
@@ -236,6 +247,14 @@ export interface ChatRequest {
 	 * its body — no arbitrary fields).
 	 */
 	extraBody?: Record<string, unknown>;
+	/**
+	 * The shape the answer must have: a zod schema, or `jsonSchema(schema, { validate })`.
+	 * The result's `object` is the answer parsed and checked by the schema's own
+	 * validation (zod's, or `validate`; a `jsonSchema` without one only parses); an answer
+	 * that fails it fails that attempt, and the next provider is tried. A provider
+	 * declaring `structuredOutputs` gets the schema to enforce while it decodes.
+	 */
+	schema?: FlexibleSchema<unknown>;
 	/**
 	 * The logger or span this call belongs under. The call is a `chat` span there
 	 * (kind `inference`), each provider tried an `attempt` span inside it, named
@@ -321,6 +340,8 @@ interface Attempt {
 		completionTokens: number;
 		costUsd?: number;
 	} | null;
+	/** The answer parsed against the request's schema, when it gave one. */
+	object?: unknown;
 }
 
 export class Llm {
@@ -335,6 +356,7 @@ export class Llm {
 		let reasoning = "";
 		const toolCalls: LlmToolCall[] = [];
 		let usage: LlmUsage | null = null;
+		let object: unknown;
 		for await (const event of this.stream(req)) {
 			if (event.kind === "delta") text += event.text;
 			else if (event.kind === "reasoning") reasoning += event.text;
@@ -348,9 +370,18 @@ export class Llm {
 					toolName: event.toolName,
 					input: event.input,
 				});
-			else if (event.kind === "end") usage = event.usage;
+			else if (event.kind === "end") {
+				usage = event.usage;
+				object = event.object;
+			}
 		}
-		return { text: text.trim(), reasoning: reasoning.trim(), toolCalls, usage };
+		return {
+			text: text.trim(),
+			reasoning: reasoning.trim(),
+			toolCalls,
+			usage,
+			...(req.schema ? { object } : {}),
+		};
 	}
 
 	/**
@@ -437,6 +468,7 @@ export class Llm {
 									model: provider.defaultModel,
 								}
 							: null,
+					...(req.schema ? { object: attempt.object } : {}),
 				};
 				return;
 			}
@@ -523,26 +555,31 @@ export class Llm {
 		let emitted = false;
 		let sawContent = false;
 		let usage: Attempt["usage"] = null;
+		/** The answer parsed against the request's schema, settled once the stream ends. */
+		let parsed: PromiseLike<unknown> | undefined;
 		try {
-			// A conversation in the OpenAI shape carries its system text as messages; the
-			// AI SDK takes it only as instructions, so it moves there, after any given
-			const said = (req.messages ?? []).filter((m) => m.role === "system");
-			const instructions = [
-				req.instructions,
-				...said.map((m) => (typeof m.content === "string" ? m.content : "")),
-			]
-				.filter((text) => text)
+			// A server that enforces no schema is only asked for JSON (the provider drops
+			// the schema with a warning): the shape is stated in the instructions instead
+			const stated =
+				req.schema &&
+				!(dialectOf(provider) === "openai" && provider.structuredOutputs)
+					? `Answer with one JSON object only, matching this JSON Schema:\n${JSON.stringify(await asSchema(req.schema).jsonSchema)}`
+					: "";
+			const instructions = [req.instructions, stated]
+				.filter((t) => t)
 				.join("\n\n");
 			const result = streamText({
 				model: this.modelFor(provider, req),
 				...(req.prompt !== undefined
 					? { prompt: req.prompt }
-					: {
-							messages: (req.messages as ModelMessage[]).filter(
-								(m) => m.role !== "system",
-							),
-						}),
+					: { messages: req.messages as ModelMessage[] }),
+				// A conversation in the OpenAI shape carries its system text as messages,
+				// sometimes after the first turn: kept where it is
+				allowSystemInMessages: true,
 				...(instructions ? { instructions } : {}),
+				...(req.schema
+					? { output: Output.object({ schema: req.schema }) }
+					: {}),
 				temperature: resolveTemperature(provider),
 				maxOutputTokens: resolveMaxTokens(provider, req.maxTokens),
 				maxRetries: 0, // retry policy lives in the failover loop, not the transport
@@ -605,6 +642,7 @@ export class Llm {
 					};
 				}
 			}
+			if (req.schema) parsed = result.output;
 		} catch (e) {
 			return { ok: false, emitted, error: e, usage };
 		}
@@ -615,7 +653,14 @@ export class Llm {
 				error: new LlmError("llm: empty completion"),
 				usage,
 			};
-		return { ok: true, emitted, usage };
+		if (!req.schema) return { ok: true, emitted, usage };
+		// The answer parsed and checked against the schema; one that does not match
+		// fails the attempt like any provider failure, and the next one is tried
+		try {
+			return { ok: true, emitted, usage, object: await parsed };
+		} catch (e) {
+			return { ok: false, emitted, error: e, usage };
+		}
 	}
 
 	// One AI SDK model instance per attempt, by wire dialect. An `openai`
@@ -664,6 +709,7 @@ export class Llm {
 			...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
 			...(provider.fetch ? { fetch: provider.fetch } : {}),
 			includeUsage: true, // stream_options usage frame
+			supportsStructuredOutputs: provider.structuredOutputs === true,
 			...(Object.keys(body).length > 0
 				? {
 						transformRequestBody: (args: Record<string, unknown>) => ({
