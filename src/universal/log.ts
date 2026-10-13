@@ -1359,6 +1359,100 @@ export function humanReader({
 	};
 }
 
+/** Where a trace's time went, by what its spans were doing. */
+export interface Breakdown {
+	/** The time the outermost spans covered, together. */
+	readonly wall_ms: number;
+	/** Each kind's own time: the time its spans ran with no child span running. Spans
+	 *  that ran side by side each count, so these can add up to more than the wall. */
+	readonly by: Readonly<Record<string, number>>;
+}
+
+/**
+ * Where a trace's time went: each span's own time (its duration, less the time its
+ * children cover) counts for the span's `kind` field, or the nearest enclosing span's
+ * that has one, else `other`. Name what a span does once, where it begins
+ * (`span('look', { kind: 'perception' })`), and every span inside it counts for it
+ * until one says otherwise. Spans still open are not counted.
+ *
+ * ```typescript
+ * breakdown(events) // { wall_ms: 61200, by: { inference: 38100, input: 14800, wait: 7900, perception: 400 } }
+ * ```
+ */
+export function breakdown(events: Iterable<LogEvent>): Breakdown {
+	type Seen = {
+		parent?: string;
+		kind?: string;
+		from?: number;
+		to?: number;
+	};
+	const spans = new Map<string, Seen>();
+	for (const e of events) {
+		if (e.phase === undefined) continue;
+		const s = spans.get(e.span_id) ?? {};
+		if (e.parent_id !== undefined) s.parent = e.parent_id;
+		const kind = e.fields?.kind;
+		if (typeof kind === "string") s.kind = kind;
+		if (e.phase === "end") {
+			s.to = Date.parse(e.time);
+			s.from = s.to - e.dur_ms;
+		}
+		spans.set(e.span_id, s);
+	}
+	const ended = [...spans].filter(
+		(entry): entry is [string, Seen & { from: number; to: number }] =>
+			entry[1].to !== undefined,
+	);
+	const children = new Map<string, [number, number][]>();
+	for (const [, s] of ended)
+		if (s.parent !== undefined) {
+			const list = children.get(s.parent) ?? [];
+			list.push([s.from, s.to]);
+			children.set(s.parent, list);
+		}
+	const kindOf = (s: Seen): string => {
+		for (let at: Seen | undefined = s; at; ) {
+			if (at.kind !== undefined) return at.kind;
+			at = at.parent === undefined ? undefined : spans.get(at.parent);
+		}
+		return "other";
+	};
+	const by: Record<string, number> = {};
+	for (const [id, s] of ended) {
+		const covered = covering(children.get(id) ?? [], s.from, s.to);
+		const own = s.to - s.from - covered;
+		const kind = kindOf(s);
+		by[kind] = (by[kind] ?? 0) + own;
+	}
+	const roots = ended
+		.filter(([, s]) => s.parent === undefined || !spans.get(s.parent)?.to)
+		.map(([, s]): [number, number] => [s.from, s.to]);
+	return {
+		wall_ms: covering(roots, -Infinity, Infinity),
+		by,
+	};
+}
+
+/** How much of [from, to] the intervals cover together. */
+function covering(
+	intervals: [number, number][],
+	from: number,
+	to: number,
+): number {
+	const clipped = intervals
+		.map(([a, b]): [number, number] => [Math.max(a, from), Math.min(b, to)])
+		.filter(([a, b]) => b > a)
+		.sort((x, y) => x[0] - y[0]);
+	let total = 0;
+	let reach = -Infinity;
+	for (const [a, b] of clipped) {
+		if (b <= reach) continue;
+		total += b - Math.max(a, reach);
+		reach = b;
+	}
+	return total;
+}
+
 export function parseEvent(text: string): LogEvent | null {
 	const trimmed = text.trim();
 	if (!trimmed.startsWith("{")) return null;

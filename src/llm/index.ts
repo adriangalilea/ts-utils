@@ -70,7 +70,7 @@ import {
 	type ToolChoice,
 	type ToolSet,
 } from "ai";
-import { log as root } from "../universal/log.js";
+import { type Logger, log as root, type Span } from "../universal/log.js";
 
 const log = root.scope("llm").scope("health");
 
@@ -236,6 +236,13 @@ export interface ChatRequest {
 	 * its body — no arbitrary fields).
 	 */
 	extraBody?: Record<string, unknown>;
+	/**
+	 * The logger or span this call belongs under. The call is a `chat` span there
+	 * (kind `inference`), each provider tried an `attempt` span inside it, named
+	 * with OpenTelemetry's gen_ai fields: provider, model, server, tokens, cost,
+	 * time to the first token and decoding time. Default: the root logger.
+	 */
+	log?: Logger;
 }
 
 const DEFAULT_MAX_TOKENS = 4096;
@@ -357,7 +364,35 @@ export class Llm {
 	async *stream(req: ChatRequest): AsyncGenerator<LlmStreamEvent> {
 		if ((req.prompt === undefined) === (req.messages === undefined))
 			throw new LlmError("llm: pass exactly one of prompt/messages");
+		const span = (req.log ?? root).scope("llm").begin("chat", {
+			kind: "inference",
+			"gen_ai.operation.name": "chat",
+		});
+		// A consumer that stops reading ends the span too (finally runs on return)
+		let ended = false;
+		try {
+			for await (const event of this.failover(req, span)) {
+				if (event.kind === "end" && event.usage)
+					span.set({
+						"gen_ai.provider.name": event.usage.provider,
+						"gen_ai.request.model": event.usage.model,
+						...usageFields(event.usage),
+					});
+				yield event;
+			}
+		} catch (err) {
+			ended = true;
+			span.end(err);
+			throw err;
+		} finally {
+			if (!ended) span.end();
+		}
+	}
 
+	private async *failover(
+		req: ChatRequest,
+		span: Span,
+	): AsyncGenerator<LlmStreamEvent> {
 		const errors: string[] = [];
 		const queue = await this.buildQueue(errors);
 		let preferId: string | undefined;
@@ -374,7 +409,7 @@ export class Llm {
 			}
 			const { provider, health } = queue.splice(idx, 1)[0];
 
-			const attempt = yield* this.runAttempt(provider, req);
+			const attempt = yield* this.timedAttempt(provider, req, span);
 			if (attempt.usage) {
 				totalPrompt += attempt.usage.promptTokens;
 				if (attempt.usage.cachedTokens !== undefined)
@@ -435,6 +470,49 @@ export class Llm {
 				"llm: all providers unavailable (disabled or cooling down after failures)",
 			);
 		throw new LlmError(`llm: all providers failed: ${errors.join("; ")}`);
+	}
+
+	// One provider attempt as a span: where it went, how long until its first token
+	// (the prompt's processing, network included), how long it decoded after it, and
+	// what it was billed.
+	private async *timedAttempt(
+		provider: ProviderConfig,
+		req: ChatRequest,
+		parent: Span,
+	): AsyncGenerator<LlmStreamEvent, Attempt> {
+		const server = provider.baseUrl ? hostOf(provider.baseUrl) : undefined;
+		const span = parent.begin("attempt", {
+			"gen_ai.provider.name": provider.id,
+			"gen_ai.request.model": provider.defaultModel,
+			...(server ? { "server.address": server } : {}),
+		});
+		const t0 = performance.now();
+		let first: number | undefined;
+		let ended = false;
+		try {
+			const run = this.runAttempt(provider, req);
+			for (let step = await run.next(); ; step = await run.next()) {
+				if (step.done) {
+					const done = performance.now();
+					span.set({
+						...(first !== undefined
+							? {
+									ttft_ms: Math.round(first - t0),
+									decode_ms: Math.round(done - first),
+								}
+							: {}),
+						...(step.value.usage ? usageFields(step.value.usage) : {}),
+					});
+					ended = true;
+					span.end(step.value.ok ? undefined : step.value.error);
+					return step.value;
+				}
+				first ??= performance.now();
+				yield step.value;
+			}
+		} finally {
+			if (!ended) span.end();
+		}
 	}
 
 	// Stream one provider attempt, translating AI SDK parts to LlmStreamEvents.
@@ -773,6 +851,26 @@ function normalizeAnthropicBase(baseUrl: string): string {
 // full URL.
 function normalizeOpenAiBase(baseUrl: string): string {
 	return baseUrl.replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
+}
+
+/** The host a provider is reached at, for a span's `server.address`. */
+function hostOf(baseUrl: string): string {
+	return new URL(baseUrl).host;
+}
+
+/** Token accounting as OpenTelemetry's gen_ai fields name it; cost has no
+ *  convention and keeps its own name. */
+function usageFields(
+	usage: NonNullable<Attempt["usage"]>,
+): Record<string, number> {
+	return {
+		"gen_ai.usage.input_tokens": usage.promptTokens,
+		...(usage.cachedTokens !== undefined
+			? { "gen_ai.usage.cache_read.input_tokens": usage.cachedTokens }
+			: {}),
+		"gen_ai.usage.output_tokens": usage.completionTokens,
+		...(usage.costUsd !== undefined ? { cost_usd: usage.costUsd } : {}),
+	};
 }
 
 /**

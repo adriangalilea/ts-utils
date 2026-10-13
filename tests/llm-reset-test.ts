@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { jsonSchema, tool } from "ai";
 import { createLlm } from "../src/llm/index.js";
+import { setLogFormat } from "../src/universal/log.js";
 
 // The request must DECLARE tools or the SDK's parser never surfaces tool parts.
 const TOOLS = {
@@ -92,7 +93,23 @@ const fetchB: typeof globalThis.fetch = async () =>
 			model: "fake",
 			choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
 		}),
+		JSON.stringify({
+			id: "b1",
+			object: "chat.completion.chunk",
+			created: 0,
+			model: "fake",
+			choices: [],
+			usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 },
+		}),
 	]);
+
+// The trace the calls write, as json events
+setLogFormat("json");
+const events: Record<string, unknown>[] = [];
+const print = console.error;
+console.error = (...a: unknown[]): void => {
+	events.push(JSON.parse(String(a[0])) as Record<string, unknown>);
+};
 
 const llm = createLlm({
 	providers: [
@@ -144,7 +161,41 @@ assert.ok(
 	`order wrong: ${kinds.join(",")}`,
 );
 assert.equal(kinds.at(-1), "end");
+console.error = print;
 console.log(
 	`  PASS reset follows a tool-only failed attempt (${kinds.join(" → ")})`,
 );
-console.log("\n1 passed");
+
+// The call is one chat span; each provider tried an attempt span inside it, the
+// failed one ending in error, the one that answered with its timings and tokens.
+type Ev = {
+	msg: string;
+	phase?: string;
+	status?: string;
+	span_id?: string;
+	parent_id?: string;
+	fields?: Record<string, unknown>;
+};
+const ends = (events as Ev[]).filter((e) => e.phase === "end");
+const chat = ends.find((e) => e.msg === "chat");
+const attempts = ends.filter((e) => e.msg === "attempt");
+assert.ok(chat, "no chat span");
+assert.equal(chat.status, "ok");
+assert.equal(chat.fields?.kind, "inference");
+assert.equal(chat.fields?.["gen_ai.provider.name"], "healthy");
+assert.equal(chat.fields?.["gen_ai.usage.input_tokens"], 12);
+assert.deepEqual(
+	attempts.map((a) => [a.parent_id, a.status, a.fields?.["server.address"]]),
+	[
+		[chat.span_id, "error", "fake.a"],
+		[chat.span_id, "ok", "fake.b"],
+	],
+);
+const ok = attempts[1]?.fields ?? {};
+assert.ok(
+	typeof ok.ttft_ms === "number" && typeof ok.decode_ms === "number",
+	`no timings: ${JSON.stringify(ok)}`,
+);
+assert.equal(ok["gen_ai.usage.output_tokens"], 3);
+console.log("  PASS the call and each attempt are spans with gen_ai fields");
+console.log("\n2 passed");

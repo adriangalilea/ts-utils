@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { assert, Panic, SourcedError, unwrap } from "../src/offensive.js";
 import { runtime } from "../src/runtime.js";
 import {
+	breakdown,
 	humanReader,
 	type LogEvent,
 	type Logger,
@@ -925,6 +926,78 @@ try {
 			"\n  live",
 			JSON.stringify(want),
 		);
+}
+// Where a trace's time went: a span's own time counts for its kind, or its nearest
+// enclosing span's; children's time is theirs. A run of 100 ms: a look, a click whose
+// hand and settle fill it, a decision holding a model call.
+{
+	const base = Date.parse("2026-10-13T12:00:00Z");
+	const span = (
+		id: string,
+		parent: string | undefined,
+		from: number,
+		to: number,
+		kind?: string,
+	): LogEvent[] => {
+		const common = {
+			level: "info",
+			msg: id,
+			service: "t",
+			trace_id: "a".repeat(32),
+			span_id: id.padEnd(16, "0"),
+			...(parent ? { parent_id: parent.padEnd(16, "0") } : {}),
+		};
+		return [
+			{
+				time: new Date(base + from).toISOString(),
+				verb: "wait",
+				phase: "start",
+				...common,
+				...(kind ? { fields: { kind } } : {}),
+			},
+			{
+				time: new Date(base + to).toISOString(),
+				verb: "success",
+				phase: "end",
+				status: "ok",
+				dur_ms: to - from,
+				...common,
+			},
+		] as unknown as LogEvent[];
+	};
+	const run = breakdown([
+		...span("session", undefined, 0, 100),
+		...span("look", "session", 0, 10, "perception"),
+		...span("click", "session", 10, 60),
+		...span("hand", "click", 10, 40, "input"),
+		...span("settle", "click", 40, 60, "wait"),
+		...span("decide", "session", 60, 100),
+		...span("chat", "decide", 61, 99, "inference"),
+	]);
+	assert(
+		run.wall_ms === 100 &&
+			JSON.stringify(Object.entries(run.by).sort()) ===
+				JSON.stringify([
+					["inference", 38],
+					["input", 30],
+					["other", 2],
+					["perception", 10],
+					["wait", 20],
+				]),
+		"breakdown by kind:",
+		JSON.stringify(run),
+	);
+	// Children side by side cover their parent once; each still counts its own time.
+	const side = breakdown([
+		...span("step", undefined, 0, 50, "input"),
+		...span("a", "step", 0, 40, "wait"),
+		...span("b", "step", 20, 50, "wait"),
+	]);
+	assert(
+		side.wall_ms === 50 && side.by.input === 0 && side.by.wait === 70,
+		"overlapping children:",
+		JSON.stringify(side),
+	);
 }
 // A text of several lines prints under its line, named, each line as written; the
 // other fields stay on the line.
