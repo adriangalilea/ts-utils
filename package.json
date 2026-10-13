@@ -1,6 +1,6 @@
 {
 	"name": "@adriangalilea/utils",
-	"version": "9.13.0",
+	"version": "10.0.0",
 	"description": "TypeScript utilities - logger, currency, formatter, GramIO bot plugins, and more",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -43,10 +43,6 @@
 		"./log": {
 			"types": "./dist/universal/log.d.ts",
 			"default": "./dist/universal/log.js"
-		},
-		"./visits": {
-			"types": "./dist/visits/index.d.ts",
-			"default": "./dist/visits/index.js"
 		},
 		"./log/next": {
 			"types": "./dist/next/log.d.ts",
@@ -231,10 +227,9 @@
 	"scripts": {
 		"build": "rm -rf dist && tsc",
 		"test": "tsx tests/metrics-test.ts",
-		"test:all": "pnpm run test && pnpm run test:log && pnpm run test:log-ship && pnpm run test:visits &&pnpm run test:runtime && pnpm run test:text && pnpm run test:tg-html && pnpm run test:tg-md && pnpm run test:flags && pnpm run test:groups && pnpm run test:user && pnpm run test:language-picker && pnpm run test:self-echo && pnpm run test:update-identity && pnpm run test:update-runner &&pnpm run test:bot-text && pnpm run test:url && pnpm run test:bot-urls && pnpm run test:bot-updates && pnpm run test:bot-announce && pnpm run test:reactions && pnpm run test:llm-reset && pnpm run test:raw-writes && pnpm run test:worker-safe",
+		"test:all": "pnpm run test && pnpm run test:log && pnpm run test:log-ship && pnpm run test:runtime && pnpm run test:text && pnpm run test:tg-html && pnpm run test:tg-md && pnpm run test:flags && pnpm run test:groups && pnpm run test:user && pnpm run test:language-picker && pnpm run test:self-echo && pnpm run test:update-identity && pnpm run test:update-runner &&pnpm run test:bot-text && pnpm run test:url && pnpm run test:bot-urls && pnpm run test:bot-updates && pnpm run test:bot-announce && pnpm run test:reactions && pnpm run test:llm-reset && pnpm run test:raw-writes && pnpm run test:worker-safe",
 		"test:log": "tsx tests/log-test.ts",
 		"test:log-ship": "tsx tests/log-ship-test.ts",
-		"test:visits": "tsx tests/visits-test.ts",
 		"test:runtime": "tsx tests/runtime-test.ts",
 		"test:text": "tsx tests/text-test.ts",
 		"example": "tsx tests/example.ts",
