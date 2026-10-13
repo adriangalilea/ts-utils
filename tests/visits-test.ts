@@ -16,6 +16,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { MetricsDriver } from "../src/metrics/sqlite.js";
 import {
 	eventStep,
+	readViews,
 	readVisit,
 	readVisits,
 	VISITS_SCHEMA,
@@ -494,6 +495,26 @@ assert.deepEqual(
 	["adriangalilea.com"],
 );
 
+// --- views: each visit once per page, the staff never, kept past the visits ----------
+const read = (who: string, staffing = "0") =>
+	post([start(trace(), span(), page("/notes/x", "studio"))], {
+		"cf-connecting-ip": who,
+		"x-staff": staffing,
+	});
+await read("198.18.0.2");
+await read("198.18.0.2"); // the same visit reads it again
+await read("198.18.0.3");
+await read("198.18.0.4", "1"); // the site's own
+assert.deepEqual(
+	await readViews(db, {
+		site: "untitled.garden",
+		host: "untitled.garden",
+		paths: ["/notes/x", "/never"],
+	}),
+	{ "/notes/x": 2 },
+	"two visits read it: a second read in one visit and the staff's are no view",
+);
+
 console.log(
-	"✓ visits: batches, the gap, callers, days, refusals, crawlers, origins, sites, reading and pruning hold",
+	"✓ visits: batches, the gap, callers, days, refusals, crawlers, origins, sites, views, reading and pruning hold",
 );

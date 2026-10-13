@@ -22,12 +22,16 @@
  * ROWS: `visits_visit` (one per visit: when, how many pages, where it came
  * from, coarse country and viewport, whether a probe or the site's staff made
  * it), `visits_page` (one per page span: its place, path, how it was reached,
- * how long it was on screen, the sections it reached, the vitals) and
+ * how long it was on screen, the sections it reached, the vitals),
  * `visits_event` (every line of the page's trace as written: the page span's
  * own start and end, fetch spans, named events, errors, so a page's trace is
- * read back from its lines alone, on the visitor's one clock). Pages and visits are kept VISIT_DAYS, events EVENT_DAYS, a
- * probe's or staff's FLAGGED_DAYS; old rows go on the first write of each
- * day. Provision VISITS_SCHEMA once, never on a request.
+ * read back from its lines alone, on the visitor's one clock) and
+ * `visits_views` (per day, per page, how many visits read it, each once, the
+ * staff's and probes' never: a count with nothing of who). Pages and visits
+ * are kept VISIT_DAYS, events EVENT_DAYS, a probe's or staff's FLAGGED_DAYS;
+ * old rows go on the first write of each day. Views are kept for good: they
+ * are what a page's all-time count is read from (`readViews`). Provision
+ * VISITS_SCHEMA once, never on a request.
  *
  * REFUSED: a line that is no event, a service the site did not name, a line
  * outside a page's trace, a field named like a person (ip, user_agent, email,
@@ -65,6 +69,7 @@ export const VISITS_SCHEMA = [
 	"CREATE TABLE IF NOT EXISTS visits_event (id INTEGER PRIMARY KEY, visit TEXT NOT NULL, trace_id TEXT NOT NULL, day TEXT NOT NULL, at INTEGER NOT NULL, line TEXT NOT NULL)",
 	"CREATE INDEX IF NOT EXISTS visits_event_visit ON visits_event (visit, id)",
 	"CREATE INDEX IF NOT EXISTS visits_event_day ON visits_event (day)",
+	"CREATE TABLE IF NOT EXISTS visits_views (site TEXT NOT NULL, day TEXT NOT NULL, host TEXT NOT NULL, path TEXT NOT NULL, views INTEGER NOT NULL, PRIMARY KEY (site, day, host, path))",
 ] as const;
 
 export interface VisitsOptions {
@@ -319,13 +324,32 @@ async function assign(
 	const id = hash.slice(0, 32);
 	const [open] = [
 		...(await db.query({
-			sql: "SELECT c.visit, c.last, v.pages FROM visits_caller c JOIN visits_visit v ON v.id = c.visit WHERE c.day = ? AND c.caller = ?",
+			sql: "SELECT c.visit, c.last, v.pages, v.probe, v.staff FROM visits_caller c JOIN visits_visit v ON v.id = c.visit WHERE c.day = ? AND c.caller = ?",
 			args: [day, id],
 		})),
 	];
-	let visit =
+	/** The visit the batch's pages join: its pages so far, whether it is flagged, and
+	 *  the pages (host and path) it has seen, each counted once in its views. */
+	let visit: {
+		id: string;
+		pages: number;
+		flagged: boolean;
+		seen: Set<string>;
+	} | null =
 		open && at - Number(open.last) <= VISIT_GAP_MS
-			? { id: String(open.visit), pages: Number(open.pages) }
+			? {
+					id: String(open.visit),
+					pages: Number(open.pages),
+					flagged: Number(open.probe) === 1 || Number(open.staff) === 1,
+					seen: new Set(
+						[
+							...(await db.query({
+								sql: "SELECT DISTINCT host, path FROM visits_page WHERE visit = ?",
+								args: [String(open.visit)],
+							})),
+						].map((r) => `${String(r.host)}\0${String(r.path)}`),
+					),
+				}
 			: null;
 	for (const e of starts) {
 		if (known.has(e.trace_id as string)) continue;
@@ -334,7 +358,12 @@ async function assign(
 			f[k] === true || (k === "staff" && staff) ? 1 : 0;
 		if (visit === null) {
 			const referrer = str(f.referrer);
-			visit = { id: hex(crypto.getRandomValues(new Uint8Array(8))), pages: 0 };
+			visit = {
+				id: hex(crypto.getRandomValues(new Uint8Array(8))),
+				pages: 0,
+				flagged: false,
+				seen: new Set(),
+			};
 			statements.push({
 				sql: "INSERT INTO visits_visit (id, site, day, started, last, pages, referrer, source, country, viewport, probe, staff) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)",
 				args: [
@@ -354,6 +383,17 @@ async function assign(
 		}
 		visit.pages += 1;
 		known.set(e.trace_id as string, visit.id);
+		const host = str(f.host) ?? "";
+		const path = str(f.path) ?? "/";
+		visit.flagged ||= flag("probe") === 1 || flag("staff") === 1;
+		// A page's views: the visits that read it, each once, its own and probes' never.
+		const key = `${host}\0${path}`;
+		if (!visit.flagged && !visit.seen.has(key))
+			statements.push({
+				sql: "INSERT INTO visits_views (site, day, host, path, views) VALUES (?, ?, ?, ?, 1) ON CONFLICT (site, day, host, path) DO UPDATE SET views = views + 1",
+				args: [site, day, host, path],
+			});
+		visit.seen.add(key);
 		statements.push(
 			{
 				sql: "INSERT OR IGNORE INTO visits_page (span_id, trace_id, visit, seq, site, day, at, host, path, place, route, nav, from_path, build) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -365,8 +405,8 @@ async function assign(
 					site,
 					day,
 					at,
-					str(f.host) ?? "",
-					str(f.path) ?? "/",
+					host,
+					path,
 					str(f.place),
 					str(f.route),
 					str(f.nav) ?? "navigate",
@@ -553,6 +593,28 @@ export async function readVisits(
 		}
 	}
 	return [...visits.values()].map(({ at: _, ...v }) => v);
+}
+
+/**
+ * How many visits read each of a host's pages, all time: a page's view count, from
+ * `visits_views` (each visit once, the staff's and probes' never). `paths` limits it
+ * to those pages; a page no visit read is absent.
+ */
+export async function readViews(
+	db: MetricsReader,
+	q: { site: string; host: string; paths?: readonly string[] },
+): Promise<Record<string, number>> {
+	const only =
+		q.paths === undefined
+			? ""
+			: ` AND path IN (${q.paths.map(() => "?").join(",") || "NULL"})`;
+	const rows = await db.query({
+		sql: `SELECT path, SUM(views) AS views FROM visits_views WHERE site = ? AND host = ?${only} GROUP BY path`,
+		args: [q.site, q.host, ...(q.paths ?? [])],
+	});
+	return Object.fromEntries(
+		[...rows].map((r) => [String(r.path), Number(r.views)]),
+	);
 }
 
 /** One visit's page rows and its lines as written, in the order kept: each
