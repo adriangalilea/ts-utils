@@ -22,8 +22,9 @@
  * from, coarse country and viewport, whether a probe or the site's staff made
  * it), `visits_page` (one per page span: its place, path, how it was reached,
  * how long it was on screen, the sections it reached, the vitals) and
- * `visits_event` (the page's other lines: fetch spans, named events, errors,
- * as written). Pages and visits are kept VISIT_DAYS, events EVENT_DAYS, a
+ * `visits_event` (every line of the page's trace as written: the page span's
+ * own start and end, fetch spans, named events, errors, so a page's trace is
+ * read back from its lines alone, on the visitor's one clock). Pages and visits are kept VISIT_DAYS, events EVENT_DAYS, a
  * probe's or staff's FLAGGED_DAYS; old rows go on the first write of each
  * day. Provision VISITS_SCHEMA once, never on a request.
  *
@@ -238,11 +239,7 @@ export function visitsRoute(
 				continue;
 			}
 			accepted++;
-			if (e.msg === "page" && e.phase === "start") continue;
-			if (e.msg === "page" && e.phase === "end") {
-				statements.push(pageEnd(e));
-				continue;
-			}
+			if (e.msg === "page" && e.phase === "end") statements.push(pageEnd(e));
 			statements.push({
 				sql: "INSERT INTO visits_event (visit, trace_id, day, at, line) VALUES (?, ?, ?, ?, ?)",
 				args: [visit, e.trace_id as string, day, at, line],
@@ -555,7 +552,8 @@ export async function readVisits(
 	return [...visits.values()].map(({ at: _, ...v }) => v);
 }
 
-/** One visit's page rows and its other lines as written, for a visit's trace. */
+/** One visit's page rows and its lines as written, in the order kept: each
+ *  page's trace (its own start and end, its requests, its events) by trace id. */
 export async function readVisit(
 	db: MetricsReader,
 	id: string,

@@ -174,8 +174,8 @@ assert.equal(count("visits_visit"), 1);
 assert.equal(count("visits_page"), 1);
 assert.equal(
 	count("visits_event"),
-	3,
-	"the fetch span's two events and the named event",
+	4,
+	"the page's start, the fetch span's two events and the named event",
 );
 const [v1] = sqlite.prepare("SELECT * FROM visits_visit").all() as Record<
 	string,
@@ -377,8 +377,22 @@ const one = await readVisit(db, String(v1?.id));
 assert.equal(one.pages.length, 3);
 assert.equal(
 	one.lines.length,
-	4,
-	"the fetch span, the named event, the line kept from the refused batch",
+	9,
+	"three pages' starts and two ends, the fetch span, the named event, the line kept from the refused batch",
+);
+// A page's trace from its lines alone: its own start and end, the fetch inside it.
+const first = one.lines
+	.map((l) => JSON.parse(l) as Record<string, unknown>)
+	.filter((e) => e.trace_id === t1);
+assert.deepEqual(
+	first.map((e) => [e.msg, e.phase ?? null, e.span_id === p1]),
+	[
+		["page", "start", true],
+		["fetch", "start", false],
+		["fetch", "end", false],
+		["main action", null, true],
+		["page", "end", true],
+	],
 );
 
 // --- the next UTC day: a new salt, a new visit even within the gap -------------------
