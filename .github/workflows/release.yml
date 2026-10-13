@@ -35,7 +35,8 @@ jobs:
           path: dist
       - name: Publish
         run: |
-          TGZ=$(echo dist/*.tgz)
+          # ./ is load-bearing: npm reads `dist/x.tgz` as the GitHub repo dist/x.tgz.
+          TGZ=$(echo ./dist/*.tgz)
           NAME=$(tar -xOzf "$TGZ" package/package.json | jq -r .name)
           VERSION=$(tar -xOzf "$TGZ" package/package.json | jq -r .version)
           if npm view "$NAME@$VERSION" version > /dev/null 2>&1; then
