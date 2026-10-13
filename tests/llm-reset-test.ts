@@ -198,4 +198,38 @@ assert.ok(
 );
 assert.equal(ok["gen_ai.usage.output_tokens"], 3);
 console.log("  PASS the call and each attempt are spans with gen_ai fields");
-console.log("\n2 passed");
+
+// What reaches the server: extraBody's raw fields (snake_case included, which the AI
+// SDK's provider options would drop) and a system message given in the OpenAI shape.
+let sent: Record<string, unknown> = {};
+const capturing: typeof globalThis.fetch = async (_url, init) => {
+	sent = JSON.parse(String(init?.body));
+	return fetchB(_url, init);
+};
+const probe = createLlm({
+	providers: [
+		{
+			id: "probe",
+			type: "openai",
+			baseUrl: "http://fake.c/v1",
+			defaultModel: "fake",
+			fetch: capturing,
+		},
+	],
+});
+await probe.complete({
+	messages: [
+		{ role: "system", content: "You answer in JSON." },
+		{ role: "user", content: "hi" },
+	],
+	extraBody: { reasoning_effort: "none", think: false },
+});
+const wire = sent.messages as { role: string; content: string }[];
+assert.equal(sent.reasoning_effort, "none", JSON.stringify(sent));
+assert.equal(sent.think, false, JSON.stringify(sent));
+assert.ok(
+	wire.some((m) => m.role === "system" && m.content.includes("JSON")),
+	`the system text did not reach the server: ${JSON.stringify(wire)}`,
+);
+console.log("  PASS extraBody and a system message reach the server");
+console.log("\n3 passed");

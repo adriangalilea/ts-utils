@@ -524,14 +524,25 @@ export class Llm {
 		let sawContent = false;
 		let usage: Attempt["usage"] = null;
 		try {
+			// A conversation in the OpenAI shape carries its system text as messages; the
+			// AI SDK takes it only as instructions, so it moves there, after any given
+			const said = (req.messages ?? []).filter((m) => m.role === "system");
+			const instructions = [
+				req.instructions,
+				...said.map((m) => (typeof m.content === "string" ? m.content : "")),
+			]
+				.filter((text) => text)
+				.join("\n\n");
 			const result = streamText({
 				model: this.modelFor(provider, req),
 				...(req.prompt !== undefined
 					? { prompt: req.prompt }
-					: { messages: req.messages as ModelMessage[] }),
-				...(req.instructions !== undefined
-					? { instructions: req.instructions }
-					: {}),
+					: {
+							messages: (req.messages as ModelMessage[]).filter(
+								(m) => m.role !== "system",
+							),
+						}),
+				...(instructions ? { instructions } : {}),
 				temperature: resolveTemperature(provider),
 				maxOutputTokens: resolveMaxTokens(provider, req.maxTokens),
 				maxRetries: 0, // retry policy lives in the failover loop, not the transport
@@ -544,7 +555,7 @@ export class Llm {
 				),
 				...(req.tools ? { tools: req.tools } : {}),
 				...(req.toolChoice ? { toolChoice: req.toolChoice } : {}),
-				...this.providerOptionsFor(provider, req),
+				...this.providerOptionsFor(provider),
 			});
 
 			for await (const part of result.stream) {
@@ -640,38 +651,44 @@ export class Llm {
 			throw new LlmError(
 				`llm: provider ${provider.id} (openai) requires baseUrl`,
 			);
+		// Raw body fields are merged into the JSON as it is sent: providerOptions would
+		// pass them through a schema that keeps only the knobs it knows (camelCase), and
+		// silently drop the rest (`think`, `reasoning_effort`, `thinking`)
+		const body = {
+			...(provider.disableThinking ? { thinking: { type: "disabled" } } : {}),
+			...req.extraBody,
+		};
 		const compat = createOpenAICompatible({
 			name: provider.id,
 			baseURL: normalizeOpenAiBase(provider.baseUrl),
 			...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
 			...(provider.fetch ? { fetch: provider.fetch } : {}),
 			includeUsage: true, // stream_options usage frame
+			...(Object.keys(body).length > 0
+				? {
+						transformRequestBody: (args: Record<string, unknown>) => ({
+							...args,
+							...body,
+						}),
+					}
+				: {}),
 		});
 		return compat.chatModel(provider.defaultModel);
 	}
 
-	// Dialect-specific request body knobs, keyed the way each provider expects:
-	// openai-compatible spreads providerOptions[name] raw into the JSON body,
-	// which carries both the disableThinking flag and the request's extraBody.
+	// The anthropic dialect's thinking switch, the one knob that travels as a typed
+	// provider option; the other dialects carry theirs on the model instance.
 	private providerOptionsFor(
 		provider: ProviderConfig,
-		req: ChatRequest,
 	): Pick<Parameters<typeof streamText>[0], "providerOptions"> {
 		const type = dialectOf(provider);
 		if (type === "anthropic")
 			return provider.disableThinking
 				? { providerOptions: { anthropic: { thinking: { type: "disabled" } } } }
 				: {};
-		if (type === "openai") {
-			const body = {
-				...(provider.disableThinking ? { thinking: { type: "disabled" } } : {}),
-				...req.extraBody,
-			};
-			return Object.keys(body).length > 0
-				? { providerOptions: { [provider.id]: body } }
-				: {};
-		}
-		return {}; // openrouter: settings + extraBody ride the model instance in modelFor
+		// openai: the thinking flag and extraBody are merged into the request body by
+		// the model instance (modelFor); openrouter: they ride its model instance too
+		return {};
 	}
 
 	// Ordered attemptable keys: available now first (priority order), then
