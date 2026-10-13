@@ -926,6 +926,24 @@ try {
 			JSON.stringify(want),
 		);
 }
+// A text of several lines prints under its line, named, each line as written; the
+// other fields stay on the line.
+log.info("read", { outline: 'page "Home"\n  link "Cart"\n', n: 2 });
+{
+	const lines = (take()[0] ?? "").split("\n");
+	assert(
+		lines.length === 4 &&
+			lines[0]?.includes("n=2") === true &&
+			lines[0]?.includes("outline") === false &&
+			lines[1]?.trim() === "outline:" &&
+			lines[2]?.trim() === 'page "Home"' &&
+			lines[3]?.endsWith('  link "Cart"') === true &&
+			(lines[3]?.length ?? 0) - (lines[2]?.length ?? 0) ===
+				'  link "Cart"'.length - 'page "Home"'.length,
+		"a multi-line text prints under its line, indentation kept:\n",
+		lines.join("\n"),
+	);
+}
 // A stack prints once: the same error passed up through nested spans shows its
 // stack under the innermost failure only, the spans around it its message.
 const stacked = (text: string): number =>

@@ -641,18 +641,34 @@ function human(d: Draft, now: Date, clock: boolean): string {
 	const pairs = Object.entries(d.shows ?? d.fields ?? {})
 		.filter(([, x]) => x !== undefined)
 		.sort(([a], [b]) => byCodePoint(a, b));
+	// A text of several lines (a document, a diff, a page as read) reads as written:
+	// under the line, named, like a stack. Escaped onto the line it is unreadable.
+	const block = (x: unknown): x is string =>
+		typeof x === "string" && x.includes("\n");
+	const inline = pairs.filter(([, x]) => !block(x));
 	const tail =
-		pairs.length > 0
-			? ` ${paint(DIM, pairs.map(([k, x]) => `${k}=${humanValue(x)}`).join(" "))}`
+		inline.length > 0
+			? ` ${paint(DIM, inline.map(([k, x]) => `${k}=${humanValue(x)}`).join(" "))}`
 			: "";
 	const head = `${stamp}${pad}${v.indent} ${paint(v.style, v.symbol)} ${scope}${d.msg}${dur}${tail}`;
+	const texts = pairs.flatMap(([k, x]) =>
+		block(x)
+			? [
+					paint(DIM, `${pad}    ${k}:`),
+					...x
+						.replace(/\n+$/, "")
+						.split("\n")
+						.map((l) => paint(DIM, `${pad}      ${l}`)),
+				]
+			: [],
+	);
 	// A stack prints once: an error passed up from an inner span shows its message only.
 	const stacks = pairs.flatMap(([, x]) =>
 		x instanceof Error && x !== d.printed
 			? stackLines(x).map((l) => paint(DIM, `${pad}    ${l}`))
 			: [],
 	);
-	return [head, ...stacks].join("\n");
+	return [head, ...texts, ...stacks].join("\n");
 }
 
 type ConsoleMethod = "error" | "warn" | "info" | "debug";

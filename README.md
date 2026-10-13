@@ -150,7 +150,7 @@ stream.on('error', (err) => up.end(err))
 {"time":"2026-10-12T12:20:39.123Z","level":"warn","verb":"warn","msg":"retrying","service":"checkout","scope":["payments"],"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","fields":{"attempt":2}}
 ```
 
-`human` is symbols, colour (TTY, `NO_COLOR`, `FORCE_COLOR`), fields dim as `key=value`, an error's stack under its line (once: a span failing with the error a span inside it already failed with shows the message only; json writes it on both ends), and spans with what they hold indented:
+`human` is symbols, colour (TTY, `NO_COLOR`, `FORCE_COLOR`), fields dim as `key=value`, a field holding several lines under its line as written, an error's stack under its line (once: a span failing with the error a span inside it already failed with shows the message only; json writes it on both ends), and spans with what they hold indented:
 
 ```
  ○ sync repo=ui
