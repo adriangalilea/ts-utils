@@ -907,12 +907,13 @@ See `src/bot/CLAUDE.md` for storage layout, design decisions, and gotchas.
 
 ## Release
 
-Bump version in `package.json`, push to `main`. CI handles everything:
+Bump version in `package.json`, push to `main`. CI runs the shared workflows in [adriangalilea/ci](https://github.com/adriangalilea/ci):
 
-1. Type-check, lint, build
-2. Publish to npm via [OIDC trusted publishing](https://docs.npmjs.com/generating-provenance-statements) (no tokens — GitHub Actions proves identity directly to npm)
-3. Create git tag `vX.Y.Z`
-4. Generate changelog via [git-cliff](https://github.com/orhun/git-cliff) and create GitHub release
+1. `pnpm run verify` (type-check, lint, tests), build, pack, all without publish rights
+2. Publish the packed tarball to npm via [OIDC trusted publishing](https://docs.npmjs.com/trusted-publishers) (no tokens: GitHub Actions proves identity directly to npm)
+3. Create the tag `vX.Y.Z` and the GitHub release, with a changelog from [git-cliff](https://github.com/orhun/git-cliff)
+
+A version with no GitHub release yet is what triggers this, so a run that fails after publishing is finished by the next push.
 
 ## License
 

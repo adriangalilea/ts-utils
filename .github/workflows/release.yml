@@ -1,4 +1,4 @@
-name: NPM CI/CD
+name: release
 
 on:
   push:
@@ -6,127 +6,48 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v6
-
-    - uses: pnpm/action-setup@v5
-      with:
-        version: 11
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v6
-      with:
-        node-version: "24"
-        cache: "pnpm"
-
-    - name: Install dependencies
-      run: pnpm install --frozen-lockfile
-
-    - name: Run type check
-      run: pnpm run type-check
-
-    - name: Run type check (tests)
-      run: pnpm run type-check:tests
-
-    - name: Run linter
-      run: pnpm run ci
-
-    - name: Run tests
-      run: pnpm run test:all
-
-    - name: Build package
-      run: pnpm run build
+  build:
+    uses: adriangalilea/ci/.github/workflows/node.yml@69c560ad05a9a3f62cdb9a33cf4307cc6b485c1d # v1.1.0
+    permissions:
+      contents: read
 
   publish:
-    needs: lint
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    if: needs.build.outputs.release == 'true'
     runs-on: ubuntu-latest
     environment: npm
     permissions:
       id-token: write
-      contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          fetch-depth: 0
-
-      - uses: pnpm/action-setup@v5
+          node-version: 24
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          version: 11
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: "pnpm"
-          registry-url: "https://registry.npmjs.org"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build package
-        run: pnpm run build
-
-      - name: Extract package info
-        id: package
+          name: dist
+          path: dist
+      - name: Publish
         run: |
-          PACKAGE_NAME=$(node -p "require('./package.json').name")
-          VERSION=$(node -p "require('./package.json').version")
-
-          echo "name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Package: $PACKAGE_NAME@$VERSION"
-
-      - name: Check if version exists on npm
-        id: check
-        run: |
-          PACKAGE_NAME="${{ steps.package.outputs.name }}"
-          VERSION="${{ steps.package.outputs.version }}"
-
-          # Check if package exists and if this version is published
-          if npm view "$PACKAGE_NAME@$VERSION" version 2>/dev/null; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Version $VERSION already exists on npm"
+          TGZ=$(echo dist/*.tgz)
+          NAME=$(tar -xOzf "$TGZ" package/package.json | jq -r .name)
+          VERSION=$(tar -xOzf "$TGZ" package/package.json | jq -r .version)
+          if npm view "$NAME@$VERSION" version > /dev/null 2>&1; then
+            echo "$NAME@$VERSION already on npm"
           else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Version $VERSION not on npm, will publish"
+            npm publish "$TGZ" --access public
           fi
 
-      - name: Publish to npm
-        if: steps.check.outputs.exists == 'false'
-        run: npm publish --provenance --access public
-
-      - name: Create git tag
-        if: steps.check.outputs.exists == 'false'
-        run: |
-          VERSION="${{ steps.package.outputs.version }}"
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git tag -a "v$VERSION" -m "Release v$VERSION"
-          git push origin "v$VERSION"
-
-      - name: Generate Changelog
-        if: steps.check.outputs.exists == 'false'
-        id: git-cliff
-        uses: orhun/git-cliff-action@v4
-        with:
-          config: .github/cliff.toml
-          args: --latest
-        env:
-          OUTPUT: CHANGELOG.md
-          GITHUB_REPO: ${{ github.repository }}
-
-      - name: Create GitHub Release
-        if: steps.check.outputs.exists == 'false'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.package.outputs.version }}
-          body: ${{ steps.git-cliff.outputs.content }}
-          draft: false
-          prerelease: false
+  release:
+    needs: [build, publish]
+    uses: adriangalilea/ci/.github/workflows/release.yml@69c560ad05a9a3f62cdb9a33cf4307cc6b485c1d # v1.1.0
+    with:
+      tag: ${{ needs.build.outputs.tag }}
+    permissions:
+      contents: write

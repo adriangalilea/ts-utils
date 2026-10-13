@@ -1,6 +1,7 @@
 {
 	"name": "@adriangalilea/utils",
 	"version": "10.0.0",
+	"packageManager": "pnpm@11.22.0",
 	"description": "TypeScript utilities - logger, currency, formatter, GramIO bot plugins, and more",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -242,6 +243,7 @@
 		"check": "biome check",
 		"fix": "biome check --write --unsafe",
 		"ci": "biome ci",
+		"verify": "pnpm run type-check && pnpm run type-check:tests && pnpm run ci && pnpm run test:all",
 		"prepublishOnly": "pnpm run build",
 		"test:worker-safe": "pnpm run build && tsx tests/worker-safe-test.ts",
 		"test:raw-writes": "tsx tests/raw-writes-test.ts",
