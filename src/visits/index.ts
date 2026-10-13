@@ -13,8 +13,9 @@
  *     const visits = await readVisits(libsqlDriver(client), { site: "untitled.garden", days: 14 })
  *
  * A VISIT is one caller's pages, each within VISIT_GAP_MS of the one before,
- * within one UTC day. The caller is a hash of its IP and user agent with a
- * random salt of the day, the salt deleted once the day is over: a visitor is
+ * within one UTC day. The caller is a hash of its IP and user agent with the
+ * site and a random salt of the day, the salt deleted once the day is over (one
+ * store can hold several sites, never linking a person across them): a visitor is
  * recognisable within a day, never across two, and once the salt is gone by no
  * one. The IP and user agent are never stored; nothing is kept in the browser.
  *
@@ -310,8 +311,10 @@ async function assign(
 	}
 	if (starts.length === 0) return (t) => known.get(t);
 
+	// The site is in the hash: one store can hold several sites, and a person reading
+	// two of them is two callers, never one visit across sites nor a link between them.
 	const hash = await sha256(
-		`${await saltOf(db, day)}\0${caller.ip}\0${caller.agent}`,
+		`${await saltOf(db, day)}\0${site}\0${caller.ip}\0${caller.agent}`,
 	);
 	const id = hash.slice(0, 32);
 	const [open] = [

@@ -443,6 +443,57 @@ assert.equal(
 	"a probe is kept FLAGGED_DAYS",
 );
 
+// --- one store, two sites: the same person on both is two callers, two visits -------
+const other = visitsRoute({
+	db,
+	site: "adriangalilea.com",
+	services: ["blog-web"],
+	now: () => clock,
+});
+const gardenVisits = count("visits_visit");
+await post([start(trace(), span(), page("/", "studio"))], {
+	"cf-connecting-ip": "198.18.0.1",
+});
+const blogTrace = trace();
+res = await other(
+	new Request("https://adriangalilea.com/api/events", {
+		method: "POST",
+		headers: {
+			"content-type": "text/plain;charset=UTF-8",
+			"cf-connecting-ip": "198.18.0.1",
+			"user-agent": "Mozilla/5.0 (Macintosh) Safari/605",
+			origin: "https://adriangalilea.com",
+		},
+		body: JSON.stringify({
+			time: time(),
+			level: "info",
+			verb: "wait",
+			msg: "page",
+			service: "blog-web",
+			phase: "start",
+			trace_id: blogTrace,
+			span_id: span(),
+			fields: { host: "adriangalilea.com", path: "/", nav: "navigate" },
+		}),
+	}),
+);
+assert.equal(res.status, 204, await res.clone().text());
+assert.equal(
+	count("visits_visit"),
+	gardenVisits + 2,
+	"a visit on each site, never one across them",
+);
+assert.deepEqual(
+	(
+		sqlite
+			.prepare(
+				"SELECT v.site FROM visits_page p JOIN visits_visit v ON v.id = p.visit WHERE p.trace_id = ?",
+			)
+			.all(blogTrace) as { site: string }[]
+	).map((r) => r.site),
+	["adriangalilea.com"],
+);
+
 console.log(
-	"✓ visits: batches, the gap, callers, days, refusals, crawlers, origins, reading and pruning hold",
+	"✓ visits: batches, the gap, callers, days, refusals, crawlers, origins, sites, reading and pruning hold",
 );
