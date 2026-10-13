@@ -515,6 +515,44 @@ assert.deepEqual(
 	"two visits read it: a second read in one visit and the staff's are no view",
 );
 
+// --- a post read in a feed is a view of its page, once per visit with its page --------
+const feed = async (who: string, staffing = "0") => {
+	const t = trace();
+	const s = span();
+	await post(
+		[
+			start(t, s, page("/notes", "studio")),
+			info(t, s, "view", { host: "untitled.garden", path: "/notes/y" }),
+			info(t, s, "view", { host: "elsewhere.example", path: "/notes/y" }),
+		],
+		{ "cf-connecting-ip": who, "x-staff": staffing },
+	);
+};
+await feed("198.18.0.5");
+// The same visit then opens the post's own page: read already, no second view.
+await post([start(trace(), span(), page("/notes/y", "studio"))], {
+	"cf-connecting-ip": "198.18.0.5",
+});
+await feed("198.18.0.6");
+await feed("198.18.0.7", "1");
+assert.deepEqual(
+	await readViews(db, {
+		site: "untitled.garden",
+		host: "untitled.garden",
+		paths: ["/notes/y"],
+	}),
+	{ "/notes/y": 2 },
+	"two visits read it in the feed; opening it after, the staff's and another host's are no view",
+);
+assert.deepEqual(
+	await readViews(db, {
+		site: "untitled.garden",
+		host: "elsewhere.example",
+	}),
+	{},
+	"a view naming a host outside the site is counted nowhere",
+);
+
 console.log(
-	"✓ visits: batches, the gap, callers, days, refusals, crawlers, origins, sites, views, reading and pruning hold",
+	"✓ visits: batches, the gap, callers, days, refusals, crawlers, origins, sites, views, feed views, reading and pruning hold",
 );

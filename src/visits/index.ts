@@ -27,7 +27,8 @@
  * own start and end, fetch spans, named events, errors, so a page's trace is
  * read back from its lines alone, on the visitor's one clock) and
  * `visits_views` (per day, per page, how many visits read it, each once, the
- * staff's and probes' never: a count with nothing of who). Pages and visits
+ * staff's and probes' never: a count with nothing of who; a visit reads a page
+ * by opening it or by a `view` line naming it, a post shown whole elsewhere). Pages and visits
  * are kept VISIT_DAYS, events EVENT_DAYS, a probe's or staff's FLAGGED_DAYS;
  * old rows go on the first write of each day. Views are kept for good: they
  * are what a page's all-time count is read from (`readViews`). Provision
@@ -228,7 +229,7 @@ export function visitsRoute(
 			paging && options.staff !== undefined
 				? await options.staff(request)
 				: false;
-		const visitOf = await assign(
+		const { visitOf, viewers } = await assign(
 			db,
 			site,
 			{ caller, staff },
@@ -246,6 +247,23 @@ export function visitsRoute(
 			}
 			accepted++;
 			if (e.msg === "page" && e.phase === "end") statements.push(pageEnd(e));
+			// A post read where it was shown (a note in a feed): a view of its page.
+			const host = str(e.fields?.host);
+			const path = str(e.fields?.path);
+			if (
+				e.msg === "view" &&
+				e.phase === undefined &&
+				host !== null &&
+				path?.startsWith("/") &&
+				inside(host, site)
+			) {
+				let viewer = viewers.get(visit);
+				if (viewer === undefined) {
+					viewer = await viewerOf(db, visit);
+					viewers.set(visit, viewer);
+				}
+				statements.push(...view(viewer, { site, day, host, path }));
+			}
 			statements.push({
 				sql: "INSERT INTO visits_event (visit, trace_id, day, at, line) VALUES (?, ?, ?, ?, ?)",
 				args: [visit, e.trace_id as string, day, at, line],
@@ -294,7 +312,11 @@ async function assign(
 	at: number,
 	events: readonly { e: LogEvent }[],
 	statements: SqlStatement[],
-): Promise<(trace: string) => string | undefined> {
+): Promise<{
+	visitOf: (trace: string) => string | undefined;
+	viewers: Map<string, Viewer>;
+}> {
+	const viewers = new Map<string, Viewer>();
 	const traces = [...new Set(events.map(({ e }) => e.trace_id as string))];
 	// One event per page, its start where the batch has it.
 	const opened = new Map<string, LogEvent>();
@@ -314,7 +336,7 @@ async function assign(
 		});
 		for (const r of rows) known.set(String(r.trace_id), String(r.visit));
 	}
-	if (starts.length === 0) return (t) => known.get(t);
+	if (starts.length === 0) return { visitOf: (t) => known.get(t), viewers };
 
 	// The site is in the hash: one store can hold several sites, and a person reading
 	// two of them is two callers, never one visit across sites nor a link between them.
@@ -324,31 +346,17 @@ async function assign(
 	const id = hash.slice(0, 32);
 	const [open] = [
 		...(await db.query({
-			sql: "SELECT c.visit, c.last, v.pages, v.probe, v.staff FROM visits_caller c JOIN visits_visit v ON v.id = c.visit WHERE c.day = ? AND c.caller = ?",
+			sql: "SELECT c.visit, c.last, v.pages FROM visits_caller c JOIN visits_visit v ON v.id = c.visit WHERE c.day = ? AND c.caller = ?",
 			args: [day, id],
 		})),
 	];
-	/** The visit the batch's pages join: its pages so far, whether it is flagged, and
-	 *  the pages (host and path) it has seen, each counted once in its views. */
-	let visit: {
-		id: string;
-		pages: number;
-		flagged: boolean;
-		seen: Set<string>;
-	} | null =
+	/** The visit the batch's pages join: its pages so far and what it has viewed. */
+	let visit: ({ id: string; pages: number } & Viewer) | null =
 		open && at - Number(open.last) <= VISIT_GAP_MS
 			? {
 					id: String(open.visit),
 					pages: Number(open.pages),
-					flagged: Number(open.probe) === 1 || Number(open.staff) === 1,
-					seen: new Set(
-						[
-							...(await db.query({
-								sql: "SELECT DISTINCT host, path FROM visits_page WHERE visit = ?",
-								args: [String(open.visit)],
-							})),
-						].map((r) => `${String(r.host)}\0${String(r.path)}`),
-					),
+					...(await viewerOf(db, String(open.visit))),
 				}
 			: null;
 	for (const e of starts) {
@@ -386,14 +394,8 @@ async function assign(
 		const host = str(f.host) ?? "";
 		const path = str(f.path) ?? "/";
 		visit.flagged ||= flag("probe") === 1 || flag("staff") === 1;
-		// A page's views: the visits that read it, each once, its own and probes' never.
-		const key = `${host}\0${path}`;
-		if (!visit.flagged && !visit.seen.has(key))
-			statements.push({
-				sql: "INSERT INTO visits_views (site, day, host, path, views) VALUES (?, ?, ?, ?, 1) ON CONFLICT (site, day, host, path) DO UPDATE SET views = views + 1",
-				args: [site, day, host, path],
-			});
-		visit.seen.add(key);
+		viewers.set(visit.id, visit);
+		statements.push(...view(visit, { site, day, host, path }));
 		statements.push(
 			{
 				sql: "INSERT OR IGNORE INTO visits_page (span_id, trace_id, visit, seq, site, day, at, host, path, place, route, nav, from_path, build) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -425,7 +427,55 @@ async function assign(
 			sql: "INSERT INTO visits_caller (day, caller, visit, last) VALUES (?, ?, ?, ?) ON CONFLICT (day, caller) DO UPDATE SET visit = excluded.visit, last = excluded.last",
 			args: [day, id, visit.id, at],
 		});
-	return (t) => known.get(t);
+	return { visitOf: (t) => known.get(t), viewers };
+}
+
+/** What a visit has read, for its views: whether it is the staff's or a probe's (never
+ *  counted), and each page (host and path) it opened or was shown (a "view" line),
+ *  each a view once. */
+interface Viewer {
+	flagged: boolean;
+	readonly seen: Set<string>;
+}
+
+const viewKey = (host: string, path: string) => `${host}\0${path}`;
+
+async function viewerOf(db: MetricsReader, visit: string): Promise<Viewer> {
+	const [v] = [
+		...(await db.query({
+			sql: "SELECT probe, staff FROM visits_visit WHERE id = ?",
+			args: [visit],
+		})),
+	];
+	if (v === undefined) throw new Error(`visits: no visit ${visit}`);
+	const read = await db.query({
+		sql: "SELECT host, path FROM visits_page WHERE visit = ? UNION SELECT json_extract(line, '$.fields.host'), json_extract(line, '$.fields.path') FROM visits_event WHERE visit = ? AND json_extract(line, '$.msg') = 'view' AND json_extract(line, '$.phase') IS NULL",
+		args: [visit, visit],
+	});
+	return {
+		flagged: Number(v.probe) === 1 || Number(v.staff) === 1,
+		seen: new Set(
+			[...read].map((r) => viewKey(String(r.host), String(r.path))),
+		),
+	};
+}
+
+/** A page read by a visit: a view of it, the first time this visit reads it. */
+function view(
+	viewer: Viewer,
+	at: { site: string; day: string; host: string; path: string },
+): SqlStatement[] {
+	const key = viewKey(at.host, at.path);
+	const first = !viewer.seen.has(key);
+	viewer.seen.add(key);
+	return first && !viewer.flagged
+		? [
+				{
+					sql: "INSERT INTO visits_views (site, day, host, path, views) VALUES (?, ?, ?, ?, 1) ON CONFLICT (site, day, host, path) DO UPDATE SET views = views + 1",
+					args: [at.site, at.day, at.host, at.path],
+				},
+			]
+		: [];
 }
 
 /** What a page span's end adds to its row. */
