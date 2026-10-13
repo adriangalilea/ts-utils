@@ -470,14 +470,27 @@ export interface VisitRow {
 	readonly staff: boolean;
 }
 
+/** A named event as a step of a visit: where it happened, then its name
+ *  (`trash:main action`), right after the page it was written on. */
+export const eventStep = (place: string, event: string): string =>
+	`${place}:${event}`;
+
 /**
  * The visits of the last `days` UTC days, today included, oldest first. A
  * probe's and the staff's are left out unless `flagged`: they are no product
- * number.
+ * number. `events` names the lines (by message) that are steps of a visit too,
+ * each right after the page it was written on, as `eventStep(place, name)`: a
+ * project's main action is where a funnel ends.
  */
 export async function readVisits(
 	db: MetricsReader,
-	q: { site: string; days: number; flagged?: boolean; now?: number },
+	q: {
+		site: string;
+		days: number;
+		flagged?: boolean;
+		events?: readonly string[];
+		now?: number;
+	},
 ): Promise<VisitRow[]> {
 	if (!(Number.isInteger(q.days) && q.days >= 1))
 		throw new Error(`visits: days is a whole number of days, got ${q.days}`);
@@ -486,13 +499,28 @@ export async function readVisits(
 	const flags = q.flagged ? "" : " AND v.probe = 0 AND v.staff = 0";
 	const rows = [
 		...(await db.query({
-			sql: `SELECT v.id, v.started, v.referrer, v.source, v.country, v.viewport, v.probe, v.staff, p.place, p.path FROM visits_visit v JOIN visits_page p ON p.visit = v.id WHERE v.site = ? AND v.day >= ?${flags} ORDER BY v.started, v.id, p.seq`,
+			sql: `SELECT v.id, v.started, v.referrer, v.source, v.country, v.viewport, v.probe, v.staff, p.place, p.path, p.trace_id FROM visits_visit v JOIN visits_page p ON p.visit = v.id WHERE v.site = ? AND v.day >= ?${flags} ORDER BY v.started, v.id, p.seq`,
 			args,
 		})),
 	];
+	// Each page's named events, in the order written: lines (no phase) of its trace.
+	const events = new Map<string, string[]>();
+	if (q.events && q.events.length > 0) {
+		const named = [
+			...(await db.query({
+				sql: `SELECT e.trace_id, json_extract(e.line, '$.msg') AS msg FROM visits_event e JOIN visits_visit v ON v.id = e.visit WHERE v.site = ? AND v.day >= ?${flags} AND json_extract(e.line, '$.phase') IS NULL AND json_extract(e.line, '$.msg') IN (${q.events.map(() => "?").join(",")}) ORDER BY e.id`,
+				args: [...args, ...q.events],
+			})),
+		];
+		for (const r of named) {
+			const list = events.get(String(r.trace_id)) ?? [];
+			list.push(String(r.msg));
+			events.set(String(r.trace_id), list);
+		}
+	}
 	const visits = new Map<
 		string,
-		VisitRow & { places: string[]; pages: number }
+		VisitRow & { places: string[]; pages: number; at: string | undefined }
 	>();
 	for (const r of rows) {
 		const id = String(r.id);
@@ -503,6 +531,7 @@ export async function readVisits(
 				started: Number(r.started),
 				places: [],
 				pages: 0,
+				at: undefined,
 				referrer: str(r.referrer) ?? undefined,
 				source: str(r.source) ?? undefined,
 				country: str(r.country) ?? undefined,
@@ -512,11 +541,18 @@ export async function readVisits(
 			};
 			visits.set(id, v);
 		}
+		// A move within a place is no new step, even past an event written there.
 		const place = str(r.place) ?? String(r.path);
-		if (v.places.at(-1) !== place) v.places.push(place);
+		if (v.at !== place) v.places.push(place);
+		v.at = place;
 		v.pages += 1;
+		// Pressed twice in a row is one step.
+		for (const name of events.get(String(r.trace_id)) ?? []) {
+			const step = eventStep(place, name);
+			if (v.places.at(-1) !== step) v.places.push(step);
+		}
 	}
-	return [...visits.values()];
+	return [...visits.values()].map(({ at: _, ...v }) => v);
 }
 
 /** One visit's page rows and its other lines as written, for a visit's trace. */

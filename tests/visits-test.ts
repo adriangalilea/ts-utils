@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import type { MetricsDriver } from "../src/metrics/sqlite.js";
 import {
+	eventStep,
 	readVisit,
 	readVisits,
 	VISITS_SCHEMA,
@@ -328,6 +329,31 @@ assert.deepEqual(
 		[["studio"], 1, null],
 	],
 	"places in order (two pages in lore are one stop), the probe and the staff left out",
+);
+// A named event is a step, right after the page it was written on.
+assert.deepEqual(
+	(
+		await readVisits(db, {
+			site: "untitled.garden",
+			days: 1,
+			events: ["main action"],
+			now: clock,
+		})
+	)[0]?.places,
+	["studio", eventStep("studio", "main action"), "lore"],
+	"the main action, after the studio page it was pressed on",
+);
+assert.deepEqual(
+	(
+		await readVisits(db, {
+			site: "untitled.garden",
+			days: 1,
+			events: ["nothing written"],
+			now: clock,
+		})
+	)[0]?.places,
+	["studio", "lore"],
+	"an event no page wrote adds no step",
 );
 visits = await readVisits(db, {
 	site: "untitled.garden",
