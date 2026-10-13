@@ -68,6 +68,7 @@ import {
 	type FlexibleSchema,
 	type LanguageModel,
 	type ModelMessage,
+	NoObjectGeneratedError,
 	Output,
 	streamText,
 	type ToolChoice,
@@ -215,15 +216,59 @@ export interface LlmResult {
 	object?: unknown;
 }
 
+/**
+ * Why one provider's attempt failed, typed for a caller to act on:
+ * `off-schema`, the model answered and its answer is not the schema's shape
+ * (`text` what it wrote, `cut` when its token cap stopped it before the end);
+ * `empty`, it answered nothing; `failed`, the call itself failed (the
+ * provider's words, its HTTP status when it gave one).
+ */
+export type LlmFailure =
+	| { kind: "off-schema"; provider: string; text: string; cut: boolean }
+	| { kind: "empty"; provider: string }
+	| { kind: "failed"; provider: string; message: string; status?: number };
+
 export class LlmError extends Error {
+	/** Each provider's failure in the order tried: empty for an error before any attempt. */
+	readonly failures: LlmFailure[];
 	constructor(
 		message: string,
 		readonly status?: number,
+		failures: LlmFailure[] = [],
 	) {
 		super(message);
 		this.name = "LlmError";
+		this.failures = failures;
 	}
 }
+
+/** An attempt's error as an `LlmFailure`: the AI SDK's own error for an answer
+ *  that is not the schema's, which carries the text and why it stopped. */
+function failureOf(provider: string, error: unknown): LlmFailure {
+	if (NoObjectGeneratedError.isInstance(error))
+		return {
+			kind: "off-schema",
+			provider,
+			text: error.text ?? "",
+			cut: error.finishReason === "length",
+		};
+	if (error instanceof LlmError && error.message === EMPTY)
+		return { kind: "empty", provider };
+	const status = APICallError.isInstance(error)
+		? error.statusCode
+		: error instanceof LlmError
+			? error.status
+			: undefined;
+	return {
+		kind: "failed",
+		provider,
+		message: error instanceof Error ? error.message : String(error),
+		...(status !== undefined ? { status } : {}),
+	};
+}
+
+/** An attempt that streamed no content at all. */
+const EMPTY = "llm: empty completion";
 
 // ─── Request ───────────────────────────────────────────────────────
 
@@ -425,6 +470,7 @@ export class Llm {
 		span: Span,
 	): AsyncGenerator<LlmStreamEvent> {
 		const errors: string[] = [];
+		const failures: LlmFailure[] = [];
 		const queue = await this.buildQueue(errors);
 		let preferId: string | undefined;
 		let totalPrompt = 0;
@@ -483,6 +529,7 @@ export class Llm {
 					? attempt.error.message
 					: String(attempt.error);
 			errors.push(`${provider.id}: ${msg}`);
+			failures.push(failureOf(provider.id, attempt.error));
 			await this.recordFailure(
 				keyId(provider),
 				provider.id,
@@ -501,7 +548,11 @@ export class Llm {
 			throw new LlmError(
 				"llm: all providers unavailable (disabled or cooling down after failures)",
 			);
-		throw new LlmError(`llm: all providers failed: ${errors.join("; ")}`);
+		throw new LlmError(
+			`llm: all providers failed: ${errors.join("; ")}`,
+			undefined,
+			failures,
+		);
 	}
 
 	// One provider attempt as a span: where it went, how long until its first token
@@ -650,7 +701,7 @@ export class Llm {
 			return {
 				ok: false,
 				emitted,
-				error: new LlmError("llm: empty completion"),
+				error: new LlmError(EMPTY),
 				usage,
 			};
 		if (!req.schema) return { ok: true, emitted, usage };
