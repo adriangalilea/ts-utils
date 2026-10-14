@@ -78,8 +78,8 @@ import {
 	type PrepareStepResult,
 	type StopCondition,
 	streamText,
-	ToolChoiceViolationError,
 	type ToolChoice,
+	ToolChoiceViolationError,
 	type ToolSet,
 } from "ai";
 import { type Logger, log as root, type Span } from "../universal/log.js";

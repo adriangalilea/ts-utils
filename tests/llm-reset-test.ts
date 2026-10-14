@@ -170,9 +170,7 @@ assert.ok(
 );
 assert.equal(kinds.at(-1), "end");
 console.error = print;
-pass(
-	`reset follows a tool-only failed attempt (${kinds.join(" → ")})`,
-);
+pass(`reset follows a tool-only failed attempt (${kinds.join(" → ")})`);
 
 // The call is one chat span; each provider tried an attempt span inside it, the
 // failed one ending in error, the one that answered with its timings and tokens.
@@ -552,9 +550,7 @@ const ACTING = {
 		"a reply with no tool call where one was required is empty",
 	);
 	assert.deepEqual(executed, [{ text: "hal" }]);
-	pass(
-		"a reply that calls no tool where one is required fails as empty",
-	);
+	pass("a reply that calls no tool where one is required fails as empty");
 }
 {
 	// A tool slower than the request timeout: the timeout is each request's, the
@@ -590,9 +586,7 @@ const ACTING = {
 		stopWhen: stepCountIs(5),
 	});
 	assert.equal(r.text, "added");
-	pass(
-		"a tool slower than the request timeout does not abort the loop",
-	);
+	pass("a tool slower than the request timeout does not abort the loop");
 }
 {
 	// prepareStep's messages replace what the model reads from that step on; the
