@@ -78,6 +78,7 @@ import {
 	type PrepareStepResult,
 	type StopCondition,
 	streamText,
+	ToolChoiceViolationError,
 	type ToolChoice,
 	type ToolSet,
 } from "ai";
@@ -293,7 +294,12 @@ function failureOf(provider: string, error: unknown): LlmFailure {
 			text: error.text ?? "",
 			cut: error.finishReason === "length",
 		};
-	if (error instanceof LlmError && error.message === EMPTY)
+	// A turn that had to call a tool and called none answered nothing it could: as empty
+	// as no answer, which the caller tells the model, not a broken provider
+	if (
+		(error instanceof LlmError && error.message === EMPTY) ||
+		ToolChoiceViolationError.isInstance(error)
+	)
 		return { kind: "empty", provider };
 	const status = APICallError.isInstance(error)
 		? error.statusCode

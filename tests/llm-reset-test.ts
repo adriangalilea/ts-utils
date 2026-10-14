@@ -510,6 +510,46 @@ const ACTING = {
 	);
 }
 {
+	// A step that must call a tool and answers text instead answered nothing it could:
+	// typed empty, so a caller tells its model to act, never reads a broken provider
+	executed.length = 0;
+	console.error = () => {};
+	const requests: Record<string, unknown>[] = [];
+	const required = createLlm({
+		providers: [
+			{
+				id: "required",
+				type: "openai",
+				baseUrl: "http://fake.r/v1",
+				defaultModel: "fake",
+				fetch: looping(requests),
+			},
+		],
+	});
+	const failed = await required
+		.complete({
+			prompt: "quote hal",
+			tools: ACTING,
+			toolChoice: "required",
+			stopWhen: stepCountIs(5),
+		})
+		.then(
+			() => null,
+			(e: unknown) => e,
+		);
+	console.error = print;
+	assert.ok(failed instanceof LlmError, `no LlmError: ${String(failed)}`);
+	assert.deepEqual(
+		failed.failures.map((f) => f.kind),
+		["empty"],
+		"a reply with no tool call where one was required is empty",
+	);
+	assert.deepEqual(executed, [{ text: "hal" }]);
+	console.log(
+		"  PASS a reply that calls no tool where one is required fails as empty",
+	);
+}
+{
 	// A tool slower than the request timeout: the timeout is each request's, the
 	// tools between requests are not timed by it (a tool may wait on a person)
 	const requests: Record<string, unknown>[] = [];
@@ -619,4 +659,4 @@ const ACTING = {
 		"  PASS reasoning reaches the server per call, and a step's for that step alone",
 	);
 }
-console.log("\n11 passed");
+console.log("\n12 passed");
