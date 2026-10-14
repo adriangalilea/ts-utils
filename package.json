@@ -1,6 +1,6 @@
 {
 	"name": "@adriangalilea/utils",
-	"version": "10.6.1",
+	"version": "10.7.0",
 	"packageManager": "pnpm@11.22.0",
 	"description": "TypeScript utilities - logger, currency, formatter, GramIO bot plugins, and more",
 	"main": "./dist/index.js",
@@ -228,7 +228,7 @@
 	"scripts": {
 		"build": "rm -rf dist && tsc",
 		"test": "tsx tests/metrics-test.ts",
-		"test:all": "pnpm run test && pnpm run test:log && pnpm run test:log-ship && pnpm run test:runtime && pnpm run test:text && pnpm run test:tg-html && pnpm run test:tg-md && pnpm run test:flags && pnpm run test:groups && pnpm run test:user && pnpm run test:language-picker && pnpm run test:self-echo && pnpm run test:update-identity && pnpm run test:update-runner &&pnpm run test:bot-text && pnpm run test:url && pnpm run test:bot-urls && pnpm run test:bot-updates && pnpm run test:bot-announce && pnpm run test:reactions && pnpm run test:llm-reset && pnpm run test:raw-writes && pnpm run test:worker-safe",
+		"test:all": "pnpm run test && pnpm run test:log && pnpm run test:log-ship && pnpm run test:runtime && pnpm run test:text && pnpm run test:tg-html && pnpm run test:tg-md && pnpm run test:flags && pnpm run test:groups && pnpm run test:user && pnpm run test:language-picker && pnpm run test:self-echo && pnpm run test:update-identity && pnpm run test:update-runner &&pnpm run test:bot-text && pnpm run test:url && pnpm run test:bot-urls && pnpm run test:bot-updates && pnpm run test:bot-announce && pnpm run test:reactions && pnpm run test:llm-reset && pnpm run test:llm-mend && pnpm run test:raw-writes && pnpm run test:worker-safe",
 		"test:log": "tsx tests/log-test.ts",
 		"test:log-ship": "tsx tests/log-ship-test.ts",
 		"test:runtime": "tsx tests/runtime-test.ts",
@@ -267,7 +267,8 @@
 		"test:bot-updates": "tsx tests/bot-updates-test.ts",
 		"test:bot-announce": "tsx tests/bot-announce-test.ts",
 		"test:reactions": "tsx tests/reactions-test.ts",
-		"test:llm-reset": "tsx tests/llm-reset-test.ts"
+		"test:llm-reset": "tsx tests/llm-reset-test.ts",
+		"test:llm-mend": "tsx tests/llm-mend-test.ts"
 	},
 	"keywords": [
 		"typescript",
@@ -279,8 +280,8 @@
 	"author": "Adrian Galilea <adriangalilea@gmail.com>",
 	"license": "MIT",
 	"devDependencies": {
-		"@ai-sdk/anthropic": "^4.0.72",
-		"@ai-sdk/openai-compatible": "^3.0.63",
+		"@ai-sdk/anthropic": "^4.0.74",
+		"@ai-sdk/openai-compatible": "^3.0.65",
 		"@biomejs/biome": "2.4.15",
 		"@gramio/format": "^0.12.1",
 		"@gramio/session": "^0.2.0",
@@ -288,7 +289,7 @@
 		"@gramio/storage": "^2.0.1",
 		"@openrouter/ai-sdk-provider": "^3.1.0",
 		"@types/node": "^24.3.0",
-		"ai": "^7.0.128",
+		"ai": "^7.0.130",
 		"gramio": "^0.15.1",
 		"next": "^16.3.8",
 		"react": "^19.3.0",

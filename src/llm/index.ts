@@ -70,6 +70,7 @@ import {
 	APICallError,
 	asSchema,
 	type FlexibleSchema,
+	type JSONSchema7,
 	type LanguageModel,
 	type ModelMessage,
 	NoObjectGeneratedError,
@@ -78,6 +79,7 @@ import {
 	type PrepareStepResult,
 	type StopCondition,
 	streamText,
+	type ToolCallRepairFunction,
 	type ToolChoice,
 	ToolChoiceViolationError,
 	type ToolSet,
@@ -99,6 +101,71 @@ export {
 	type ToolSet,
 	tool,
 } from "ai";
+
+/** Whether a JSON Schema takes a list or an object (alone or among `anyOf`/`oneOf`). */
+const structured = (s: JSONSchema7 | boolean | undefined): boolean => {
+	if (typeof s !== "object") return false;
+	const types = Array.isArray(s.type) ? s.type : [s.type];
+	if (types.includes("array") || types.includes("object")) return true;
+	return [...(s.anyOf ?? []), ...(s.oneOf ?? [])].some(structured);
+};
+
+/** JSON parsed, or undefined. */
+const parsed = (text: string): unknown => {
+	try {
+		return JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+};
+
+/**
+ * A tool call's input mended where the model wrote a list or an object as a string of
+ * JSON: `"found": "[…]"`, and the string that swallowed the fields after it,
+ * `"found": "[…], \"verdict\": \"…\"}"` (verdict then missing). Each such field of the
+ * schema is read as JSON in its place: alone, else as the rest of the object it was cut
+ * from, whose fields come back beside it. Null when nothing mends. A local model ended
+ * a task this way and, told "expected array, received string", sent the same call until
+ * its budget ran out, sure the tool was caching its input.
+ */
+export function mended(input: string, schema: JSONSchema7): string | null {
+	const value = parsed(input);
+	if (typeof value !== "object" || value === null || Array.isArray(value))
+		return null;
+	const fields = schema.properties ?? {};
+	const out: Record<string, unknown> = { ...value };
+	let changed = false;
+	for (const [key, held] of Object.entries(value)) {
+		if (typeof held !== "string" || !structured(fields[key])) continue;
+		const alone = parsed(held);
+		if (typeof alone === "object" && alone !== null) {
+			out[key] = alone;
+			changed = true;
+			continue;
+		}
+		const rest = parsed(`{${JSON.stringify(key)}:${held}`);
+		if (typeof rest !== "object" || rest === null) continue;
+		for (const [k, v] of Object.entries(rest)) {
+			if (k === key || !(k in out)) out[k] = v;
+		}
+		changed = true;
+	}
+	return changed ? JSON.stringify(out) : null;
+}
+
+/** The repair every tool loop runs on a call whose input failed its schema (`mended`). */
+const repair: ToolCallRepairFunction<ToolSet> = async ({
+	toolCall,
+	tools,
+	inputSchema,
+}) => {
+	if (!(toolCall.toolName in tools)) return null;
+	const input = mended(
+		toolCall.input,
+		await inputSchema({ toolName: toolCall.toolName }),
+	);
+	return input === null ? null : { ...toolCall, input };
+};
 
 /** How much a model reasons before it answers: the AI SDK's level ("none" turns it
  *  off, where the provider can). */
@@ -728,7 +795,7 @@ export class Llm {
 				// without this no-op the SDK ALSO dumps the full APICallError to console.
 				onError: () => {},
 				...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
-				...(req.tools ? { tools: req.tools } : {}),
+				...(req.tools ? { tools: req.tools, repairToolCall: repair } : {}),
 				...(req.toolChoice ? { toolChoice: req.toolChoice } : {}),
 				...(req.stopWhen ? { stopWhen: req.stopWhen } : {}),
 				...(req.reasoning ? { reasoning: req.reasoning } : {}),
