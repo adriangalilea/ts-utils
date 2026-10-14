@@ -26,6 +26,10 @@
  *     OpenRouter's usage accounting (`providerMetadata.openrouter.usage.cost`)
  *     or a `cost` field on the provider's raw usage frame — never a price
  *     table estimate.
+ *   - **A tool loop that never acts twice.** `stopWhen` runs the AI SDK's
+ *     loop (tools with `execute`, called again with their results); once a
+ *     tool has run, a failure ends the call instead of failing over, since
+ *     another provider would replay the tools from scratch.
  *
  * Worker-safe: fetch/WebStreams only, no `node:*`. Peer deps: `ai`,
  * `@ai-sdk/openai-compatible`, `@ai-sdk/anthropic`,
@@ -70,6 +74,9 @@ import {
 	type ModelMessage,
 	NoObjectGeneratedError,
 	Output,
+	type PrepareStepFunction,
+	type PrepareStepResult,
+	type StopCondition,
 	streamText,
 	type ToolChoice,
 	type ToolSet,
@@ -78,14 +85,38 @@ import { type Logger, log as root, type Span } from "../universal/log.js";
 
 const log = root.scope("llm").scope("health");
 
-// One import surface for consumers: the tool helper and its types ride along.
+// One import surface for consumers: the tool helper, the tool loop's stop
+// conditions, the serial executor a loop's ordered tools share, and their types.
 export {
+	hasToolCall,
 	jsonSchema,
 	type ModelMessage,
+	SerialJobExecutor,
+	type StopCondition,
+	stepCountIs,
 	type Tool,
 	type ToolSet,
 	tool,
 } from "ai";
+
+/** How much a model reasons before it answers: the AI SDK's level ("none" turns it
+ *  off, where the provider can). */
+export type Reasoning = NonNullable<
+	Parameters<typeof streamText>[0]["reasoning"]
+>;
+
+/**
+ * The tool loop's step hook: the AI SDK's, whose result may also say how much the
+ * model reasons on that step (`reasoning`), mapped to the provider's own option.
+ */
+export type PrepareStep = (
+	options: Parameters<PrepareStepFunction<ToolSet>>[0],
+) =>
+	| (PrepareStepResult<ToolSet> & { reasoning?: Reasoning })
+	| undefined
+	| PromiseLike<
+			(PrepareStepResult<ToolSet> & { reasoning?: Reasoning }) | undefined
+	  >;
 
 // ─── Config ────────────────────────────────────────────────────────
 
@@ -164,7 +195,8 @@ export interface HealthStore {
 export interface LlmOptions {
 	providers: ProviderConfig[];
 	health?: HealthStore;
-	/** Per-attempt hard timeout in ms. Default 120_000. */
+	/** Hard timeout of each request to a model, in ms. Default 120_000. A tool
+	 *  loop's tools run between requests and are not timed by it. */
 	requestTimeoutMs?: number;
 }
 
@@ -198,7 +230,13 @@ export type LlmStreamEvent =
 	/** A tool call's arguments arriving as text; `tool-call` follows with the parsed whole. */
 	| { kind: "tool-input-delta"; toolCallId: string; delta: string }
 	| { kind: "tool-call"; toolCallId: string; toolName: string; input: unknown }
-	| { kind: "end"; usage: LlmUsage | null; object?: unknown };
+	| {
+			kind: "end";
+			usage: LlmUsage | null;
+			object?: unknown;
+			/** The turns this call added: the model's, and its tools' results. */
+			messages: ModelMessage[];
+	  };
 
 export interface LlmToolCall {
 	/** The provider's id for this call: what a later turn must echo back to replay it (ds4 keys its exact-DSML replay on it). */
@@ -214,6 +252,9 @@ export interface LlmResult {
 	usage: LlmUsage | null;
 	/** The answer parsed and validated against `schema`, when the request gave one. */
 	object?: unknown;
+	/** The turns this call added, every step's: the model's, and its tools' results.
+	 *  Appended to the request's `messages`, the conversation goes on from here. */
+	messages: ModelMessage[];
 }
 
 /**
@@ -283,6 +324,26 @@ export interface ChatRequest {
 	maxTokens?: number;
 	tools?: ToolSet;
 	toolChoice?: ToolChoice<ToolSet>;
+	/**
+	 * The tool loop: the tools the model calls that have an `execute` run, and the
+	 * model is called again with their results until one of these holds (the AI SDK's
+	 * stop conditions: `stepCountIs(n)`, `hasToolCall(name)`, or any function of the
+	 * steps so far). Default: one step. Each step is a `step` span in its attempt.
+	 * Once a tool has run, a failure is the call's: no other provider is tried, since
+	 * its tools would run again.
+	 */
+	stopWhen?: StopCondition<ToolSet> | StopCondition<ToolSet>[];
+	/**
+	 * Before each step of the tool loop: settings for it (the AI SDK's step hook),
+	 * among them `messages`, which replace what the model reads from that step on
+	 * (a conversation kept inside its window), and `reasoning`, how much the model
+	 * reasons on that step alone. The result's `messages` stay the turns the call
+	 * added, never the replaced ones.
+	 */
+	prepareStep?: PrepareStep;
+	/** How much the model reasons before each answer, unless a step says otherwise.
+	 *  A `reasoning_effort` in `extraBody` would override any step's: use this. */
+	reasoning?: Reasoning;
 	abortSignal?: AbortSignal;
 	/**
 	 * OpenAI-dialect only: raw request-body fields spread into the JSON body
@@ -387,6 +448,10 @@ interface Attempt {
 	} | null;
 	/** The answer parsed against the request's schema, when it gave one. */
 	object?: unknown;
+	/** A tool ran: what it did is done, and no other provider may do it again. */
+	acted: boolean;
+	/** The turns the attempt added, when it finished. */
+	messages: ModelMessage[];
 }
 
 export class Llm {
@@ -402,6 +467,7 @@ export class Llm {
 		const toolCalls: LlmToolCall[] = [];
 		let usage: LlmUsage | null = null;
 		let object: unknown;
+		let messages: ModelMessage[] = [];
 		for await (const event of this.stream(req)) {
 			if (event.kind === "delta") text += event.text;
 			else if (event.kind === "reasoning") reasoning += event.text;
@@ -418,6 +484,7 @@ export class Llm {
 			else if (event.kind === "end") {
 				usage = event.usage;
 				object = event.object;
+				messages = event.messages;
 			}
 		}
 		return {
@@ -426,6 +493,7 @@ export class Llm {
 			toolCalls,
 			usage,
 			...(req.schema ? { object } : {}),
+			messages,
 		};
 	}
 
@@ -515,6 +583,7 @@ export class Llm {
 								}
 							: null,
 					...(req.schema ? { object: attempt.object } : {}),
+					messages: attempt.messages,
 				};
 				return;
 			}
@@ -537,6 +606,13 @@ export class Llm {
 				classifyError(attempt.error),
 				attempt.error,
 			);
+			// A tool that ran has acted on the world: another provider would act again
+			if (attempt.acted)
+				throw new LlmError(
+					`llm: ${provider.id} failed after its tools ran: ${msg}`,
+					undefined,
+					failures,
+				);
 
 			// Whatever this attempt painted is now stale; order a repaint before
 			// the next attempt streams a fresh response.
@@ -573,7 +649,7 @@ export class Llm {
 		let first: number | undefined;
 		let ended = false;
 		try {
-			const run = this.runAttempt(provider, req);
+			const run = this.runAttempt(provider, req, span);
 			for (let step = await run.next(); ; step = await run.next()) {
 				if (step.done) {
 					const done = performance.now();
@@ -598,14 +674,22 @@ export class Llm {
 		}
 	}
 
-	// Stream one provider attempt, translating AI SDK parts to LlmStreamEvents.
+	// Stream one provider attempt, translating AI SDK parts to LlmStreamEvents;
+	// each step of a tool loop a `step` span under the attempt's.
 	private async *runAttempt(
 		provider: ProviderConfig,
 		req: ChatRequest,
+		parent: Span,
 	): AsyncGenerator<LlmStreamEvent, Attempt> {
 		let emitted = false;
 		let sawContent = false;
+		let acted = false;
 		let usage: Attempt["usage"] = null;
+		/** The step being decoded: its span, when it began, its first token, its calls. */
+		let step:
+			| { span: Span; t0: number; first?: number; calls: string[] }
+			| undefined;
+		let steps = 0;
 		/** The answer parsed against the request's schema, settled once the stream ends. */
 		let parsed: PromiseLike<unknown> | undefined;
 		try {
@@ -637,17 +721,36 @@ export class Llm {
 				// The failover loop consumes error parts and reports once per attempt;
 				// without this no-op the SDK ALSO dumps the full APICallError to console.
 				onError: () => {},
-				abortSignal: withTimeout(
-					req.abortSignal,
-					this.opts.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
-				),
+				...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
 				...(req.tools ? { tools: req.tools } : {}),
 				...(req.toolChoice ? { toolChoice: req.toolChoice } : {}),
+				...(req.stopWhen ? { stopWhen: req.stopWhen } : {}),
+				...(req.reasoning ? { reasoning: req.reasoning } : {}),
+				...(req.prepareStep
+					? { prepareStep: this.stepping(provider, req.prepareStep) }
+					: {}),
 				...this.providerOptionsFor(provider),
 			});
 
 			for await (const part of result.stream) {
-				if (part.type === "text-delta") {
+				// A step's first token is the first thing it decodes: words, thinking, a call
+				if (
+					step &&
+					step.first === undefined &&
+					(part.type === "text-delta" ||
+						part.type === "reasoning-delta" ||
+						part.type === "tool-input-start" ||
+						part.type === "tool-call")
+				)
+					step.first = performance.now();
+				if (part.type === "start-step") {
+					steps += 1;
+					step = {
+						span: parent.begin("step", { step: steps }),
+						t0: performance.now(),
+						calls: [],
+					};
+				} else if (part.type === "text-delta") {
 					emitted = true;
 					sawContent = true;
 					yield { kind: "delta", text: part.text };
@@ -664,53 +767,109 @@ export class Llm {
 				} else if (part.type === "tool-call") {
 					emitted = true;
 					sawContent = true;
+					step?.calls.push(`${part.toolName} ${JSON.stringify(part.input)}`);
 					yield {
 						kind: "tool-call",
 						toolCallId: part.toolCallId,
 						toolName: part.toolName,
 						input: part.input,
 					};
+				} else if (part.type === "tool-result" || part.type === "tool-error") {
+					acted = true;
 				} else if (part.type === "finish-step") {
-					usage = {
+					// A loop's usage is every step's: each is a request billed on its own
+					const cost = extractCost(part.providerMetadata, part.usage.raw);
+					const cached = part.usage.inputTokenDetails?.cacheReadTokens;
+					const these = {
 						promptTokens: part.usage.inputTokens ?? 0,
-						...(part.usage.inputTokenDetails?.cacheReadTokens !== undefined
-							? { cachedTokens: part.usage.inputTokenDetails.cacheReadTokens }
-							: {}),
+						...(cached !== undefined ? { cachedTokens: cached } : {}),
 						completionTokens: part.usage.outputTokens ?? 0,
-						...(extractCost(part.providerMetadata, part.usage.raw) !== undefined
-							? { costUsd: extractCost(part.providerMetadata, part.usage.raw) }
-							: {}),
+						...(cost !== undefined ? { costUsd: cost } : {}),
 					};
+					usage = usage
+						? {
+								promptTokens: usage.promptTokens + these.promptTokens,
+								...(usage.cachedTokens !== undefined || cached !== undefined
+									? { cachedTokens: (usage.cachedTokens ?? 0) + (cached ?? 0) }
+									: {}),
+								completionTokens:
+									usage.completionTokens + these.completionTokens,
+								...(usage.costUsd !== undefined || cost !== undefined
+									? { costUsd: (usage.costUsd ?? 0) + (cost ?? 0) }
+									: {}),
+							}
+						: these;
+					if (step) {
+						const done = performance.now();
+						step.span.set({
+							finish_reason: part.finishReason,
+							...(step.calls.length > 0
+								? { calls: step.calls.join("\n") }
+								: {}),
+							...(step.first !== undefined
+								? {
+										ttft_ms: Math.round(step.first - step.t0),
+										decode_ms: Math.round(done - step.first),
+									}
+								: {}),
+							...usageFields(these),
+						});
+						step.span.end();
+						step = undefined;
+					}
 				} else if (part.type === "error") {
 					// The AI SDK stream never throws; failures arrive as parts.
-					return { ok: false, emitted, error: part.error, usage };
-				} else if (part.type === "abort") {
+					step?.span.end(part.error);
 					return {
 						ok: false,
 						emitted,
+						acted,
+						error: part.error,
+						usage,
+						messages: [],
+					};
+				} else if (part.type === "abort") {
+					step?.span.end(new LlmError("llm: aborted"));
+					return {
+						ok: false,
+						emitted,
+						acted,
 						error: new LlmError("llm: aborted"),
 						usage,
+						messages: [],
 					};
 				}
 			}
 			if (req.schema) parsed = result.output;
+			if (!sawContent)
+				return {
+					ok: false,
+					emitted,
+					acted,
+					error: new LlmError(EMPTY),
+					usage,
+					messages: [],
+				};
+			// Every step's turns (the last response alone holds only the last step's)
+			const messages: ModelMessage[] = await result.responseMessages;
+			if (!req.schema) return { ok: true, emitted, acted, usage, messages };
+			// The answer parsed and checked against the schema; one that does not match
+			// fails the attempt like any provider failure, and the next one is tried
+			try {
+				return {
+					ok: true,
+					emitted,
+					acted,
+					usage,
+					object: await parsed,
+					messages,
+				};
+			} catch (e) {
+				return { ok: false, emitted, acted, error: e, usage, messages: [] };
+			}
 		} catch (e) {
-			return { ok: false, emitted, error: e, usage };
-		}
-		if (!sawContent)
-			return {
-				ok: false,
-				emitted,
-				error: new LlmError(EMPTY),
-				usage,
-			};
-		if (!req.schema) return { ok: true, emitted, usage };
-		// The answer parsed and checked against the schema; one that does not match
-		// fails the attempt like any provider failure, and the next one is tried
-		try {
-			return { ok: true, emitted, usage, object: await parsed };
-		} catch (e) {
-			return { ok: false, emitted, error: e, usage };
+			step?.span.end(e);
+			return { ok: false, emitted, acted, error: e, usage, messages: [] };
 		}
 	}
 
@@ -719,11 +878,15 @@ export class Llm {
 	// which is what reports a billed cost per request.
 	private modelFor(provider: ProviderConfig, req: ChatRequest): LanguageModel {
 		const type = dialectOf(provider);
+		const fetch = timed(
+			provider.fetch ?? globalThis.fetch,
+			this.opts.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
+		);
 		if (type === "openrouter") {
 			const openrouter = createOpenRouter({
 				...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
 				...(provider.baseUrl ? { baseURL: provider.baseUrl } : {}),
-				...(provider.fetch ? { fetch: provider.fetch } : {}),
+				fetch,
 			});
 			return openrouter.chat(provider.defaultModel, {
 				usage: { include: true }, // OpenRouter usage accounting: actual billed cost on the final chunk
@@ -739,7 +902,7 @@ export class Llm {
 				...(provider.baseUrl
 					? { baseURL: normalizeAnthropicBase(provider.baseUrl) }
 					: {}),
-				...(provider.fetch ? { fetch: provider.fetch } : {}),
+				fetch,
 			});
 			return anthropic(provider.defaultModel);
 		}
@@ -758,7 +921,7 @@ export class Llm {
 			name: provider.id,
 			baseURL: normalizeOpenAiBase(provider.baseUrl),
 			...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
-			...(provider.fetch ? { fetch: provider.fetch } : {}),
+			fetch,
 			includeUsage: true, // stream_options usage frame
 			supportsStructuredOutputs: provider.structuredOutputs === true,
 			...(Object.keys(body).length > 0
@@ -775,6 +938,34 @@ export class Llm {
 
 	// The anthropic dialect's thinking switch, the one knob that travels as a typed
 	// provider option; the other dialects carry theirs on the model instance.
+	// The caller's step hook as the AI SDK takes it: a step's `reasoning` becomes the
+	// provider's own option, since the SDK's step settings have no reasoning level.
+	private stepping(
+		provider: ProviderConfig,
+		prepare: PrepareStep,
+	): PrepareStepFunction<ToolSet> {
+		return async (options) => {
+			const step = await prepare(options);
+			if (!step?.reasoning) return step;
+			const { reasoning, ...rest } = step;
+			const type = dialectOf(provider);
+			if (type === "anthropic")
+				throw new LlmError(
+					`llm: a step's reasoning is mapped for the openai and openrouter dialects; ${provider.id} is anthropic`,
+				);
+			// openai-compatible reads its options under the provider's name, OpenRouter
+			// under its own
+			const own =
+				type === "openrouter"
+					? { openrouter: { reasoning: { effort: reasoning } } }
+					: { [provider.id]: { reasoningEffort: reasoning } };
+			return {
+				...rest,
+				providerOptions: { ...rest.providerOptions, ...own },
+			} as PrepareStepResult<ToolSet>;
+		};
+	}
+
 	private providerOptionsFor(
 		provider: ProviderConfig,
 	): Pick<Parameters<typeof streamText>[0], "providerOptions"> {
@@ -945,14 +1136,20 @@ function resolveMaxTokens(
 	return provider.maxTokens ? Math.min(ask, provider.maxTokens) : ask;
 }
 
-// Combine the caller's abort signal (client disconnect) with a hard per-attempt
-// timeout so a stalled upstream can't wedge the request forever.
-function withTimeout(
-	external: AbortSignal | undefined,
+// The provider's transport with a hard timeout on each request, so a stalled
+// upstream can't wedge a call forever. Per request, never per call: a tool loop's
+// call spans its tools too, and a tool may wait on a person for minutes.
+function timed(
+	fetcher: typeof globalThis.fetch,
 	ms: number,
-): AbortSignal {
-	const timeout = AbortSignal.timeout(ms);
-	return external ? AbortSignal.any([external, timeout]) : timeout;
+): typeof globalThis.fetch {
+	return (input, init) => {
+		const timeout = AbortSignal.timeout(ms);
+		return fetcher(input, {
+			...init,
+			signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
+		});
+	};
 }
 
 // The Anthropic provider appends /v1/messages relative to its base; tolerate a

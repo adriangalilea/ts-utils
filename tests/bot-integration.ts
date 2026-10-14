@@ -503,7 +503,7 @@ async function* fakeLLM(): AsyncGenerator<LlmStreamEvent> {
 		await sleep(80);
 		yield { kind: "delta", text: t };
 	}
-	yield { kind: "end", usage: null };
+	yield { kind: "end", usage: null, messages: [] };
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));

@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { jsonSchema, tool } from "ai";
 // (jsonSchema also declares the structured-output tests' schema)
-import { createLlm } from "../src/llm/index.js";
+import { createLlm, LlmError, stepCountIs } from "../src/llm/index.js";
 import { setLogFormat } from "../src/universal/log.js";
 
 // The request must DECLARE tools or the SDK's parser never surfaces tool parts.
@@ -367,4 +367,256 @@ const step = jsonSchema<{ ref: string }>(
 		"  PASS an answer that does not match the schema fails its provider, the next answers",
 	);
 }
-console.log("\n6 passed");
+// The tool loop: a server that calls the tool on its first request and answers in
+// words once it has the tool's result; `dies` tears its second request down.
+const looping =
+	(
+		requests: Record<string, unknown>[],
+		dies = false,
+	): typeof globalThis.fetch =>
+	async (_url, init) => {
+		const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+		requests.push(body);
+		const chunk = (delta: Record<string, unknown>, finish: string | null) =>
+			JSON.stringify({
+				id: "l",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: "fake",
+				choices: [{ index: 0, delta, finish_reason: finish }],
+			});
+		const usage = JSON.stringify({
+			id: "l",
+			object: "chat.completion.chunk",
+			created: 0,
+			model: "fake",
+			choices: [],
+			usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+		});
+		if (requests.length === 1)
+			return sse([
+				chunk(
+					{
+						tool_calls: [
+							{
+								index: 0,
+								id: "call_loop",
+								type: "function",
+								function: { name: "add_quote", arguments: '{"text":"hal"}' },
+							},
+						],
+					},
+					null,
+				),
+				chunk({}, "tool_calls"),
+				usage,
+			]);
+		if (dies)
+			return sse([chunk({ content: "half" }, null)], { dieAfter: true });
+		return sse([chunk({ content: "added" }, null), chunk({}, "stop"), usage]);
+	};
+const executed: unknown[] = [];
+const ACTING = {
+	add_quote: tool({
+		description: "test tool",
+		inputSchema: jsonSchema<{ text: string }>({
+			type: "object",
+			properties: { text: { type: "string" } },
+		}),
+		execute: async (input) => {
+			executed.push(input);
+			return "quoted";
+		},
+	}),
+};
+{
+	events.length = 0;
+	console.error = (...a: unknown[]): void => {
+		events.push(JSON.parse(String(a[0])) as Record<string, unknown>);
+	};
+	const requests: Record<string, unknown>[] = [];
+	const loop = createLlm({
+		providers: [
+			{
+				id: "loop",
+				type: "openai",
+				baseUrl: "http://fake.h/v1",
+				defaultModel: "fake",
+				fetch: looping(requests),
+			},
+		],
+	});
+	const r = await loop.complete({
+		prompt: "quote hal",
+		tools: ACTING,
+		stopWhen: stepCountIs(5),
+	});
+	console.error = print;
+	assert.deepEqual(executed, [{ text: "hal" }]);
+	assert.equal(requests.length, 2);
+	assert.equal(r.text, "added");
+	assert.deepEqual(
+		r.messages.map((m) => m.role),
+		["assistant", "tool", "assistant"],
+	);
+	assert.equal(r.usage?.promptTokens, 20, "a loop's usage is every step's");
+	const steps = (events as Ev[]).filter(
+		(e) => e.phase === "end" && e.msg === "step",
+	);
+	assert.deepEqual(
+		steps.map((s) => s.fields?.calls),
+		['add_quote {"text":"hal"}', undefined],
+	);
+	console.log(
+		"  PASS a tool loop runs the tool, calls again with its result, and returns the turns it added",
+	);
+}
+{
+	executed.length = 0;
+	console.error = () => {};
+	const [first, second]: Record<string, unknown>[][] = [[], []];
+	const pair = createLlm({
+		providers: [
+			{
+				id: "acted",
+				type: "openai",
+				baseUrl: "http://fake.i/v1",
+				defaultModel: "fake",
+				priority: 1,
+				fetch: looping(first, true),
+			},
+			{
+				id: "fresh",
+				type: "openai",
+				baseUrl: "http://fake.j/v1",
+				defaultModel: "fake",
+				priority: 2,
+				fetch: looping(second),
+			},
+		],
+	});
+	const failed = await pair
+		.complete({ prompt: "quote hal", tools: ACTING, stopWhen: stepCountIs(5) })
+		.then(
+			() => null,
+			(e: unknown) => e,
+		);
+	console.error = print;
+	assert.ok(failed instanceof LlmError, `no LlmError: ${String(failed)}`);
+	assert.equal(second.length, 0, "a provider was tried after a tool acted");
+	assert.deepEqual(executed, [{ text: "hal" }]);
+	console.log(
+		"  PASS a loop that fails after its tool acted is not replayed on another provider",
+	);
+}
+{
+	// A tool slower than the request timeout: the timeout is each request's, the
+	// tools between requests are not timed by it (a tool may wait on a person)
+	const requests: Record<string, unknown>[] = [];
+	const slow = createLlm({
+		requestTimeoutMs: 100,
+		providers: [
+			{
+				id: "slow-tool",
+				type: "openai",
+				baseUrl: "http://fake.k/v1",
+				defaultModel: "fake",
+				fetch: looping(requests),
+			},
+		],
+	});
+	const r = await slow.complete({
+		prompt: "quote hal",
+		tools: {
+			add_quote: tool({
+				description: "test tool",
+				inputSchema: jsonSchema<{ text: string }>({
+					type: "object",
+					properties: { text: { type: "string" } },
+				}),
+				execute: async () => {
+					await new Promise((resolve) => setTimeout(resolve, 300));
+					return "quoted";
+				},
+			}),
+		},
+		stopWhen: stepCountIs(5),
+	});
+	assert.equal(r.text, "added");
+	console.log(
+		"  PASS a tool slower than the request timeout does not abort the loop",
+	);
+}
+{
+	// prepareStep's messages replace what the model reads from that step on; the
+	// result is still the turns the call added
+	const requests: Record<string, unknown>[] = [];
+	const kept = createLlm({
+		providers: [
+			{
+				id: "kept",
+				type: "openai",
+				baseUrl: "http://fake.l/v1",
+				defaultModel: "fake",
+				fetch: looping(requests),
+			},
+		],
+	});
+	const r = await kept.complete({
+		messages: [{ role: "user", content: "quote hal, a long story" }],
+		tools: ACTING,
+		stopWhen: stepCountIs(5),
+		prepareStep: ({ stepNumber, messages }) =>
+			stepNumber === 1
+				? {
+						messages: messages.map((m) =>
+							m.role === "user" ? { ...m, content: "quote hal" } : m,
+						),
+					}
+				: {},
+	});
+	const second = JSON.stringify(requests[1]?.messages);
+	assert.ok(
+		second.includes('"quote hal"') && !second.includes("a long story"),
+		`the second request read: ${second}`,
+	);
+	assert.deepEqual(
+		r.messages.map((m) => m.role),
+		["assistant", "tool", "assistant"],
+	);
+	console.log(
+		"  PASS prepareStep's messages reach the next request, the result keeps the turns added",
+	);
+}
+{
+	// The request's reasoning reaches the server as the dialect says it, and a step's
+	// reasoning is that step's alone
+	const requests: Record<string, unknown>[] = [];
+	const reasoning = createLlm({
+		providers: [
+			{
+				id: "reasoning",
+				type: "openai",
+				baseUrl: "http://fake.m/v1",
+				defaultModel: "fake",
+				fetch: looping(requests),
+			},
+		],
+	});
+	await reasoning.complete({
+		prompt: "quote hal",
+		tools: ACTING,
+		stopWhen: stepCountIs(5),
+		reasoning: "none",
+		prepareStep: ({ stepNumber }) =>
+			stepNumber === 1 ? { reasoning: "low" } : undefined,
+	});
+	assert.deepEqual(
+		requests.map((r) => r.reasoning_effort),
+		["none", "low"],
+	);
+	console.log(
+		"  PASS reasoning reaches the server per call, and a step's for that step alone",
+	);
+}
+console.log("\n11 passed");
