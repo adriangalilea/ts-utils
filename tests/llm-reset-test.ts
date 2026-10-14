@@ -10,6 +10,13 @@ import { jsonSchema, tool } from "ai";
 import { createLlm, LlmError, stepCountIs } from "../src/llm/index.js";
 import { setLogFormat } from "../src/universal/log.js";
 
+/** A test that held, said; the summary counts them. */
+let passed = 0;
+const pass = (what: string): void => {
+	passed++;
+	console.log(`  PASS ${what}`);
+};
+
 // The request must DECLARE tools or the SDK's parser never surfaces tool parts.
 const TOOLS = {
 	add_quote: tool({
@@ -163,8 +170,8 @@ assert.ok(
 );
 assert.equal(kinds.at(-1), "end");
 console.error = print;
-console.log(
-	`  PASS reset follows a tool-only failed attempt (${kinds.join(" → ")})`,
+pass(
+	`reset follows a tool-only failed attempt (${kinds.join(" → ")})`,
 );
 
 // The call is one chat span; each provider tried an attempt span inside it, the
@@ -198,7 +205,7 @@ assert.ok(
 	`no timings: ${JSON.stringify(ok)}`,
 );
 assert.equal(ok["gen_ai.usage.output_tokens"], 3);
-console.log("  PASS the call and each attempt are spans with gen_ai fields");
+pass("the call and each attempt are spans with gen_ai fields");
 
 // What reaches the server: extraBody's raw fields (snake_case included, which the AI
 // SDK's provider options would drop) and a system message given in the OpenAI shape.
@@ -232,7 +239,7 @@ assert.ok(
 	wire.some((m) => m.role === "system" && m.content.includes("JSON")),
 	`the system text did not reach the server: ${JSON.stringify(wire)}`,
 );
-console.log("  PASS extraBody and a system message reach the server");
+pass("extraBody and a system message reach the server");
 
 // Structured output: a server answering `text`, recording what it was sent.
 const answering =
@@ -303,8 +310,8 @@ const step = jsonSchema<{ ref: string }>(
 		(format.json_schema?.schema as { required: string[] }).required,
 		["ref"],
 	);
-	console.log(
-		"  PASS a structuredOutputs provider gets the schema and the answer comes back parsed",
+	pass(
+		"a structuredOutputs provider gets the schema and the answer comes back parsed",
 	);
 }
 {
@@ -333,8 +340,8 @@ const step = jsonSchema<{ ref: string }>(
 		system?.content.includes('"required":["ref"]'),
 		`the schema is not stated: ${JSON.stringify(seen.body?.messages)}`,
 	);
-	console.log(
-		"  PASS a provider without structuredOutputs is told the schema in its instructions",
+	pass(
+		"a provider without structuredOutputs is told the schema in its instructions",
 	);
 }
 {
@@ -363,8 +370,8 @@ const step = jsonSchema<{ ref: string }>(
 	const r = await pair.complete({ prompt: "which?", schema: step });
 	assert.deepEqual(r.object, { ref: "e5" });
 	assert.equal(r.usage === null || r.usage.provider === "right", true);
-	console.log(
-		"  PASS an answer that does not match the schema fails its provider, the next answers",
+	pass(
+		"an answer that does not match the schema fails its provider, the next answers",
 	);
 }
 // The tool loop: a server that calls the tool on its first request and answers in
@@ -467,8 +474,8 @@ const ACTING = {
 		steps.map((s) => s.fields?.calls),
 		['add_quote {"text":"hal"}', undefined],
 	);
-	console.log(
-		"  PASS a tool loop runs the tool, calls again with its result, and returns the turns it added",
+	pass(
+		"a tool loop runs the tool, calls again with its result, and returns the turns it added",
 	);
 }
 {
@@ -505,8 +512,8 @@ const ACTING = {
 	assert.ok(failed instanceof LlmError, `no LlmError: ${String(failed)}`);
 	assert.equal(second.length, 0, "a provider was tried after a tool acted");
 	assert.deepEqual(executed, [{ text: "hal" }]);
-	console.log(
-		"  PASS a loop that fails after its tool acted is not replayed on another provider",
+	pass(
+		"a loop that fails after its tool acted is not replayed on another provider",
 	);
 }
 {
@@ -545,8 +552,8 @@ const ACTING = {
 		"a reply with no tool call where one was required is empty",
 	);
 	assert.deepEqual(executed, [{ text: "hal" }]);
-	console.log(
-		"  PASS a reply that calls no tool where one is required fails as empty",
+	pass(
+		"a reply that calls no tool where one is required fails as empty",
 	);
 }
 {
@@ -583,8 +590,8 @@ const ACTING = {
 		stopWhen: stepCountIs(5),
 	});
 	assert.equal(r.text, "added");
-	console.log(
-		"  PASS a tool slower than the request timeout does not abort the loop",
+	pass(
+		"a tool slower than the request timeout does not abort the loop",
 	);
 }
 {
@@ -624,8 +631,8 @@ const ACTING = {
 		r.messages.map((m) => m.role),
 		["assistant", "tool", "assistant"],
 	);
-	console.log(
-		"  PASS prepareStep's messages reach the next request, the result keeps the turns added",
+	pass(
+		"prepareStep's messages reach the next request, the result keeps the turns added",
 	);
 }
 {
@@ -655,8 +662,8 @@ const ACTING = {
 		requests.map((r) => r.reasoning_effort),
 		["none", "low"],
 	);
-	console.log(
-		"  PASS reasoning reaches the server per call, and a step's for that step alone",
+	pass(
+		"reasoning reaches the server per call, and a step's for that step alone",
 	);
 }
-console.log("\n12 passed");
+console.log(`\n${passed} passed`);
