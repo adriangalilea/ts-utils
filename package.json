@@ -1,365 +1,365 @@
 {
-	"name": "@adriangalilea/utils",
-	"version": "10.7.0",
-	"packageManager": "pnpm@11.22.0",
-	"description": "TypeScript utilities - logger, currency, formatter, GramIO bot plugins, and more",
-	"main": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"type": "module",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"browser": "./dist/browser.js",
-			"node": "./dist/index.js",
-			"default": "./dist/index.js"
-		},
-		"./browser": {
-			"types": "./dist/browser.d.ts",
-			"default": "./dist/browser.js"
-		},
-		"./runtime": {
-			"types": "./dist/runtime.d.ts",
-			"default": "./dist/runtime.js"
-		},
-		"./ansi": {
-			"types": "./dist/universal/ansi.d.ts",
-			"default": "./dist/universal/ansi.js"
-		},
-		"./format": {
-			"types": "./dist/universal/format.d.ts",
-			"default": "./dist/universal/format.js"
-		},
-		"./time": {
-			"types": "./dist/universal/time.d.ts",
-			"default": "./dist/universal/time.js"
-		},
-		"./url": {
-			"types": "./dist/universal/url/index.d.ts",
-			"default": "./dist/universal/url/index.js"
-		},
-		"./url/sites": {
-			"types": "./dist/universal/url/sites.d.ts",
-			"default": "./dist/universal/url/sites.js"
-		},
-		"./log": {
-			"types": "./dist/universal/log.d.ts",
-			"default": "./dist/universal/log.js"
-		},
-		"./log/next": {
-			"types": "./dist/next/log.d.ts",
-			"default": "./dist/next/log.js"
-		},
-		"./cli": {
-			"types": "./dist/cli/index.d.ts",
-			"default": "./dist/cli/index.js"
-		},
-		"./currency": {
-			"types": "./dist/universal/currency/index.d.ts",
-			"default": "./dist/universal/currency/index.js"
-		},
-		"./say": {
-			"types": "./dist/say/index.d.ts",
-			"default": "./dist/say/index.js"
-		},
-		"./tg-html": {
-			"types": "./dist/tg-html/index.d.ts",
-			"default": "./dist/tg-html/index.js"
-		},
-		"./tg-md": {
-			"types": "./dist/tg-md/index.d.ts",
-			"default": "./dist/tg-md/index.js"
-		},
-		"./bot/access-control": {
-			"types": "./dist/bot/access-control.d.ts",
-			"default": "./dist/bot/access-control.js"
-		},
-		"./bot/admin": {
-			"types": "./dist/bot/admin.d.ts",
-			"default": "./dist/bot/admin.js"
-		},
-		"./bot/allow-list": {
-			"types": "./dist/bot/allow-list.d.ts",
-			"default": "./dist/bot/allow-list.js"
-		},
-		"./bot/coalesce": {
-			"types": "./dist/bot/coalesce.d.ts",
-			"default": "./dist/bot/coalesce.js"
-		},
-		"./bot/draft": {
-			"types": "./dist/bot/draft.d.ts",
-			"default": "./dist/bot/draft.js"
-		},
-		"./bot/language": {
-			"types": "./dist/bot/language.d.ts",
-			"default": "./dist/bot/language.js"
-		},
-		"./bot/menu": {
-			"types": "./dist/bot/menu.d.ts",
-			"default": "./dist/bot/menu.js"
-		},
-		"./bot/kit": {
-			"types": "./dist/bot/kit.d.ts",
-			"default": "./dist/bot/kit.js"
-		},
-		"./bot/llm": {
-			"types": "./dist/bot/llm.d.ts",
-			"default": "./dist/bot/llm.js"
-		},
-		"./bot/reactions": {
-			"types": "./dist/bot/reactions.d.ts",
-			"default": "./dist/bot/reactions.js"
-		},
-		"./bot/payments": {
-			"types": "./dist/bot/payments/index.d.ts",
-			"default": "./dist/bot/payments/index.js"
-		},
-		"./bot/storage": {
-			"types": "./dist/bot/storage.d.ts",
-			"default": "./dist/bot/storage.js"
-		},
-		"./bot/storage-d1": {
-			"types": "./dist/bot/storage-d1.d.ts",
-			"default": "./dist/bot/storage-d1.js"
-		},
-		"./bot/ctx": {
-			"types": "./dist/bot/ctx.d.ts",
-			"default": "./dist/bot/ctx.js"
-		},
-		"./bot/keys": {
-			"types": "./dist/bot/keys.d.ts",
-			"default": "./dist/bot/keys.js"
-		},
-		"./bot/callbacks": {
-			"types": "./dist/bot/callbacks.d.ts",
-			"default": "./dist/bot/callbacks.js"
-		},
-		"./bot/session": {
-			"types": "./dist/bot/session.d.ts",
-			"default": "./dist/bot/session.js"
-		},
-		"./bot/notify": {
-			"types": "./dist/bot/notify.d.ts",
-			"default": "./dist/bot/notify.js"
-		},
-		"./bot/worker": {
-			"types": "./dist/bot/worker.d.ts",
-			"default": "./dist/bot/worker.js"
-		},
-		"./bot/create": {
-			"types": "./dist/bot/create.d.ts",
-			"default": "./dist/bot/create.js"
-		},
-		"./bot/profile": {
-			"types": "./dist/bot/profile.d.ts",
-			"default": "./dist/bot/profile.js"
-		},
-		"./bot/flags": {
-			"types": "./dist/bot/flags.d.ts",
-			"default": "./dist/bot/flags.js"
-		},
-		"./bot/groups": {
-			"types": "./dist/bot/groups.d.ts",
-			"default": "./dist/bot/groups.js"
-		},
-		"./bot/user": {
-			"types": "./dist/bot/user.d.ts",
-			"default": "./dist/bot/user.js"
-		},
-		"./bot/urls": {
-			"types": "./dist/bot/urls.d.ts",
-			"default": "./dist/bot/urls.js"
-		},
-		"./bot/announce": {
-			"types": "./dist/bot/announce.d.ts",
-			"default": "./dist/bot/announce.js"
-		},
-		"./bot/updates": {
-			"types": "./dist/bot/updates.d.ts",
-			"default": "./dist/bot/updates.js"
-		},
-		"./llm": {
-			"types": "./dist/llm/index.d.ts",
-			"default": "./dist/llm/index.js"
-		},
-		"./bot/inline-feedback": {
-			"types": "./dist/bot/inline-feedback.d.ts",
-			"default": "./dist/bot/inline-feedback.js"
-		},
-		"./metrics": {
-			"types": "./dist/metrics/index.d.ts",
-			"default": "./dist/metrics/index.js"
-		},
-		"./metrics/sqlite": {
-			"types": "./dist/metrics/sqlite.d.ts",
-			"default": "./dist/metrics/sqlite.js"
-		},
-		"./metrics/libsql": {
-			"types": "./dist/metrics/libsql.d.ts",
-			"default": "./dist/metrics/libsql.js"
-		},
-		"./metrics/d1": {
-			"types": "./dist/metrics/d1.d.ts",
-			"default": "./dist/metrics/d1.js"
-		},
-		"./metrics/d1-rest": {
-			"types": "./dist/metrics/d1-rest.d.ts",
-			"default": "./dist/metrics/d1-rest.js"
-		},
-		"./metrics/report": {
-			"types": "./dist/metrics/report.d.ts",
-			"default": "./dist/metrics/report.js"
-		},
-		"./metrics/cli": {
-			"types": "./dist/metrics/cli.d.ts",
-			"default": "./dist/metrics/cli.js"
-		},
-		"./bot/text": {
-			"types": "./dist/bot/text.d.ts",
-			"default": "./dist/bot/text.js"
-		},
-		"./bot/update-identity": {
-			"types": "./dist/bot/update-identity.d.ts",
-			"default": "./dist/bot/update-identity.js"
-		}
-	},
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "rm -rf dist && tsc",
-		"test": "tsx tests/metrics-test.ts",
-		"test:all": "pnpm run test && pnpm run test:log && pnpm run test:log-ship && pnpm run test:runtime && pnpm run test:text && pnpm run test:tg-html && pnpm run test:tg-md && pnpm run test:flags && pnpm run test:groups && pnpm run test:user && pnpm run test:language-picker && pnpm run test:self-echo && pnpm run test:update-identity && pnpm run test:update-runner &&pnpm run test:bot-text && pnpm run test:url && pnpm run test:bot-urls && pnpm run test:bot-updates && pnpm run test:bot-announce && pnpm run test:reactions && pnpm run test:llm-reset && pnpm run test:llm-mend && pnpm run test:raw-writes && pnpm run test:worker-safe",
-		"test:log": "tsx tests/log-test.ts",
-		"test:log-ship": "tsx tests/log-ship-test.ts",
-		"test:runtime": "tsx tests/runtime-test.ts",
-		"test:text": "tsx tests/text-test.ts",
-		"example": "tsx tests/example.ts",
-		"update-crypto": "tsx scripts/update-crypto-list.ts",
-		"update-url-rules": "tsx scripts/update-url-rules.ts",
-		"type-check": "tsc --noEmit",
-		"type-check:tests": "tsc -p tests/tsconfig.json",
-		"lint": "biome lint",
-		"format": "biome format",
-		"check": "biome check",
-		"fix": "biome check --write --unsafe",
-		"ci": "biome ci",
-		"verify": "pnpm run type-check && pnpm run type-check:tests && pnpm run ci && pnpm run test:all",
-		"prepublishOnly": "pnpm run build",
-		"test:worker-safe": "pnpm run build && tsx tests/worker-safe-test.ts",
-		"test:raw-writes": "tsx tests/raw-writes-test.ts",
-		"demo:bot": "tsx tests/create-demo.ts",
-		"demo:bot-integration": "tsx tests/bot-integration.ts",
-		"demo:cli": "tsx tests/cli-demo.ts",
-		"demo:live": "tsx tests/live-demo.ts",
-		"test:tg-html": "tsx tests/tg-html-test.ts",
-		"test:flags": "tsx tests/flags-test.ts",
-		"test:groups": "tsx tests/groups-test.ts",
-		"test:user": "tsx tests/user-test.ts",
-		"test:language-picker": "tsx tests/language-picker-test.ts",
-		"test:llm": "tsx tests/llm-live-test.ts",
-		"test:tg-md": "tsx tests/tg-md-test.ts",
-		"test:self-echo": "tsx tests/self-echo-test.ts",
-		"test:update-identity": "tsx tests/update-identity-test.ts",
-		"test:update-runner": "tsx tests/update-runner-test.ts",
-		"test:bot-text": "tsx tests/bot-text-test.ts",
-		"test:url": "tsx tests/url-test.ts",
-		"test:bot-urls": "tsx tests/bot-urls-test.ts",
-		"test:bot-updates": "tsx tests/bot-updates-test.ts",
-		"test:bot-announce": "tsx tests/bot-announce-test.ts",
-		"test:reactions": "tsx tests/reactions-test.ts",
-		"test:llm-reset": "tsx tests/llm-reset-test.ts",
-		"test:llm-mend": "tsx tests/llm-mend-test.ts"
-	},
-	"keywords": [
-		"typescript",
-		"utils",
-		"log",
-		"currency",
-		"format"
-	],
-	"author": "Adrian Galilea <adriangalilea@gmail.com>",
-	"license": "MIT",
-	"devDependencies": {
-		"@ai-sdk/anthropic": "^4.0.74",
-		"@ai-sdk/openai-compatible": "^3.0.65",
-		"@biomejs/biome": "2.4.15",
-		"@gramio/format": "^0.12.1",
-		"@gramio/session": "^0.2.0",
-		"@gramio/split": "^0.0.1",
-		"@gramio/storage": "^2.0.1",
-		"@openrouter/ai-sdk-provider": "^3.1.0",
-		"@types/node": "^24.3.0",
-		"ai": "^7.0.130",
-		"gramio": "^0.15.1",
-		"next": "^16.3.8",
-		"react": "^19.3.0",
-		"react-dom": "^19.3.0",
-		"tsx": "^4.20.4",
-		"typescript": "^5.9.2",
-		"zod": "^4.4.3"
-	},
-	"peerDependencies": {
-		"@ai-sdk/anthropic": "^4.0.0",
-		"@ai-sdk/openai-compatible": "^3.0.0",
-		"@gramio/format": ">=0.8.0",
-		"@gramio/session": ">=0.2.0",
-		"@gramio/split": "^0.0.1",
-		"@gramio/storage": ">=2.0.0",
-		"@openrouter/ai-sdk-provider": "^3.0.0",
-		"ai": "^7.0.0",
-		"gramio": "^0.15.0",
-		"next": ">=15",
-		"zod": ">=3.22"
-	},
-	"peerDependenciesMeta": {
-		"@gramio/format": {
-			"optional": true
-		},
-		"@gramio/session": {
-			"optional": true
-		},
-		"@gramio/storage": {
-			"optional": true
-		},
-		"gramio": {
-			"optional": true
-		},
-		"zod": {
-			"optional": true
-		},
-		"ai": {
-			"optional": true
-		},
-		"@ai-sdk/anthropic": {
-			"optional": true
-		},
-		"@ai-sdk/openai-compatible": {
-			"optional": true
-		},
-		"@openrouter/ai-sdk-provider": {
-			"optional": true
-		},
-		"@gramio/split": {
-			"optional": true
-		},
-		"next": {
-			"optional": true
-		}
-	},
-	"publishConfig": {
-		"access": "public",
-		"registry": "https://registry.npmjs.org/"
-	},
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/adriangalilea/ts-utils.git"
-	},
-	"bugs": {
-		"url": "https://github.com/adriangalilea/ts-utils/issues"
-	},
-	"homepage": "https://github.com/adriangalilea/ts-utils#readme",
-	"sideEffects": false,
-	"dependencies": {
-		"linkifyjs": "^4.3.3"
-	}
+  "name": "@adriangalilea/utils",
+  "version": "10.8.0",
+  "packageManager": "pnpm@11.22.0",
+  "description": "TypeScript utilities - logger, currency, formatter, GramIO bot plugins, and more",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "browser": "./dist/browser.js",
+      "node": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
+    },
+    "./ansi": {
+      "types": "./dist/universal/ansi.d.ts",
+      "default": "./dist/universal/ansi.js"
+    },
+    "./format": {
+      "types": "./dist/universal/format.d.ts",
+      "default": "./dist/universal/format.js"
+    },
+    "./time": {
+      "types": "./dist/universal/time.d.ts",
+      "default": "./dist/universal/time.js"
+    },
+    "./url": {
+      "types": "./dist/universal/url/index.d.ts",
+      "default": "./dist/universal/url/index.js"
+    },
+    "./url/sites": {
+      "types": "./dist/universal/url/sites.d.ts",
+      "default": "./dist/universal/url/sites.js"
+    },
+    "./log": {
+      "types": "./dist/universal/log.d.ts",
+      "default": "./dist/universal/log.js"
+    },
+    "./log/next": {
+      "types": "./dist/next/log.d.ts",
+      "default": "./dist/next/log.js"
+    },
+    "./cli": {
+      "types": "./dist/cli/index.d.ts",
+      "default": "./dist/cli/index.js"
+    },
+    "./currency": {
+      "types": "./dist/universal/currency/index.d.ts",
+      "default": "./dist/universal/currency/index.js"
+    },
+    "./say": {
+      "types": "./dist/say/index.d.ts",
+      "default": "./dist/say/index.js"
+    },
+    "./tg-html": {
+      "types": "./dist/tg-html/index.d.ts",
+      "default": "./dist/tg-html/index.js"
+    },
+    "./tg-md": {
+      "types": "./dist/tg-md/index.d.ts",
+      "default": "./dist/tg-md/index.js"
+    },
+    "./bot/access-control": {
+      "types": "./dist/bot/access-control.d.ts",
+      "default": "./dist/bot/access-control.js"
+    },
+    "./bot/admin": {
+      "types": "./dist/bot/admin.d.ts",
+      "default": "./dist/bot/admin.js"
+    },
+    "./bot/allow-list": {
+      "types": "./dist/bot/allow-list.d.ts",
+      "default": "./dist/bot/allow-list.js"
+    },
+    "./bot/coalesce": {
+      "types": "./dist/bot/coalesce.d.ts",
+      "default": "./dist/bot/coalesce.js"
+    },
+    "./bot/draft": {
+      "types": "./dist/bot/draft.d.ts",
+      "default": "./dist/bot/draft.js"
+    },
+    "./bot/language": {
+      "types": "./dist/bot/language.d.ts",
+      "default": "./dist/bot/language.js"
+    },
+    "./bot/menu": {
+      "types": "./dist/bot/menu.d.ts",
+      "default": "./dist/bot/menu.js"
+    },
+    "./bot/kit": {
+      "types": "./dist/bot/kit.d.ts",
+      "default": "./dist/bot/kit.js"
+    },
+    "./bot/llm": {
+      "types": "./dist/bot/llm.d.ts",
+      "default": "./dist/bot/llm.js"
+    },
+    "./bot/reactions": {
+      "types": "./dist/bot/reactions.d.ts",
+      "default": "./dist/bot/reactions.js"
+    },
+    "./bot/payments": {
+      "types": "./dist/bot/payments/index.d.ts",
+      "default": "./dist/bot/payments/index.js"
+    },
+    "./bot/storage": {
+      "types": "./dist/bot/storage.d.ts",
+      "default": "./dist/bot/storage.js"
+    },
+    "./bot/storage-d1": {
+      "types": "./dist/bot/storage-d1.d.ts",
+      "default": "./dist/bot/storage-d1.js"
+    },
+    "./bot/ctx": {
+      "types": "./dist/bot/ctx.d.ts",
+      "default": "./dist/bot/ctx.js"
+    },
+    "./bot/keys": {
+      "types": "./dist/bot/keys.d.ts",
+      "default": "./dist/bot/keys.js"
+    },
+    "./bot/callbacks": {
+      "types": "./dist/bot/callbacks.d.ts",
+      "default": "./dist/bot/callbacks.js"
+    },
+    "./bot/session": {
+      "types": "./dist/bot/session.d.ts",
+      "default": "./dist/bot/session.js"
+    },
+    "./bot/notify": {
+      "types": "./dist/bot/notify.d.ts",
+      "default": "./dist/bot/notify.js"
+    },
+    "./bot/worker": {
+      "types": "./dist/bot/worker.d.ts",
+      "default": "./dist/bot/worker.js"
+    },
+    "./bot/create": {
+      "types": "./dist/bot/create.d.ts",
+      "default": "./dist/bot/create.js"
+    },
+    "./bot/profile": {
+      "types": "./dist/bot/profile.d.ts",
+      "default": "./dist/bot/profile.js"
+    },
+    "./bot/flags": {
+      "types": "./dist/bot/flags.d.ts",
+      "default": "./dist/bot/flags.js"
+    },
+    "./bot/groups": {
+      "types": "./dist/bot/groups.d.ts",
+      "default": "./dist/bot/groups.js"
+    },
+    "./bot/user": {
+      "types": "./dist/bot/user.d.ts",
+      "default": "./dist/bot/user.js"
+    },
+    "./bot/urls": {
+      "types": "./dist/bot/urls.d.ts",
+      "default": "./dist/bot/urls.js"
+    },
+    "./bot/announce": {
+      "types": "./dist/bot/announce.d.ts",
+      "default": "./dist/bot/announce.js"
+    },
+    "./bot/updates": {
+      "types": "./dist/bot/updates.d.ts",
+      "default": "./dist/bot/updates.js"
+    },
+    "./llm": {
+      "types": "./dist/llm/index.d.ts",
+      "default": "./dist/llm/index.js"
+    },
+    "./bot/inline-feedback": {
+      "types": "./dist/bot/inline-feedback.d.ts",
+      "default": "./dist/bot/inline-feedback.js"
+    },
+    "./metrics": {
+      "types": "./dist/metrics/index.d.ts",
+      "default": "./dist/metrics/index.js"
+    },
+    "./metrics/sqlite": {
+      "types": "./dist/metrics/sqlite.d.ts",
+      "default": "./dist/metrics/sqlite.js"
+    },
+    "./metrics/libsql": {
+      "types": "./dist/metrics/libsql.d.ts",
+      "default": "./dist/metrics/libsql.js"
+    },
+    "./metrics/d1": {
+      "types": "./dist/metrics/d1.d.ts",
+      "default": "./dist/metrics/d1.js"
+    },
+    "./metrics/d1-rest": {
+      "types": "./dist/metrics/d1-rest.d.ts",
+      "default": "./dist/metrics/d1-rest.js"
+    },
+    "./metrics/report": {
+      "types": "./dist/metrics/report.d.ts",
+      "default": "./dist/metrics/report.js"
+    },
+    "./metrics/cli": {
+      "types": "./dist/metrics/cli.d.ts",
+      "default": "./dist/metrics/cli.js"
+    },
+    "./bot/text": {
+      "types": "./dist/bot/text.d.ts",
+      "default": "./dist/bot/text.js"
+    },
+    "./bot/update-identity": {
+      "types": "./dist/bot/update-identity.d.ts",
+      "default": "./dist/bot/update-identity.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc",
+    "test": "tsx tests/metrics-test.ts",
+    "test:all": "pnpm run test && pnpm run test:log && pnpm run test:log-ship && pnpm run test:runtime && pnpm run test:text && pnpm run test:tg-html && pnpm run test:tg-md && pnpm run test:flags && pnpm run test:groups && pnpm run test:user && pnpm run test:language-picker && pnpm run test:self-echo && pnpm run test:update-identity && pnpm run test:update-runner &&pnpm run test:bot-text && pnpm run test:url && pnpm run test:bot-urls && pnpm run test:bot-updates && pnpm run test:bot-announce && pnpm run test:reactions && pnpm run test:llm-reset && pnpm run test:llm-mend && pnpm run test:raw-writes && pnpm run test:worker-safe",
+    "test:log": "tsx tests/log-test.ts",
+    "test:log-ship": "tsx tests/log-ship-test.ts",
+    "test:runtime": "tsx tests/runtime-test.ts",
+    "test:text": "tsx tests/text-test.ts",
+    "example": "tsx tests/example.ts",
+    "update-crypto": "tsx scripts/update-crypto-list.ts",
+    "update-url-rules": "tsx scripts/update-url-rules.ts",
+    "type-check": "tsc --noEmit",
+    "type-check:tests": "tsc -p tests/tsconfig.json",
+    "lint": "biome lint",
+    "format": "biome format",
+    "check": "biome check",
+    "fix": "biome check --write --unsafe",
+    "ci": "biome ci",
+    "verify": "pnpm run type-check && pnpm run type-check:tests && pnpm run ci && pnpm run test:all",
+    "prepublishOnly": "pnpm run build",
+    "test:worker-safe": "pnpm run build && tsx tests/worker-safe-test.ts",
+    "test:raw-writes": "tsx tests/raw-writes-test.ts",
+    "demo:bot": "tsx tests/create-demo.ts",
+    "demo:bot-integration": "tsx tests/bot-integration.ts",
+    "demo:cli": "tsx tests/cli-demo.ts",
+    "demo:live": "tsx tests/live-demo.ts",
+    "test:tg-html": "tsx tests/tg-html-test.ts",
+    "test:flags": "tsx tests/flags-test.ts",
+    "test:groups": "tsx tests/groups-test.ts",
+    "test:user": "tsx tests/user-test.ts",
+    "test:language-picker": "tsx tests/language-picker-test.ts",
+    "test:llm": "tsx tests/llm-live-test.ts",
+    "test:tg-md": "tsx tests/tg-md-test.ts",
+    "test:self-echo": "tsx tests/self-echo-test.ts",
+    "test:update-identity": "tsx tests/update-identity-test.ts",
+    "test:update-runner": "tsx tests/update-runner-test.ts",
+    "test:bot-text": "tsx tests/bot-text-test.ts",
+    "test:url": "tsx tests/url-test.ts",
+    "test:bot-urls": "tsx tests/bot-urls-test.ts",
+    "test:bot-updates": "tsx tests/bot-updates-test.ts",
+    "test:bot-announce": "tsx tests/bot-announce-test.ts",
+    "test:reactions": "tsx tests/reactions-test.ts",
+    "test:llm-reset": "tsx tests/llm-reset-test.ts",
+    "test:llm-mend": "tsx tests/llm-mend-test.ts"
+  },
+  "keywords": [
+    "typescript",
+    "utils",
+    "log",
+    "currency",
+    "format"
+  ],
+  "author": "Adrian Galilea <adriangalilea@gmail.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "@ai-sdk/anthropic": "^4.0.74",
+    "@ai-sdk/openai-compatible": "^3.0.65",
+    "@biomejs/biome": "2.4.15",
+    "@gramio/format": "^0.12.1",
+    "@gramio/session": "^0.2.0",
+    "@gramio/split": "^0.0.1",
+    "@gramio/storage": "^2.0.1",
+    "@openrouter/ai-sdk-provider": "^3.1.0",
+    "@types/node": "^24.3.0",
+    "ai": "^7.0.130",
+    "gramio": "^0.15.1",
+    "next": "^16.3.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tsx": "^4.20.4",
+    "typescript": "^5.9.2",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@ai-sdk/anthropic": "^4.0.0",
+    "@ai-sdk/openai-compatible": "^3.0.0",
+    "@gramio/format": ">=0.8.0",
+    "@gramio/session": ">=0.2.0",
+    "@gramio/split": "^0.0.1",
+    "@gramio/storage": ">=2.0.0",
+    "@openrouter/ai-sdk-provider": "^3.0.0",
+    "ai": "^7.0.0",
+    "gramio": "^0.15.0",
+    "next": ">=15",
+    "zod": ">=3.22"
+  },
+  "peerDependenciesMeta": {
+    "@gramio/format": {
+      "optional": true
+    },
+    "@gramio/session": {
+      "optional": true
+    },
+    "@gramio/storage": {
+      "optional": true
+    },
+    "gramio": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    },
+    "ai": {
+      "optional": true
+    },
+    "@ai-sdk/anthropic": {
+      "optional": true
+    },
+    "@ai-sdk/openai-compatible": {
+      "optional": true
+    },
+    "@openrouter/ai-sdk-provider": {
+      "optional": true
+    },
+    "@gramio/split": {
+      "optional": true
+    },
+    "next": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adriangalilea/ts-utils.git"
+  },
+  "bugs": {
+    "url": "https://github.com/adriangalilea/ts-utils/issues"
+  },
+  "homepage": "https://github.com/adriangalilea/ts-utils#readme",
+  "sideEffects": false,
+  "dependencies": {
+    "linkifyjs": "^4.3.3"
+  }
 }
