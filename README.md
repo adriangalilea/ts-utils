@@ -515,7 +515,7 @@ What makes it hold up:
 - **Renders to stderr by default** — stdout stays clean for `--json` and pipes.
 - **Crash-safe cursor**: hidden while painting, restored on done/clear, process exit, and signals — politely (if the app has its own SIGINT handler for graceful shutdown, it stays in charge).
 - **Flicker-free**: synchronized-update escapes (`?2026`) make repaints atomic on modern terminals; lines are ANSI-aware clipped to the terminal width so the erase math never breaks.
-- **Measurement is grapheme-aware**: a ZWJ emoji / flag counts as one visible unit in `width()`/`clip()`/`table()` alignment. East-Asian double-width (CJK) is a known TODO — those columns can drift a cell.
+- **Measurement is in terminal cells**: a ZWJ emoji / flag is one grapheme, and CJK characters and emoji take two cells, so `width()`/`clip()`/`table()` line up what a terminal shows (py-utils `cli` measures the same way). `clip()` never splits a wide character at the cut.
 - One **region** at a time, by design (`assert`): two pinned regions can't share the bottom of one screen — compose into a single `render()`. A `spinner()` started *under* an active region is legitimate composition and degrades gracefully: its final line prints above the region.
 
 Run the demo: `pnpm tsx tests/live-demo.ts` (and pipe it through `| cat` to see the non-TTY degradation).

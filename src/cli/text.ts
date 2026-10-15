@@ -38,24 +38,57 @@ const ANSI_SPLIT_RE = /(\x1b\[[0-9;]*m)/;
 
 // Grapheme clusters, not code points: what the terminal renders as ONE symbol
 // (ZWJ emoji 👨‍👩‍👧, flags 🇪🇸, skin tones) is several code points — counting
-// pieces breaks alignment.
-// CJK and wide emoji occupy TWO terminal cells but count as one here, so
-// CJK-heavy columns drift by a cell per wide grapheme.
+// pieces breaks alignment. Each cluster then takes the cells a terminal gives
+// it: two for East Asian wide/fullwidth characters and emoji-presentation
+// symbols, one otherwise (py-utils measures the same way).
 const GRAPHEMES = new Intl.Segmenter();
 
-/** Visible width of a string — ANSI escapes stripped, counted by grapheme cluster. */
-export const width = (s: string): number =>
-	[...GRAPHEMES.segment(s.replace(ANSI_RE, ""))].length;
+// East Asian Wide/Fullwidth blocks (the wcwidth core table): Hangul Jamo, CJK
+// radicals through Yi, Hangul syllables, compatibility ideographs, vertical
+// and fullwidth forms, the supplementary ideographic planes.
+const WIDE: [number, number][] = [
+	[0x1100, 0x115f],
+	[0x2e80, 0x303e],
+	[0x3041, 0x33ff],
+	[0x3400, 0x4dbf],
+	[0x4e00, 0x9fff],
+	[0xa000, 0xa4cf],
+	[0xac00, 0xd7a3],
+	[0xf900, 0xfaff],
+	[0xfe30, 0xfe4f],
+	[0xff00, 0xff60],
+	[0xffe0, 0xffe6],
+	[0x20000, 0x2fffd],
+	[0x30000, 0x3fffd],
+];
+const EMOJI_PRESENTATION = /\p{Emoji_Presentation}|️/u;
+
+/** Terminal cells one grapheme cluster occupies. */
+function cells(grapheme: string): number {
+	const cp = grapheme.codePointAt(0) ?? 0;
+	if (WIDE.some(([lo, hi]) => cp >= lo && cp <= hi)) return 2;
+	return EMOJI_PRESENTATION.test(grapheme) ? 2 : 1;
+}
+
+/** Visible width of a string in terminal cells — ANSI escapes stripped. */
+export const width = (s: string): number => {
+	let w = 0;
+	for (const g of GRAPHEMES.segment(s.replace(ANSI_RE, "")))
+		w += cells(g.segment);
+	return w;
+};
 
 /**
- * Truncate to `n` visible graphemes (ellipsis at the cut), ANSI-aware: escape
+ * Truncate to `n` visible cells (ellipsis at the cut), ANSI-aware: escape
  * sequences pass through so styling survives, and open styles are closed
- * with a final reset. Plain strings work too — this is THE truncate.
+ * with a final reset. A wide character never straddles the cut. Plain
+ * strings work too — this is THE truncate.
  */
 export function clip(s: string, n: number): string {
 	if (width(s) <= n) return s;
 	let out = "";
-	let vis = 0;
+	let used = 0;
+	let cut = false;
 	let styled = false;
 	for (const part of s.split(ANSI_SPLIT_RE)) {
 		if (part === "") continue;
@@ -65,12 +98,14 @@ export function clip(s: string, n: number): string {
 			continue;
 		}
 		for (const g of GRAPHEMES.segment(part)) {
-			if (vis < n - 1) {
+			if (cut) break;
+			const w = cells(g.segment);
+			if (used + w <= n - 1) {
 				out += g.segment;
-				vis++;
-			} else if (vis === n - 1) {
+				used += w;
+			} else {
 				out += "…";
-				vis++;
+				cut = true;
 			}
 		}
 	}
