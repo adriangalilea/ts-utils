@@ -272,6 +272,7 @@ export function elapsed(since: number): string {
  * (a helper deep in a call stack, under a dashboard), it degrades the same
  * way — the final line lands ABOVE the region via the console routing. Only
  * a second live() region screams; a nested spinner is legitimate composition.
+ * Every line it writes goes to stderr: stdout stays data for pipes / --json.
  */
 export async function spinner<T>(
 	label: string,
@@ -287,7 +288,7 @@ export async function spinner<T>(
 			? live(() => `${spin()} ${current} ${dim(elapsed(start))}`)
 			: null;
 	const persist = (line: string): void =>
-		l ? l.done(line) : console.log(line);
+		l ? l.done(line) : console.error(line);
 	try {
 		const v = await fn(set);
 		persist(`${green("✓")} ${current} ${dim(elapsed(start))}`);

@@ -31,7 +31,7 @@ const ALLOWED: Record<string, { count: number; reason: string }> = {
 	"src/cli/live.ts": {
 		count: 10,
 		reason:
-			"the live region reroutes console.log/warn/error above itself and restores them, and spinner() prints its final line to stdout when no region is active: terminal rendering, not diagnostics",
+			"the live region reroutes console.log/warn/error above itself and restores them, and spinner() under an active region prints its final line through console.error, routed above it: terminal rendering, not diagnostics",
 	},
 	"src/platform/kev.ts": {
 		count: 1,
