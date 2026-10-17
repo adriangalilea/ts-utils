@@ -108,3 +108,85 @@ export function until(d: Dateish, now: Dateish = Date.now()): string {
 	if (delta < MIN) return "now";
 	return `in ${span(delta)}`;
 }
+
+// ── time as a person types it ───────────────────────────────────────────────
+// One vocabulary for every --since, --until and deadline a command line takes:
+//   today · yesterday     that day
+//   20:00 · 9:30          today, at that local time
+//   30m · 2h · 3d · 1w    that long ago, or from now in a deadline
+//   2026-10-05            that local day
+//   anything else         an ISO datetime, as Date.parse reads it
+// A day is a span, so where in it a bound falls is said by `edge`: a --since
+// starts at its first instant, an --until ends at its last.
+
+/** Where in a day a bound falls. */
+export type Edge = "start" | "end";
+
+const UNIT = { m: MIN, h: HOUR, d: DAY, w: WEEK } as const;
+const VOCABULARY =
+	"today · yesterday · 20:00 · 30m/2h/3d/1w · YYYY-MM-DD · ISO";
+
+const dayEdge = (d: Date, edge: Edge) => {
+	const out = new Date(d);
+	if (edge === "start") out.setHours(0, 0, 0, 0);
+	else out.setHours(23, 59, 59, 999);
+	return out;
+};
+
+function absolute(s: string, edge: Edge, now: Date): Date | null {
+	if (s === "today") return dayEdge(now, edge);
+	if (s === "yesterday")
+		return dayEdge(
+			new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1),
+			edge,
+		);
+	const at = s.match(/^(\d{1,2}):(\d{2})$/);
+	if (at) {
+		const [h, m] = [Number(at[1]), Number(at[2])];
+		if (h > 23 || m > 59) throw new Error(`"${s}" is no time of day`);
+		return new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m);
+	}
+	const day = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+	if (day) {
+		const d = new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3]));
+		if (d.getDate() !== Number(day[3])) throw new Error(`"${s}" is no day`);
+		return dayEdge(d, edge);
+	}
+	return null;
+}
+
+/** An instant as typed, looking back: `2h` is two hours ago. Throws on anything
+ *  outside the vocabulary, naming it. */
+export function parseWhen(
+	s: string,
+	edge: Edge = "start",
+	now: Date = new Date(),
+): Date {
+	const ago = s.match(/^(\d+)([mhdw])$/);
+	if (ago)
+		return new Date(
+			now.getTime() - Number(ago[1]) * UNIT[ago[2] as keyof typeof UNIT],
+		);
+	const at = absolute(s, edge, now) ?? new Date(s);
+	if (Number.isNaN(at.getTime()))
+		throw new Error(`can't read time "${s}": ${VOCABULARY}`);
+	return at;
+}
+
+/** A deadline as typed, looking forward: `2h` is two hours from now, a day ends
+ *  at its last instant. Throws on anything outside the vocabulary. */
+export function parseDeadline(s: string, now: Date = new Date()): Date {
+	const ahead = s.match(/^(\d+)([mhdw])$/);
+	if (ahead)
+		return new Date(
+			now.getTime() + Number(ahead[1]) * UNIT[ahead[2] as keyof typeof UNIT],
+		);
+	return parseWhen(s, "end", now);
+}
+
+/** A local day as typed: "2026-10-05". */
+export const localDay = (d: Date): string =>
+	`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+/** A local wall-clock instant: "2026-10-05 20:00". */
+export const localStamp = (d: Date): string => `${localDay(d)} ${clock(d)}`;
