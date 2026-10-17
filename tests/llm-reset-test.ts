@@ -660,4 +660,97 @@ const ACTING = {
 		"reasoning reaches the server per call, and a step's for that step alone",
 	);
 }
+
+// The anthropic dialect: every request marks its prompt for the cache, and a step that
+// asks for reasoning thinks adaptively at that effort while one that does not keeps
+// the request's own setting.
+{
+	const requests: Record<string, unknown>[] = [];
+	const anthropicSse = () => {
+		const events = [
+			{
+				type: "message_start",
+				message: {
+					id: "m",
+					type: "message",
+					role: "assistant",
+					model: "fake",
+					content: [],
+					stop_reason: null,
+					usage: { input_tokens: 5, output_tokens: 1 },
+				},
+			},
+			{
+				type: "content_block_start",
+				index: 0,
+				content_block: { type: "text", text: "" },
+			},
+			{
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "text_delta", text: "hi" },
+			},
+			{ type: "content_block_stop", index: 0 },
+			{
+				type: "message_delta",
+				delta: { stop_reason: "end_turn" },
+				usage: { output_tokens: 2 },
+			},
+			{ type: "message_stop" },
+		];
+		const enc = new TextEncoder();
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				for (const e of events)
+					controller.enqueue(
+						enc.encode(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`),
+					);
+				controller.close();
+			},
+		});
+		return new Response(body, {
+			status: 200,
+			headers: { "content-type": "text/event-stream" },
+		});
+	};
+	const claude = createLlm({
+		providers: [
+			{
+				id: "claude",
+				type: "anthropic",
+				apiKey: "fake",
+				defaultModel: "claude-haiku-5-5",
+				fetch: async (_url, init) => {
+					requests.push(JSON.parse(String(init?.body)));
+					return anthropicSse();
+				},
+			},
+		],
+	});
+	await claude.complete({ prompt: "hello", reasoning: "none" });
+	await claude.complete({
+		prompt: "hello",
+		reasoning: "none",
+		prepareStep: () => ({ reasoning: "low" }),
+	});
+	assert.deepEqual(
+		requests.map((r) => r.cache_control),
+		[{ type: "ephemeral" }, { type: "ephemeral" }],
+		"an anthropic request did not mark its prompt for the cache",
+	);
+	assert.deepEqual(
+		requests.map((r) => [
+			r.thinking,
+			(r.output_config as { effort?: string } | undefined)?.effort,
+		]),
+		[
+			[{ type: "disabled" }, undefined],
+			[{ type: "adaptive" }, "low"],
+		],
+		"an anthropic step's reasoning did not reach the request",
+	);
+	pass(
+		"anthropic: every request cached, a step's reasoning thinks at its effort",
+	);
+}
 console.log(`\n${passed} passed`);

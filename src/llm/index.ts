@@ -167,6 +167,13 @@ const repair: ToolCallRepairFunction<ToolSet> = async ({
 	return input === null ? null : { ...toolCall, input };
 };
 
+/** Every anthropic request marks its prompt for Anthropic's prompt cache: unlike the
+ *  other dialects' servers, Anthropic caches only what a request asks it to, so a tool
+ *  loop unmarked reads its whole conversation again, at full price, on every step. A
+ *  prompt under the model's minimum cacheable size is not cached and costs nothing
+ *  more; a first write costs a quarter more than reading it fresh. */
+const ANTHROPIC_CACHE = { cacheControl: { type: "ephemeral" } } as const;
+
 /** How much a model reasons before it answers: the AI SDK's level ("none" turns it
  *  off, where the provider can). */
 export type Reasoning = NonNullable<
@@ -1022,16 +1029,29 @@ export class Llm {
 			if (!step?.reasoning) return step;
 			const { reasoning, ...rest } = step;
 			const type = dialectOf(provider);
-			if (type === "anthropic")
-				throw new LlmError(
-					`llm: a step's reasoning is mapped for the openai and openrouter dialects; ${provider.id} is anthropic`,
-				);
-			// openai-compatible reads its options under the provider's name, OpenRouter
-			// under its own
+			// anthropic: a step that reasons thinks adaptively at the effort named; one
+			// that asks for none keeps the request's own setting, which the SDK maps per
+			// model (Sonnet 5.5 refuses `disabled`, Opus 5.5 cannot stop thinking). Its
+			// options replace the request's, so the cache mark rides along. openai-
+			// compatible reads its options under the provider's name, OpenRouter under
+			// its own
 			const own =
-				type === "openrouter"
-					? { openrouter: { reasoning: { effort: reasoning } } }
-					: { [provider.id]: { reasoningEffort: reasoning } };
+				type === "anthropic"
+					? {
+							anthropic: {
+								...ANTHROPIC_CACHE,
+								...(reasoning === "none" || reasoning === "provider-default"
+									? {}
+									: {
+											thinking: { type: "adaptive" },
+											// Anthropic's lowest effort is low
+											effort: reasoning === "minimal" ? "low" : reasoning,
+										}),
+							},
+						}
+					: type === "openrouter"
+						? { openrouter: { reasoning: { effort: reasoning } } }
+						: { [provider.id]: { reasoningEffort: reasoning } };
 			return {
 				...rest,
 				providerOptions: { ...rest.providerOptions, ...own },
@@ -1044,9 +1064,16 @@ export class Llm {
 	): Pick<Parameters<typeof streamText>[0], "providerOptions"> {
 		const type = dialectOf(provider);
 		if (type === "anthropic")
-			return provider.disableThinking
-				? { providerOptions: { anthropic: { thinking: { type: "disabled" } } } }
-				: {};
+			return {
+				providerOptions: {
+					anthropic: {
+						...ANTHROPIC_CACHE,
+						...(provider.disableThinking
+							? { thinking: { type: "disabled" } }
+							: {}),
+					},
+				},
+			};
 		// openai: the thinking flag and extraBody are merged into the request body by
 		// the model instance (modelFor); openrouter: they ride its model instance too
 		return {};
