@@ -355,17 +355,16 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 				throw new Error(`cli: --${name}: only a string flag has choices`);
 			if (f.choices?.length === 0)
 				throw new Error(`cli: --${name}: choices names nothing`);
+			// The first reading of argv must know, for any command, whether a flag
+			// takes a value and which letter it is; whether that value is a list, or
+			// which words it takes, is each command's own (`ls --to` one address,
+			// `send --to` the recipients).
 			const seen = every[name];
-			if (
-				seen &&
-				(seen.type !== f.type ||
-					seen.short !== f.short ||
-					!seen.list !== !f.list)
-			)
+			if (seen && (seen.type !== f.type || seen.short !== f.short))
 				throw new Error(
-					`cli: --${name} is spelled two ways (${command} and another): one type, one short letter, a list or not`,
+					`cli: --${name} is spelled two ways (${command} and another): one type, one short letter`,
 				);
-			every[name] = f;
+			every[name] = seen?.list ? seen : f;
 			if (!(name in BUILT_IN) && !(name in global))
 				owners[name] = [...(owners[name] ?? []), command];
 		}

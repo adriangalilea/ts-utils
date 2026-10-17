@@ -318,6 +318,33 @@ bad(
 	},
 	/--to is spelled two ways/,
 );
+// one name, a list in one command and one value in another: each reads its own
+{
+	const mail = program({
+		...base,
+		commands: {
+			ls: {
+				says: "ls",
+				flags: { to: { type: "string", says: "one address" } },
+			},
+			send: {
+				says: "send",
+				flags: { to: { type: "string", list: true, says: "recipients" } },
+			},
+		},
+	});
+	assert.deepEqual(
+		(mail.parse(["ls", "--to", "a,b"]) as { values: unknown }).values,
+		{
+			to: "a,b",
+		},
+	);
+	assert.deepEqual(
+		(mail.parse(["send", "--to", "a,b", "--to", "c"]) as { values: unknown })
+			.values,
+		{ to: ["a", "b", "c"] },
+	);
+}
 bad(
 	{ ...base, commands: { a: { args: "<x> [y...] <z>", says: "a" } } },
 	/only the last may take the rest/,
