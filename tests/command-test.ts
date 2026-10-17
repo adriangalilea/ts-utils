@@ -9,6 +9,9 @@ import { CliError, program } from "../src/cli/index.js";
 import { stripAnsi } from "../src/universal/ansi.js";
 import { localDay, parseDeadline, parseWhen } from "../src/universal/time.js";
 
+/** A domain's own words, as a consumer keeps them. */
+const FOLDERS = ["inbox", "junk", "trash"] as const;
+
 const eid = program({
 	name: "eid",
 	version: "1.2.3",
@@ -50,13 +53,15 @@ const eid = program({
 			says: "your links",
 			flags: {
 				limit: { type: "integer", says: "at most" },
-				order: { type: "string", value: "<new|old>", says: "which first" },
-				tag: { type: "string", value: "<t>", multiple: true, says: "tagged" },
-				days: {
-					type: "integer",
-					value: "<n>",
-					multiple: true,
-					says: "days",
+				order: { type: "string", choices: ["new", "old"], says: "which first" },
+				tag: { type: "string", value: "<t>", list: true, says: "tagged" },
+				days: { type: "integer", list: true, says: "days" },
+				folder: {
+					type: "string",
+					value: "<folder>",
+					choices: FOLDERS,
+					list: true,
+					says: "only these",
 				},
 			},
 		},
@@ -136,8 +141,8 @@ assert.deepEqual(run("set", "bio", "hello", "there").args, [
 	"hello",
 	"there",
 ]);
-refused(["vouches", "maybe"], /"maybe" is not on, off/);
-assert.deepEqual(run("vouches", "off").args, ["off"]);
+// args are shape only: what a value may be is the handler's
+assert.deepEqual(run("vouches", "maybe").args, ["maybe"]);
 
 // a command that does not exist, with a guess
 refused(["sned"], /^No command "sned": eid send\?$/);
@@ -172,9 +177,22 @@ refused(["zzzzzz"], /^No command "zzzzzz": eid help$/);
 		const tags: string[] | undefined = c.values.tag;
 		void [n, tags];
 	}
-	const d = run("ls", "--limit", "-5", "--days", "3", "--days", "7");
+	const d = run("ls", "--limit", "-5", "--days", "3,4", "--days", "7");
 	if (d.command === "ls")
-		assert.deepEqual(d.values, { limit: -5, days: [3, 7] });
+		assert.deepEqual(d.values, { limit: -5, days: [3, 4, 7] });
+	// a list is commas and repeats alike, trimmed, empties dropped, each checked
+	const e = run("ls", "--folder", "inbox, junk,", "--folder", "trash");
+	if (e.command === "ls") {
+		assert.deepEqual(e.values.folder, ["inbox", "junk", "trash"]);
+		// the type is the domain's own words
+		const f: ("inbox" | "junk" | "trash")[] | undefined = e.values.folder;
+		const o: "new" | "old" | undefined = e.values.order;
+		void [f, o];
+	}
+	refused(
+		["ls", "--folder", "inbox,spam"],
+		/^--folder: "spam" is not inbox, junk, trash$/,
+	);
 	refused(
 		["ls", "--limit", "lots"],
 		/^--limit takes a whole number, not "lots"$/,
@@ -252,10 +270,14 @@ refused(["zzzzzz"], /^No command "zzzzzz": eid help$/);
 			"eid help [command]",
 		],
 	);
+	const ls = stripAnsi((eid.parse(["help", "ls"]) as { text: string }).text);
+	// choices shown as the placeholder, or after the words where one hides them
 	assert.match(
-		stripAnsi((eid.parse(["help", "ls"]) as { text: string }).text),
-		/--limit <n> {2,}at most\n {4}--order <new\|old>/,
+		ls,
+		/--limit <n> {2,}at most\n {4}--order <new\|old> {2,}which first/,
 	);
+	assert.match(ls, /--tag <t>,… {2,}tagged/);
+	assert.match(ls, /--folder <folder>,… {2,}only these \(inbox, junk, trash\)/);
 }
 
 // a spec that cannot work throws as the program starts
@@ -439,7 +461,7 @@ bad(
 					},
 				},
 			}),
-		/a boolean flag is never required/,
+		/a boolean flag takes no value, list, choices or required/,
 	);
 }
 

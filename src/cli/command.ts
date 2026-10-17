@@ -34,12 +34,16 @@ export interface FlagSpec {
 	readonly type: "boolean" | "string" | "integer";
 	/** One character: `-d` for `--dir`. Grouped as typed: `-wo`, `-wd ~/x`. */
 	readonly short?: string;
-	/** The value as the help shows it: `<path>`. Words with bars, `<asc|desc>`,
-	 *  are the only values a string flag takes. */
+	/** The value as the help shows it, and nothing more: `<path>`. Absent, it is
+	 *  the choices (`<credit|debit>`), `<n>` for an integer, else `<value>`. */
 	readonly value?: string;
 	readonly says: string;
-	/** Given again, every value kept in order (a flag with a value only). */
-	readonly multiple?: boolean;
+	/** The only values a string flag takes, its type narrowed to them: pass the
+	 *  domain's own array (`choices: FOLDERS`), so the flag cannot drift from it. */
+	readonly choices?: readonly string[];
+	/** Comma-separated (`--to a,b`), trimmed, empties dropped, each item checked
+	 *  against `choices`; given again, it adds to the list. Typed as an array. */
+	readonly list?: boolean;
 	/** The command refuses to run without it, and its value is never undefined
 	 *  (a flag with a value only). */
 	readonly required?: boolean;
@@ -49,9 +53,10 @@ export type FlagSpecs = { readonly [name: string]: FlagSpec };
 
 export interface CommandSpec {
 	/**
-	 * Its arguments as typed after its name: `<path> [name]`, `<words...>`,
-	 * `<on|off>`. Each `<x>` must be given and each `[x]` may be; a last one
-	 * ending in `...` takes the rest; `a|b` words are the only answers taken.
+	 * Its arguments as typed after its name, a usage grammar the parse counts:
+	 * `<path> [name]`, `<words...>`. Each `<x>` must be given and each `[x]` may
+	 * be; a last one ending in `...` takes the rest. Shape only: what a value may
+	 * be is the handler's to check.
 	 */
 	readonly args?: string;
 	/** One line: what it does, in the person's words. */
@@ -62,7 +67,13 @@ export interface CommandSpec {
 	readonly examples?: readonly string[];
 	/** What `--json` prints. */
 	readonly json?: string;
-	/** Shorter names it answers to (`msg` for `message`), shown beside it. */
+	/**
+	 * Other words it answers to (`msg` for `message`), shown beside it. Input only:
+	 * the handler, the help, the JSON and every message name the command itself.
+	 * Their cost is two spellings in scripts and docs, so examples and skills use
+	 * the name; a shell alias or a fish abbr is often the better tool, as it
+	 * expands to the name and history never sees the short one.
+	 */
 	readonly aliases?: readonly string[];
 }
 
@@ -89,10 +100,10 @@ type One<S extends FlagSpec> = S["type"] extends "boolean"
 	? boolean
 	: S["type"] extends "integer"
 		? number
-		: string;
-type ValueOf<S extends FlagSpec> = S["multiple"] extends true
-	? One<S>[]
-	: One<S>;
+		: S extends { readonly choices: infer C extends readonly string[] }
+			? C[number]
+			: string;
+type ValueOf<S extends FlagSpec> = S["list"] extends true ? One<S>[] : One<S>;
 
 type RequiredOf<F extends FlagSpecs> = {
 	[K in keyof F]: F[K]["required"] extends true ? K : never;
@@ -181,12 +192,7 @@ const BUILT_IN: FlagSpecs = {
 	version: { type: "boolean", says: "the version" },
 };
 
-type Arg = {
-	name: string;
-	needed: boolean;
-	rest: boolean;
-	choices: string[] | null;
-};
+type Arg = { name: string; needed: boolean; rest: boolean };
 
 /** `args` as the parse counts them. */
 function argsOf(args: string | undefined): Arg[] {
@@ -198,29 +204,24 @@ function argsOf(args: string | undefined): Arg[] {
 		const rest = m[3] !== undefined;
 		if (rest && i !== words.length - 1)
 			throw new Error(`cli: args "${args}": only the last may take the rest`);
-		const name = m[2] as string;
-		return {
-			name,
-			needed: m[1] === "<",
-			rest,
-			choices: name.includes("|") ? name.split("|") : null,
-		};
+		return { name: m[2] as string, needed: m[1] === "<", rest };
 	});
 }
 
-/** A flag as the help shows it: `-d, --dir <path>`. */
+/** A flag's value as the help shows it: its `value`, else its choices, else its type's. */
+const placeholderOf = (f: FlagSpec): string =>
+	f.value ??
+	(f.choices
+		? `<${f.choices.join("|")}>`
+		: f.type === "integer"
+			? "<n>"
+			: "<value>");
+
+/** A flag as the help shows it: `-d, --dir <path>`, a list `--to <value>,…`. */
 const flagText = (name: string, f: FlagSpec) =>
 	`${f.short ? `-${f.short}, ` : ""}--${name}${
-		f.type === "boolean"
-			? ""
-			: ` ${f.value ?? (f.type === "integer" ? "<n>" : "<value>")}`
+		f.type === "boolean" ? "" : ` ${placeholderOf(f)}${f.list ? ",…" : ""}`
 	}`;
-
-/** The only values a string flag takes, where its `value` names them: `<a|b>`. */
-const choicesOf = (f: FlagSpec): string[] | null => {
-	const m = f.type === "string" ? f.value?.match(/^<([^<>]+\|[^<>]+)>$/) : null;
-	return m ? (m[1] as string).split("|") : null;
-};
 
 /** `text` folded to the terminal's width (80 at most, a reading measure), each
  *  line after `indent` spaces. */
@@ -343,23 +344,26 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 					);
 				shorts.set(f.short, name);
 			}
-			if (f.multiple && f.type === "boolean")
+			if (
+				f.type === "boolean" &&
+				(f.value || f.list || f.required || f.choices)
+			)
 				throw new Error(
-					`cli: --${name}: only a flag with a value is given again`,
+					`cli: --${name}: a boolean flag takes no value, list, choices or required`,
 				);
-			if (f.type === "boolean" && f.value !== undefined)
-				throw new Error(`cli: --${name}: a boolean flag takes no value`);
-			if (f.type === "boolean" && f.required)
-				throw new Error(`cli: --${name}: a boolean flag is never required`);
+			if (f.choices && f.type !== "string")
+				throw new Error(`cli: --${name}: only a string flag has choices`);
+			if (f.choices?.length === 0)
+				throw new Error(`cli: --${name}: choices names nothing`);
 			const seen = every[name];
 			if (
 				seen &&
 				(seen.type !== f.type ||
 					seen.short !== f.short ||
-					seen.multiple !== f.multiple)
+					!seen.list !== !f.list)
 			)
 				throw new Error(
-					`cli: --${name} is spelled two ways (${command} and another): one type, one short letter`,
+					`cli: --${name} is spelled two ways (${command} and another): one type, one short letter, a list or not`,
 				);
 			every[name] = f;
 			if (!(name in BUILT_IN) && !(name in global))
@@ -457,7 +461,12 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 						heading("flags"),
 						...flags.map(
 							([n, f]) =>
-								`    ${padEndV(flagText(n, f), column)}${f.says}${f.required ? ui.muted(" (required)") : ""}`,
+								`    ${padEndV(flagText(n, f), column)}${f.says}${
+									// choices a placeholder hides are said after the words
+									f.choices && f.value
+										? ui.muted(` (${f.choices.join(", ")})`)
+										: ""
+								}${f.required ? ui.muted(" (required)") : ""}`,
 						),
 					]
 				: []),
@@ -527,7 +536,7 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 						type:
 							f.type === "boolean" ? ("boolean" as const) : ("string" as const),
 						...(f.short && { short: f.short }),
-						...(f.multiple && { multiple: true }),
+						...(f.list && { multiple: true }),
 					},
 				]),
 			);
@@ -602,14 +611,21 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 					);
 				return Number(s);
 			}
-			const choices = choicesOf(f);
-			if (choices && !choices.includes(s))
+			if (f.choices && !f.choices.includes(s))
 				throw new CliError(
-					`--${flag}: "${s}" is not ${choices.join(", ")}`,
+					`--${flag}: "${s}" is not ${f.choices.join(", ")}`,
 					"usage",
 				);
 			return s;
 		};
+		// A list's every item, from each time it was given: `--to a,b --to c`.
+		const items = (given: unknown[]) =>
+			given.flatMap((g) =>
+				String(g)
+					.split(",")
+					.map((x) => x.trim())
+					.filter(Boolean),
+			);
 		// The command's own flags, the built-in ones answered here and left out.
 		const values = Object.fromEntries(
 			Object.entries(strict.values)
@@ -617,7 +633,7 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 				.map(([k, v]) => [
 					k,
 					Array.isArray(v)
-						? v.map((x) => read(k, x as string | boolean))
+						? items(v).map((x) => read(k, x))
 						: read(k, v as string | boolean),
 				]),
 		);
@@ -669,16 +685,6 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 					`${spec.name} ${name} needs ${flagText(flag, f)}: ${f.says}`,
 					"usage",
 				);
-		shape.forEach((a, i) => {
-			const given = a.rest ? rest.slice(i) : rest.slice(i, i + 1);
-			for (const g of given)
-				if (a.choices && !a.choices.includes(g))
-					throw new CliError(
-						`${spec.name} ${name}: "${g}" is not ${a.choices.join(", ")}`,
-						"usage",
-					);
-		});
-
 		return { kind: "run", command: name, args: rest, values } as Call<P>;
 	}
 
