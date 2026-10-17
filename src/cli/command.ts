@@ -26,7 +26,7 @@
  */
 
 import { parseArgs } from "node:util";
-import { CliError } from "./run.js";
+import { CliError, emit } from "./run.js";
 import { padEndV, ui, width } from "./text.js";
 
 export interface FlagSpec {
@@ -120,11 +120,35 @@ export type Call<P extends ProgramSpec> = {
  *  the same as JSON, for `--json`. */
 export type Print = { kind: "print"; text: string; data: unknown };
 
+/** One command's call, by its name. */
+export type CallOf<P extends ProgramSpec, K extends Named<P>> = Extract<
+	Call<P>,
+	{ command: K }
+>;
+
+/** What runs each command: one handler per command, no more, each given its own
+ *  call (its flags typed by its spec) and what `context` built for them all. */
+export type Handlers<P extends ProgramSpec, Ctx = undefined> = {
+	[K in Named<P>]: (call: CallOf<P, K>, ctx: Ctx) => void | Promise<void>;
+};
+
 export interface Program<P extends ProgramSpec> {
 	readonly spec: P;
 	/** `argv` read: the command asked for, or what to print instead. A mistake in
 	 *  it throws `CliError` (code "usage") saying what to type. */
 	parse(argv?: readonly string[]): Call<P> | Print;
+	/**
+	 * `argv` read and answered: help and the version printed (their data as JSON
+	 * under `--json`), any other command given to its handler. `context` builds,
+	 * once and from the call, what every handler shares (a session, a client).
+	 */
+	run<Ctx = undefined>(
+		handlers: Handlers<P, Ctx>,
+		opts?: {
+			argv?: readonly string[];
+			context?: (call: Call<P>) => Ctx | Promise<Ctx>;
+		},
+	): Promise<void>;
 	/** The overview: every command on a line, by section. */
 	overview(): string;
 	/** One command in full. */
@@ -617,9 +641,41 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 		return { kind: "run", command: name, args: rest, values } as Call<P>;
 	}
 
+	const run: Program<P>["run"] = async (handlers, opts = {}) => {
+		// The handlers are the commands: one each, none for a command that is not.
+		const named = Object.keys(spec.commands);
+		const given = Object.keys(handlers);
+		const missing = named.filter((n) => !given.includes(n));
+		const extra = given.filter((n) => !named.includes(n));
+		if (missing.length || extra.length)
+			throw new Error(
+				`cli: ${spec.name}'s handlers: ${[
+					missing.length && `none for ${missing.join(", ")}`,
+					extra.length && `${extra.join(", ")} is no command`,
+				]
+					.filter(Boolean)
+					.join("; ")}`,
+			);
+		const argv = opts.argv ?? process.argv.slice(2);
+		const call = parse(argv);
+		if (call.kind === "print")
+			return emit(argv.includes("--json"), call.data, () =>
+				process.stdout.write(call.text),
+			);
+		const ctx = opts.context ? await opts.context(call) : undefined;
+		// A call and its handler name one command; TypeScript cannot follow a
+		// union through an index, so the pairing is this one line's.
+		const handler = handlers[call.command as Named<P>] as (
+			c: Call<P>,
+			x: unknown,
+		) => void | Promise<void>;
+		await handler(call, ctx);
+	};
+
 	return {
 		spec,
 		parse,
+		run,
 		overview,
 		detail: detail as Program<P>["detail"],
 		describe,

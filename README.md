@@ -554,7 +554,7 @@ Run the demo: `pnpm tsx tests/live-demo.ts` (and pipe it through `| cat` to see 
 A program is described once, as data, and everything a person meets is read from that table: the parse, the refusals, the values' types and the help. A flag cannot exist without its words, nor its words without the flag.
 
 ```typescript
-import { emit, jsonOut, main, program, WATCH_FLAGS } from '@adriangalilea/utils/cli'
+import { main, program, WATCH_FLAGS } from '@adriangalilea/utils/cli'
 
 const eid = program({
   name: 'eid',
@@ -577,15 +577,20 @@ const eid = program({
   sections: [['files', ['send', 'inbox', 'help']]],
 })
 
-main(async () => {
-  const call = eid.parse()
-  if (call.kind === 'print') return emit(jsonOut(), call.data, () => process.stdout.write(call.text))
-  switch (call.command) {
-    case 'send': return send(call.args[0], call.values.to)   // values typed per command
-    case 'inbox': return inbox(call.values.watch, call.values.once)
-  }
-})
+main(() =>
+  eid.run(
+    {
+      // one handler per command, each given its own call: args, and values typed by its flags
+      send: ({ args: [path], values }, api) => send(api, path, values.to),
+      inbox: ({ values }, api) => inbox(api, values.watch, values.once),
+    },
+    // built once from the call, given to every handler
+    { context: (call) => client({ json: call.values.json === true }) },
+  ),
+)
 ```
+
+`run` answers `help`, `--help` and `--version` itself (their data as JSON under `--json`) and gives any other command to its handler; a handler missing or a handler for no command is a type error, and screams when it runs. `parse` is the same reading without the dispatch, for a program that routes its own calls.
 
 - **The parse is node's `parseArgs`**: short flags group (`-wo`, `-wd ~/x`, a flag taking a value last), `--dir=x` works, `--` ends the flags. A dash and a digit that no flag spells (`-5`, `--09-29`) is an argument.
 - **A flag is `boolean`, `string` or `integer`** (a whole number, typed `number`, `--limit lots` refused). A string flag whose `value` names words, `<new|old>`, takes only those. `multiple: true` keeps every value given, in order.

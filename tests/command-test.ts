@@ -360,4 +360,56 @@ bad(
 	assert.throws(() => parseWhen("2026-02-30"), /no day/);
 }
 
+// run: each command to its own handler, typed by its spec, with one context
+{
+	const tiny = program({
+		name: "t",
+		version: "1",
+		says: "t",
+		global: { json: { type: "boolean", says: "json" } },
+		commands: {
+			get: {
+				args: "<x>",
+				says: "get",
+				flags: { dir: { type: "string", says: "dir" } },
+			},
+			ls: { says: "ls", flags: { limit: { type: "integer", says: "n" } } },
+		},
+	});
+	const seen: string[] = [];
+	const handlers = {
+		get: (c: { args: string[]; values: { dir?: string } }, ctx: string) => {
+			seen.push(`get ${c.args[0]} ${c.values.dir} ${ctx}`);
+		},
+		ls: async (c: { values: { limit?: number } }, ctx: string) => {
+			seen.push(`ls ${c.values.limit} ${ctx}`);
+		},
+	};
+	const context = (c: { command: string }) => `ctx:${c.command}`;
+	await tiny.run(handlers, { argv: ["get", "a", "--dir", "/x"], context });
+	await tiny.run(handlers, { argv: ["ls", "--limit", "3"], context });
+	assert.deepEqual(seen, ["get a /x ctx:get", "ls 3 ctx:ls"]);
+
+	// help is printed, never run: its text, or its data under --json
+	const out: string[] = [];
+	const write = process.stdout.write.bind(process.stdout);
+	const log = console.log;
+	process.stdout.write = ((s: string) => out.push(s) > 0) as typeof write;
+	console.log = (s: string) => void out.push(s);
+	await tiny.run(handlers, { argv: ["help", "get"], context });
+	await tiny.run(handlers, { argv: ["--version", "--json"], context });
+	process.stdout.write = write;
+	console.log = log;
+	assert.match(stripAnsi(out[0] ?? ""), /t get <x>\n {2}get/);
+	assert.deepEqual(JSON.parse(out[1] ?? ""), { version: "1" });
+	assert.equal(seen.length, 2);
+
+	// one handler per command, checked as it runs
+	await assert.rejects(
+		// @ts-expect-error ls has no handler
+		tiny.run({ get: handlers.get }, { argv: ["get", "a"], context }),
+		/t's handlers: none for ls/,
+	);
+}
+
 console.log("command: ok");
