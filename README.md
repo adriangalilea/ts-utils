@@ -385,6 +385,18 @@ until(weeklyReset)                 // "in 3d 13h"   ("now" if passed)
 ago(null)                          // "—" (every function)
 ```
 
+Time as a person types it, one vocabulary for every `--since`, `--until` and deadline: `today`, `yesterday`, `20:00` (today at that local time), `30m`/`2h`/`3d`/`1w`, `2026-10-05` (that local day), or an ISO datetime. `parseWhen` looks back (`2h` is two hours ago), `parseDeadline` forward (two hours from now). A day is a span, so `edge` says where a bound falls: a `--since` at its first instant, an `--until` at its last; a deadline day ends at its last. Anything outside the vocabulary throws, naming it.
+
+```typescript
+import { localDay, localStamp, parseDeadline, parseWhen } from '@adriangalilea/utils/time'
+
+parseWhen('3d')                    // three days ago
+parseWhen('2026-10-05', 'end')     // 2026-10-05 23:59:59.999, local
+parseDeadline('2h')                // two hours from now
+localDay(d)                        // "2026-10-05", the local day (never toISOString's UTC one)
+localStamp(d)                      // "2026-10-05 20:00"
+```
+
 ### URL (`url`)
 
 URLs, from user-typed text to cache identity. The whole funnel — *is there a
@@ -536,6 +548,80 @@ What makes it hold up:
 - One **region** at a time, by design (`assert`): two pinned regions can't share the bottom of one screen — compose into a single `render()`. A `spinner()` started *under* an active region is legitimate composition and degrades gracefully: its final line prints above the region.
 
 Run the demo: `pnpm tsx tests/live-demo.ts` (and pipe it through `| cat` to see the non-TTY degradation).
+
+### Command-line programs (`cli`)
+
+A program is described once, as data, and everything a person meets is read from that table: the parse, the refusals, the values' types and the help. A flag cannot exist without its words, nor its words without the flag.
+
+```typescript
+import { emit, jsonOut, main, program, WATCH_FLAGS } from '@adriangalilea/utils/cli'
+
+const eid = program({
+  name: 'eid',
+  version: '1.0.0',
+  says: 'your e-ID from a terminal',
+  global: { json: { type: 'boolean', says: 'the answer as JSON on stdout' } },
+  commands: {
+    send: {
+      args: '<path> [name]',
+      says: 'send a file or a folder from this machine',
+      flags: { to: { type: 'string', short: 't', value: '<people>', says: 'only for these accounts' } },
+      examples: ['eid send notes.zip --to ada'],
+      json: 'SendMade',
+    },
+    inbox: {
+      says: 'what people are sending you',
+      flags: { watch: { type: 'boolean', short: 'w', says: 'wait for sends' }, ...WATCH_FLAGS },
+    },
+  },
+  sections: [['files', ['send', 'inbox', 'help']]],
+})
+
+main(async () => {
+  const call = eid.parse()
+  if (call.kind === 'print') return emit(jsonOut(), call.data, () => process.stdout.write(call.text))
+  switch (call.command) {
+    case 'send': return send(call.args[0], call.values.to)   // values typed per command
+    case 'inbox': return inbox(call.values.watch, call.values.once)
+  }
+})
+```
+
+- **The parse is node's `parseArgs`**: short flags group (`-wo`, `-wd ~/x`, a flag taking a value last), `--dir=x` works, `--` ends the flags. A dash and a digit that no flag spells (`-5`, `--09-29`) is an argument.
+- **A mistake throws `CliError` (code `usage`) saying what to type**: a flag of another command (`--watch is not a flag of eid send: it is eid inbox's`), a flag of none with the nearest spelling, a missing value, a command misspelt (`No command "sned": eid send?`), and arguments counted from `args`: each `<x>` is needed, each `[x]` may be given, a last `<x...>` takes the rest, `<on|off>` takes only those words.
+- **`help`, `--help`, `-h` and `--version` are built in.** `call.kind === 'print'` carries the text and the same as `data` for `--json`. The overview lists every command in its section and the global flags and `env` in one column; `help <command>` adds `more`, the flags, `examples` and what `json` prints.
+- **The spec is checked as the program starts**: a section missing a command, a short letter meaning two flags (one letter, one flag, across the program), one flag name with two types, `args` that cannot be counted. Each throws on the first run, never on the one command that trips it.
+
+`main(run)` answers a failure one way for every program: a `CliError` is said in red (under `--json`, `{ error: { code, message, fields? } }` on stdout) and exits 1; anything else is a bug, thrown with its stack. `emit(json, data, human)` is the answer, JSON or for a person.
+
+**Questions** (`ask`, `confirm`, `askHidden`) go to stderr, so stdout stays the answer. Ctrl-C at one is Ctrl-C, Ctrl-D is no answer, and `askHidden` reads key by key with the terminal raw, so a password is in no scrollback. With no terminal to ask in (a pipe, a script, an agent) each throws `CliError` (code `unconfirmed`) with what to type instead, never waiting on input nobody will give:
+
+```typescript
+if (!(await confirm('take it?', 'say --yes to take it'))) return
+const password = await askHidden('password: ', '--password <words>')
+```
+
+### Watching (`cli`)
+
+Every `watch` command keeps one contract, so an agent that learned one has learned them all: it streams every match until Ctrl-C; `--once` (`-o`) exits 0 at the first; `--until <t>` exits at the deadline, 0 if anything matched and 2 if nothing; exit 1 is a real failure. Matches go to stdout (one JSON line each under `--json`), everything else to stderr, so an agent backgrounds the watch and branches on its exit code.
+
+```typescript
+import { deadlineFlag, matchFlag, WATCH_FLAGS, WatchClock } from '@adriangalilea/utils/cli'
+
+// flags: { ...WATCH_FLAGS, match: { type: 'string', value: '<re>', says: '…' } }
+const clock = new WatchClock({
+  once: values.once === true,
+  until: values.until ? deadlineFlag(values.until) : undefined,
+  cleanup: () => imap.logout(),
+})
+for await (const m of stream) {
+  if (!matchFlag(values.match ?? '').test(m.subject)) continue
+  console.log(JSON.stringify(m))
+  clock.hit()   // ends a --once watch, after stdout drains
+}
+```
+
+`whenFlag(flag, s, edge)` and `deadlineFlag(s)` read the time vocabulary (Time, below) and turn a mistake into a `CliError`.
 
 ### Offensive Programming
 

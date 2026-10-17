@@ -23,8 +23,12 @@
 
 import { padEndV, padStartV, ui, width } from "./text.js";
 
+export * from "./command.js";
 export * from "./live.js";
+export * from "./prompt.js";
+export * from "./run.js";
 export { clip, link, ui, width } from "./text.js";
+export * from "./watch.js";
 
 export interface TableOpts {
 	/** Column headers (bolded). */

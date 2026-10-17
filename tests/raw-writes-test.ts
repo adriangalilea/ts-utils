@@ -33,6 +33,16 @@ const ALLOWED: Record<string, { count: number; reason: string }> = {
 		reason:
 			"the live region reroutes console.log/warn/error above itself and restores them, and spinner() under an active region prints its final line through console.error, routed above it: terminal rendering, not diagnostics",
 	},
+	"src/cli/run.ts": {
+		count: 4,
+		reason:
+			"a program's answer (emit: JSON or its human lines on stdout) and its failure (main: the error said on stderr, or as JSON on stdout): output, not diagnostics; through console so a live region keeps them above itself",
+	},
+	"src/cli/watch.ts": {
+		count: 1,
+		reason:
+			"a watch says on stderr why it ends at its deadline, part of the watch contract's output beside its exit code",
+	},
 	"src/platform/kev.ts": {
 		count: 1,
 		reason:

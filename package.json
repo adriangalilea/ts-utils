@@ -228,11 +228,12 @@
 	"scripts": {
 		"build": "rm -rf dist && tsc",
 		"test": "tsx tests/metrics-test.ts",
-		"test:all": "pnpm run test && pnpm run test:log && pnpm run test:log-ship && pnpm run test:runtime && pnpm run test:text && pnpm run test:tg-html && pnpm run test:tg-md && pnpm run test:flags && pnpm run test:groups && pnpm run test:user && pnpm run test:language-picker && pnpm run test:self-echo && pnpm run test:update-identity && pnpm run test:update-runner &&pnpm run test:bot-text && pnpm run test:url && pnpm run test:bot-urls && pnpm run test:bot-updates && pnpm run test:bot-announce && pnpm run test:reactions && pnpm run test:llm-reset && pnpm run test:llm-mend && pnpm run test:raw-writes && pnpm run test:worker-safe",
+		"test:all": "pnpm run test && pnpm run test:log && pnpm run test:log-ship && pnpm run test:runtime && pnpm run test:text && pnpm run test:command && pnpm run test:tg-html && pnpm run test:tg-md && pnpm run test:flags && pnpm run test:groups && pnpm run test:user && pnpm run test:language-picker && pnpm run test:self-echo && pnpm run test:update-identity && pnpm run test:update-runner &&pnpm run test:bot-text && pnpm run test:url && pnpm run test:bot-urls && pnpm run test:bot-updates && pnpm run test:bot-announce && pnpm run test:reactions && pnpm run test:llm-reset && pnpm run test:llm-mend && pnpm run test:raw-writes && pnpm run test:worker-safe",
 		"test:log": "tsx tests/log-test.ts",
 		"test:log-ship": "tsx tests/log-ship-test.ts",
 		"test:runtime": "tsx tests/runtime-test.ts",
 		"test:text": "tsx tests/text-test.ts",
+		"test:command": "tsx tests/command-test.ts",
 		"example": "tsx tests/example.ts",
 		"update-crypto": "tsx scripts/update-crypto-list.ts",
 		"update-url-rules": "tsx scripts/update-url-rules.ts",
