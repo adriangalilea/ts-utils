@@ -102,7 +102,11 @@ refused(
 	["send", "x", "--watch"],
 	/--watch is not a flag of eid send: it is eid inbox's/,
 );
-refused(["inbox", "--wach"], /--wach is no flag of eid inbox: --watch\?/);
+refused(["inbox", "--wach"], /^--wach is no flag of eid inbox: --watch\?$/);
+refused(
+	["inbox", "--zzzzzz"],
+	/^--zzzzzz is no flag of eid inbox: eid help inbox$/,
+);
 refused(["inbox", "--dir"], /--dir needs a value: -d, --dir <path>/);
 refused(["inbox", "--watch=yes"], /--watch takes no value/);
 
@@ -122,7 +126,8 @@ refused(["vouches", "maybe"], /"maybe" is not on, off/);
 assert.deepEqual(run("vouches", "off").args, ["off"]);
 
 // a command that does not exist, with a guess
-refused(["sned"], /No command "sned": eid send\?/);
+refused(["sned"], /^No command "sned": eid send\?$/);
+refused(["zzzzzz"], /^No command "zzzzzz": eid help$/);
 
 // a dash and a digit is an argument unless a flag spells it
 {
@@ -183,7 +188,7 @@ refused(["sned"], /No command "sned": eid send\?/);
 		text: "1.2.3\n",
 		data: { version: "1.2.3" },
 	});
-	refused(["help", "nope"], /No command "nope"/);
+	refused(["help", "nope"], /^No command "nope": eid help$/);
 	const data = eid.describe() as {
 		commands: { name: string; usage: string }[];
 	};

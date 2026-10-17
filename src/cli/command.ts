@@ -459,15 +459,18 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 			allowPositionals: true,
 			tokens: true,
 		});
-		const [named, ...rest] = loose.positionals.map(stand);
-		const name = named ?? "help";
-		if (!(name in commands)) {
-			const guess = nearest(name, Object.keys(commands));
-			throw new CliError(
-				`No command "${name}"${guess ? `: ${spec.name} ${guess}?` : ""}. ${spec.name} help`,
+		// A word no command answers: the nearest spelling where one is near, else
+		// where the list is.
+		const noCommand = (word: string) => {
+			const guess = nearest(word, Object.keys(commands));
+			return new CliError(
+				`No command "${word}": ${guess ? `${spec.name} ${guess}?` : `${spec.name} help`}`,
 				"usage",
 			);
-		}
+		};
+		const [named, ...rest] = loose.positionals.map(stand);
+		const name = named ?? "help";
+		if (!(name in commands)) throw noCommand(name);
 
 		const allowed = flagsOf(name);
 		for (const t of loose.tokens) {
@@ -477,10 +480,10 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 			throw new CliError(
 				whose
 					? `${said} is not a flag of ${spec.name} ${name}: it is ${whose.map((w) => `${spec.name} ${w}`).join(", ")}'s`
-					: `${said} is no flag of ${spec.name} ${name}${(() => {
+					: `${said} is no flag of ${spec.name} ${name}: ${(() => {
 							const guess = nearest(t.name, Object.keys(allowed));
-							return guess ? `: --${guess}?` : "";
-						})()}. ${spec.name} help ${name}`,
+							return guess ? `--${guess}?` : `${spec.name} help ${name}`;
+						})()}`,
 				"usage",
 			);
 		}
@@ -534,13 +537,7 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 			const about = asked.help && name !== "help" ? name : rest[0];
 			if (about === undefined)
 				return { kind: "print", text: overview(), data: describe() };
-			if (!(about in commands)) {
-				const guess = nearest(about, Object.keys(commands));
-				throw new CliError(
-					`No command "${about}"${guess ? `: ${guess}?` : ""}. ${spec.name} help`,
-					"usage",
-				);
-			}
+			if (!(about in commands)) throw noCommand(about);
 			const data = (describe().commands as { name: string }[]).find(
 				(c) => c.name === about,
 			);
