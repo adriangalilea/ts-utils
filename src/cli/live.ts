@@ -264,7 +264,7 @@ export function elapsed(since: number): string {
 
 /**
  * The one-liner: animate `label` with a spinner + elapsed time while `fn`
- * runs, persist `✓ label 1.2s` on success, `⨯ label 1.2s message` on failure
+ * runs, persist `✓ label 1.2s` on success, `⨯ label 1.2s` on failure
  * (and rethrow). `fn` receives a setter for relabeling mid-flight:
  * `spinner('connecting 0/4', async (set) => { …; set('connecting 2/4') })`.
  *
@@ -294,8 +294,9 @@ export async function spinner<T>(
 		persist(`${green("✓")} ${current} ${dim(elapsed(start))}`);
 		return v;
 	} catch (e) {
-		const msg = e instanceof Error ? e.message : String(e);
-		persist(`${red("⨯")} ${current} ${dim(elapsed(start))} ${red(msg)}`);
+		// Which step failed and when; the error itself is said once, by whoever
+		// handles it (`main`, for a command).
+		persist(`${red("⨯")} ${current} ${dim(elapsed(start))}`);
 		throw e;
 	}
 }
