@@ -633,6 +633,10 @@ for await (const m of stream) {
 
 `whenFlag(flag, s, edge)` and `deadlineFlag(s)` read the time vocabulary (Time, below) and turn a mistake into a `CliError`.
 
+#### Migrating from 10.11
+
+- `clock.hit()` takes the match's output: `print(m); clock.hit()` becomes `clock.hit(() => print(m))`. A once-watch started its exit asynchronously while a batch kept printing, so a backfill emitted every match; now nothing is emitted once the watch has ended. `clock.ended` says whether it has.
+
 ### Offensive Programming
 
 Fail loud, fail fast. Zero dependencies, works in Node, Deno, Bun, and browsers.
