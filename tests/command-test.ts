@@ -572,7 +572,8 @@ bad(
 	assert.throws(
 		() => hf.parse(["repo"]),
 		(e) =>
-			e instanceof CliError && e.message === 'No command "repo": hf-get help',
+			e instanceof CliError &&
+			e.message === '"repo" is no command and no <repo>: hf-get help',
 	);
 	const anything = program({
 		name: "notify",
@@ -613,6 +614,43 @@ bad(
 			}),
 		/give it args/,
 	);
+}
+
+// no version: none shown, no --version; the environment its own group; a long
+// description folded under its own column
+{
+	const src = program({
+		name: "cal",
+		says: "the calendar",
+		commands: {
+			agenda: {
+				says: "what is coming",
+				flags: {
+					days: {
+						type: "integer",
+						says: "how many days ahead to read, counted from today, with every recurring event expanded into each of its days",
+					},
+				},
+			},
+		},
+		env: [["CAL_ACCOUNT", "the account"]],
+	});
+	const over = stripAnsi(src.overview());
+	assert.match(over, /^ {2}cal {2}the calendar$/m);
+	assert.doesNotMatch(over, /--version/);
+	assert.match(over, /environment\n {4}CAL_ACCOUNT +the account/);
+	assert.throws(
+		() => src.parse(["--version"]),
+		(e) => e instanceof CliError && /--version is no flag/.test(e.message),
+	);
+	const lines = stripAnsi(src.detail("agenda"))
+		.split("\n")
+		.filter((l) => l.includes("--days") || /^ {10,}\S/.test(l));
+	assert.ok(lines.length >= 2, lines.join("\n"));
+	const column = (lines[0] as string).indexOf("how");
+	for (const l of lines.slice(1))
+		assert.equal(l.length - l.trimStart().length, column, l);
+	assert.ok(lines.every((l) => l.length <= 80));
 }
 
 // a required flag: refused when absent, saying what it is for; typed as there

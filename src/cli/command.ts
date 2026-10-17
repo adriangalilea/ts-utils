@@ -79,7 +79,12 @@ export interface CommandSpec {
 
 export interface ProgramSpec {
 	readonly name: string;
-	readonly version: string;
+	/**
+	 * What a release is called, for a program that has releases: it answers
+	 * `--version` and stands beside the name. A program run from its source has
+	 * none to say, so it gives none and has no `--version`.
+	 */
+	readonly version?: string;
 	/** One line, beside the name atop the overview. */
 	readonly says: string;
 	/** Quieter lines under it. */
@@ -199,8 +204,10 @@ const HELP: CommandSpec = {
 	says: "these words, or one command's in full",
 	more: "With --json, every command as data: its arguments, flags, words and what its --json prints.",
 };
-const BUILT_IN: FlagSpecs = {
+const HELP_FLAG: FlagSpecs = {
 	help: { type: "boolean", short: "h", says: "this help" },
+};
+const VERSION_FLAG: FlagSpecs = {
 	version: { type: "boolean", says: "the version" },
 };
 
@@ -235,10 +242,14 @@ const flagText = (name: string, f: FlagSpec) =>
 		f.type === "boolean" ? "" : ` ${placeholderOf(f)}${f.list ? ",…" : ""}`
 	}`;
 
-/** `text` folded to the terminal's width (80 at most, a reading measure), each
- *  line after `indent` spaces. */
-function wrap(text: string, indent: number): string {
-	const room = Math.min(80, process.stdout.columns || 80) - indent;
+/** `text` as lines that end by the terminal's width (80 at most, a reading
+ *  measure) when they start at `column`; never under 30 a line, so a narrow
+ *  terminal folds words rather than letters. */
+function fold(text: string, column: number): string[] {
+	const room = Math.max(
+		30,
+		Math.min(80, process.stdout.columns || 80) - column,
+	);
 	const lines: string[] = [];
 	let line = "";
 	for (const word of text.split(/\s+/)) {
@@ -248,8 +259,19 @@ function wrap(text: string, indent: number): string {
 		} else line = line ? `${line} ${word}` : word;
 	}
 	if (line) lines.push(line);
-	return lines.map((l) => `${" ".repeat(indent)}${l}`).join("\n");
+	return lines;
 }
+
+/** `text` folded, each line after `indent` spaces. */
+const wrap = (text: string, indent: number): string =>
+	fold(text, indent)
+		.map((l) => `${" ".repeat(indent)}${l}`)
+		.join("\n");
+
+/** `left` padded to `column`, then `text` folded so its later lines start under
+ *  its first: a description stays in its column however long. */
+const hang = (left: string, column: number, text: string): string =>
+	`${padEndV(left, column)}${fold(text, column).join(`\n${" ".repeat(column)}`)}`.trimEnd();
 
 const heading = (s: string) => `  ${ui.accent(s)}`;
 
@@ -258,11 +280,11 @@ const heading = (s: string) => `  ${ui.accent(s)}`;
 function aligned(groups: [string, [string, string][]][]): string[] {
 	const column =
 		Math.max(0, ...groups.flatMap(([, rows]) => rows.map(([l]) => width(l)))) +
-		2;
+		6;
 	return groups.flatMap(([title, rows]) => [
 		"",
 		heading(title),
-		...rows.map(([l, r]) => `    ${padEndV(l, column)}${r}`.trimEnd()),
+		...rows.map(([l, r]) => hang(`    ${l}`, column, r)),
 	]);
 }
 
@@ -323,6 +345,8 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 	if ("help" in spec.commands)
 		throw new Error(`cli: "help" is built in, ${spec.name} cannot declare it`);
 	const global = spec.global ?? {};
+	const BUILT_IN: FlagSpecs =
+		spec.version === undefined ? HELP_FLAG : { ...HELP_FLAG, ...VERSION_FLAG };
 	for (const name of Object.keys(BUILT_IN))
 		if (
 			name in global ||
@@ -489,14 +513,24 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 				flagText(n, f),
 				f.says,
 			]),
-			["--version", `this ${spec.name}'s version`],
-			...(spec.env ?? []).map(([n, says]): [string, string] => [n, says]),
+			...(spec.version === undefined
+				? []
+				: [["--version", `this ${spec.name}'s version`] as [string, string]]),
 		];
+		const env: [string, string][] = (spec.env ?? []).map(([n, says]) => [
+			n,
+			says,
+		]);
+		const groups: [string, [string, string][]][] = [
+			...rows,
+			...(always.length ? [["on every command", always] as const] : []),
+			...(env.length ? [["environment", env] as const] : []),
+		].map(([t, r]) => [t, [...r]]);
 		return [
 			"",
-			`  ${ui.head(spec.name)} ${ui.muted(spec.version)}  ${spec.says}`,
+			`  ${ui.head(spec.name)}${spec.version === undefined ? "" : ` ${ui.muted(spec.version)}`}  ${spec.says}`,
 			...(spec.about ?? []).map((l) => `  ${ui.muted(l)}`),
-			...aligned([...rows, ["on every command", always]]),
+			...aligned(groups),
 			"",
 			`  ${ui.muted([`${spec.name} help <command> for one in full`, spec.foot].filter(Boolean).join(" · "))}`,
 			"",
@@ -532,14 +566,17 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 				? [
 						"",
 						heading("flags"),
-						...flags.map(
-							([n, f]) =>
-								`    ${padEndV(flagText(n, f), column)}${f.says}${
+						...flags.map(([n, f]) =>
+							hang(
+								`    ${flagText(n, f)}`,
+								column + 4,
+								`${f.says}${
 									// choices a placeholder hides are said after the words
 									f.choices && f.value
 										? ui.muted(` (${f.choices.join(", ")})`)
 										: ""
 								}${f.required ? ui.muted(" (required)") : ""}`,
+							),
 						),
 					]
 				: []),
@@ -621,19 +658,22 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 			allowPositionals: true,
 			tokens: true,
 		});
-		// A word no command answers: the nearest spelling where one is near, else
-		// where the list is.
-		// The default, when the word is not one a command answers to, too: one
-		// the default would take, but a slip of a command's name, is refused with
-		// both readings.
+		// A word no command answers: the nearest spelling where one is near, with
+		// the default's reading when it claims the word too; else what the word
+		// is not, the default's argument named, and where the list is.
 		const noCommand = (word: string) => {
 			const guess = nearest(word, Object.keys(commands));
 			const d = spec.default;
-			const meant = d?.claims(word)
-				? `, or ${spec.name} ${d.command} ${word}`
-				: "";
+			if (guess)
+				return new CliError(
+					`No command "${word}": ${spec.name} ${guess}?${d?.claims(word) ? `, or ${spec.name} ${d.command} ${word}` : ""}`,
+					"usage",
+				);
+			const takes = d && argsOf(commands[d.command]?.args)[0]?.name;
 			return new CliError(
-				`No command "${word}": ${guess ? `${spec.name} ${guess}?${meant}` : `${spec.name} help`}`,
+				takes
+					? `"${word}" is no command and no <${takes}>: ${spec.name} help`
+					: `No command "${word}": ${spec.name} help`,
 				"usage",
 			);
 		};
