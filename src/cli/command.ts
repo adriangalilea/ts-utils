@@ -40,6 +40,9 @@ export interface FlagSpec {
 	readonly says: string;
 	/** Given again, every value kept in order (a flag with a value only). */
 	readonly multiple?: boolean;
+	/** The command refuses to run without it, and its value is never undefined
+	 *  (a flag with a value only). */
+	readonly required?: boolean;
 }
 
 export type FlagSpecs = { readonly [name: string]: FlagSpec };
@@ -89,9 +92,16 @@ type ValueOf<S extends FlagSpec> = S["multiple"] extends true
 	? One<S>[]
 	: One<S>;
 
-/** A flag absent is `undefined`, never a default: the command says what absent means. */
+type RequiredOf<F extends FlagSpecs> = {
+	[K in keyof F]: F[K]["required"] extends true ? K : never;
+}[keyof F];
+
+/** A flag absent is `undefined`, never a default: the command says what absent
+ *  means. A required flag is always there. */
 export type ValuesOf<F extends FlagSpecs> = {
-	-readonly [K in keyof F]?: ValueOf<F[K]>;
+	-readonly [K in Exclude<keyof F, RequiredOf<F>>]?: ValueOf<F[K]>;
+} & {
+	-readonly [K in RequiredOf<F>]: ValueOf<F[K]>;
 };
 
 /** No flags: an object no key is ever read from. */
@@ -323,6 +333,8 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 				);
 			if (f.type === "boolean" && f.value !== undefined)
 				throw new Error(`cli: --${name}: a boolean flag takes no value`);
+			if (f.type === "boolean" && f.required)
+				throw new Error(`cli: --${name}: a boolean flag is never required`);
 			const seen = every[name];
 			if (
 				seen &&
@@ -424,7 +436,8 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 						"",
 						heading("flags"),
 						...flags.map(
-							([n, f]) => `    ${padEndV(flagText(n, f), column)}${f.says}`,
+							([n, f]) =>
+								`    ${padEndV(flagText(n, f), column)}${f.says}${f.required ? ui.muted(" (required)") : ""}`,
 						),
 					]
 				: []),
@@ -628,6 +641,12 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 					: `${spec.name} ${name} takes no arguments; "${rest[0]}" is one too many`,
 				"usage",
 			);
+		for (const [flag, f] of Object.entries(allowed))
+			if (f.required && !(flag in values))
+				throw new CliError(
+					`${spec.name} ${name} needs ${flagText(flag, f)}: ${f.says}`,
+					"usage",
+				);
 		shape.forEach((a, i) => {
 			const given = a.rest ? rest.slice(i) : rest.slice(i, i + 1);
 			for (const g of given)

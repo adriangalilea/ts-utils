@@ -360,6 +360,57 @@ bad(
 	assert.throws(() => parseWhen("2026-02-30"), /no day/);
 }
 
+// a required flag: refused when absent, saying what it is for; typed as there
+{
+	const mail = program({
+		name: "smail",
+		version: "1",
+		says: "mail",
+		commands: {
+			send: {
+				says: "send",
+				flags: {
+					from: {
+						type: "string",
+						value: "<addr>",
+						required: true,
+						says: "the address to send as, never picked for you",
+					},
+					cc: { type: "string", says: "copy" },
+				},
+			},
+		},
+	});
+	assert.throws(
+		() => mail.parse(["send", "--cc", "x"]),
+		/^CliError: smail send needs --from <addr>: the address to send as, never picked for you$/,
+	);
+	const c = mail.parse(["send", "--from", "a@b.c"]);
+	if (c.kind === "run") {
+		const from: string = c.values.from;
+		const cc: string | undefined = c.values.cc;
+		void [from, cc];
+		assert.equal(from, "a@b.c");
+	}
+	assert.match(
+		stripAnsi(mail.detail("send")),
+		/--from <addr> {2}the address to send as, never picked for you \(required\)/,
+	);
+	assert.throws(
+		() =>
+			program({
+				...base,
+				commands: {
+					a: {
+						says: "a",
+						flags: { x: { type: "boolean", required: true, says: "" } },
+					},
+				},
+			}),
+		/a boolean flag is never required/,
+	);
+}
+
 // run: each command to its own handler, typed by its spec, with one context
 {
 	const tiny = program({
