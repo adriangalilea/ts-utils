@@ -588,6 +588,7 @@ main(async () => {
 ```
 
 - **The parse is node's `parseArgs`**: short flags group (`-wo`, `-wd ~/x`, a flag taking a value last), `--dir=x` works, `--` ends the flags. A dash and a digit that no flag spells (`-5`, `--09-29`) is an argument.
+- **A flag is `boolean`, `string` or `integer`** (a whole number, typed `number`, `--limit lots` refused). A string flag whose `value` names words, `<new|old>`, takes only those. `multiple: true` keeps every value given, in order.
 - **A mistake throws `CliError` (code `usage`) saying what to type**: a flag of another command (`--watch is not a flag of eid send: it is eid inbox's`), a flag of none with the nearest spelling, a missing value, a command misspelt (`No command "sned": eid send?`), and arguments counted from `args`: each `<x>` is needed, each `[x]` may be given, a last `<x...>` takes the rest, `<on|off>` takes only those words.
 - **`help`, `--help`, `-h` and `--version` are built in.** `call.kind === 'print'` carries the text and the same as `data` for `--json`. The overview lists every command in its section and the global flags and `env` in one column; `help <command>` adds `more`, the flags, `examples` and what `json` prints.
 - **The spec is checked as the program starts**: a section missing a command, a short letter meaning two flags (one letter, one flag, across the program), one flag name with two types, `args` that cannot be counted. Each throws on the first run, never on the one command that trips it.

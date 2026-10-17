@@ -46,9 +46,23 @@ const eid = program({
 			says: "a birthday",
 			flags: { one: { type: "boolean", short: "1", says: "best only" } },
 		},
+		ls: {
+			says: "your links",
+			flags: {
+				limit: { type: "integer", says: "at most" },
+				order: { type: "string", value: "<new|old>", says: "which first" },
+				tag: { type: "string", value: "<t>", multiple: true, says: "tagged" },
+				days: {
+					type: "integer",
+					value: "<n>",
+					multiple: true,
+					says: "days",
+				},
+			},
+		},
 	},
 	sections: [
-		["files", ["send", "inbox"]],
+		["files", ["send", "inbox", "ls"]],
 		["card", ["set", "vouches", "bday", "help"]],
 	],
 	env: [["EID_URL", "another e-ID"]],
@@ -139,6 +153,40 @@ refused(["zzzzzz"], /^No command "zzzzzz": eid help$/);
 	assert.deepEqual(e.args, ["balance", "-5"]);
 }
 
+// integers are numbers, a flag's named words are its only values, repeated
+// flags keep every value in order
+{
+	const c = run(
+		"ls",
+		"--limit",
+		"20",
+		"--order=old",
+		"--tag",
+		"a",
+		"--tag",
+		"b",
+	);
+	if (c.command === "ls") {
+		assert.deepEqual(c.values, { limit: 20, order: "old", tag: ["a", "b"] });
+		const n: number | undefined = c.values.limit;
+		const tags: string[] | undefined = c.values.tag;
+		void [n, tags];
+	}
+	const d = run("ls", "--limit", "-5", "--days", "3", "--days", "7");
+	if (d.command === "ls")
+		assert.deepEqual(d.values, { limit: -5, days: [3, 7] });
+	refused(
+		["ls", "--limit", "lots"],
+		/^--limit takes a whole number, not "lots"$/,
+	);
+	refused(
+		["ls", "--limit", "2.5"],
+		/^--limit takes a whole number, not "2\.5"$/,
+	);
+	refused(["ls", "--order", "mid"], /^--order: "mid" is not new, old$/);
+	refused(["ls", "--limit"], /^--limit needs a value: --limit <n>$/);
+}
+
 // help and version print, in every spelling
 {
 	const all = eid.parse([]);
@@ -200,8 +248,13 @@ refused(["zzzzzz"], /^No command "zzzzzz": eid help$/);
 			"eid set <what> <value...>",
 			"eid vouches <on|off>",
 			"eid bday <who> <day>",
+			"eid ls",
 			"eid help [command]",
 		],
+	);
+	assert.match(
+		stripAnsi((eid.parse(["help", "ls"]) as { text: string }).text),
+		/--limit <n> {2,}at most\n {4}--order <new\|old>/,
 	);
 }
 

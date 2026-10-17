@@ -30,13 +30,15 @@ import { CliError } from "./run.js";
 import { padEndV, ui, width } from "./text.js";
 
 export interface FlagSpec {
-	readonly type: "boolean" | "string";
+	/** `integer` is a whole number, refused otherwise, its value a `number`. */
+	readonly type: "boolean" | "string" | "integer";
 	/** One character: `-d` for `--dir`. Grouped as typed: `-wo`, `-wd ~/x`. */
 	readonly short?: string;
-	/** A string flag's value as the help shows it: `<path>`. */
+	/** The value as the help shows it: `<path>`. Words with bars, `<asc|desc>`,
+	 *  are the only values a string flag takes. */
 	readonly value?: string;
 	readonly says: string;
-	/** Given again, every value kept in order (a string flag only). */
+	/** Given again, every value kept in order (a flag with a value only). */
 	readonly multiple?: boolean;
 }
 
@@ -78,11 +80,14 @@ export interface ProgramSpec {
 	readonly foot?: string;
 }
 
-type ValueOf<S extends FlagSpec> = S["type"] extends "boolean"
+type One<S extends FlagSpec> = S["type"] extends "boolean"
 	? boolean
-	: S["multiple"] extends true
-		? string[]
+	: S["type"] extends "integer"
+		? number
 		: string;
+type ValueOf<S extends FlagSpec> = S["multiple"] extends true
+	? One<S>[]
+	: One<S>;
 
 /** A flag absent is `undefined`, never a default: the command says what absent means. */
 export type ValuesOf<F extends FlagSpecs> = {
@@ -167,7 +172,17 @@ function argsOf(args: string | undefined): Arg[] {
 
 /** A flag as the help shows it: `-d, --dir <path>`. */
 const flagText = (name: string, f: FlagSpec) =>
-	`${f.short ? `-${f.short}, ` : ""}--${name}${f.type === "string" ? ` ${f.value ?? "<value>"}` : ""}`;
+	`${f.short ? `-${f.short}, ` : ""}--${name}${
+		f.type === "boolean"
+			? ""
+			: ` ${f.value ?? (f.type === "integer" ? "<n>" : "<value>")}`
+	}`;
+
+/** The only values a string flag takes, where its `value` names them: `<a|b>`. */
+const choicesOf = (f: FlagSpec): string[] | null => {
+	const m = f.type === "string" ? f.value?.match(/^<([^<>]+\|[^<>]+)>$/) : null;
+	return m ? (m[1] as string).split("|") : null;
+};
 
 /** `text` folded to the terminal's width (80 at most, a reading measure), each
  *  line after `indent` spaces. */
@@ -278,8 +293,12 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 					);
 				shorts.set(f.short, name);
 			}
-			if (f.multiple && f.type !== "string")
-				throw new Error(`cli: --${name}: only a string flag is given again`);
+			if (f.multiple && f.type === "boolean")
+				throw new Error(
+					`cli: --${name}: only a flag with a value is given again`,
+				);
+			if (f.type === "boolean" && f.value !== undefined)
+				throw new Error(`cli: --${name}: a boolean flag takes no value`);
 			const seen = every[name];
 			if (
 				seen &&
@@ -441,12 +460,14 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 			return `${held.length - 1}`;
 		});
 
+		// An integer reaches parseArgs as a string and is read as a number after.
 		const options = (flags: FlagSpecs) =>
 			Object.fromEntries(
 				Object.entries(flags).map(([n, f]) => [
 					n,
 					{
-						type: f.type,
+						type:
+							f.type === "boolean" ? ("boolean" as const) : ("string" as const),
 						...(f.short && { short: f.short }),
 						...(f.multiple && { multiple: true }),
 					},
@@ -501,7 +522,7 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 			const flag = said.match(/'(?:-\w, )?--([\w-]+)/)?.[1];
 			const f = flag ? allowed[flag] : undefined;
 			throw new CliError(
-				f && f.type === "string"
+				f && f.type !== "boolean"
 					? `--${flag} needs a value: ${flagText(flag as string, f)}`
 					: f
 						? `--${flag} takes no value`
@@ -509,17 +530,37 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 				"usage",
 			);
 		}
+		// One value as its spec reads it: a whole number for an integer, one of
+		// its words where a string flag names them.
+		const read = (flag: string, raw: string | boolean): unknown => {
+			if (typeof raw === "boolean") return raw;
+			const s = stand(raw);
+			const f = allowed[flag] as FlagSpec;
+			if (f.type === "integer") {
+				if (!/^-?\d+$/.test(s))
+					throw new CliError(
+						`--${flag} takes a whole number, not "${s}"`,
+						"usage",
+					);
+				return Number(s);
+			}
+			const choices = choicesOf(f);
+			if (choices && !choices.includes(s))
+				throw new CliError(
+					`--${flag}: "${s}" is not ${choices.join(", ")}`,
+					"usage",
+				);
+			return s;
+		};
 		// The command's own flags, the built-in ones answered here and left out.
 		const values = Object.fromEntries(
 			Object.entries(strict.values)
 				.filter(([k]) => !(k in BUILT_IN))
 				.map(([k, v]) => [
 					k,
-					typeof v === "string"
-						? stand(v)
-						: Array.isArray(v)
-							? v.map((x) => (typeof x === "string" ? stand(x) : x))
-							: v,
+					Array.isArray(v)
+						? v.map((x) => read(k, x as string | boolean))
+						: read(k, v as string | boolean),
 				]),
 		);
 		const asked = {
