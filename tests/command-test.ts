@@ -537,6 +537,84 @@ bad(
 	);
 }
 
+// a default: a word no command spells, given to it when it claims the word; a
+// slip of a command's name refused all the same, naming both readings
+{
+	const hf = program({
+		name: "hf-get",
+		version: "1",
+		says: "h",
+		commands: {
+			pull: {
+				args: "<repo>",
+				says: "fetch a repo",
+				flags: { rev: { type: "string", says: "a revision" } },
+			},
+			ls: { says: "every repo" },
+		},
+		default: { command: "pull", claims: (w) => w.includes("/") },
+	});
+	const c = hf.parse(["owner/repo", "--rev", "v2"]);
+	assert.deepEqual(c, {
+		kind: "run",
+		command: "pull",
+		args: ["owner/repo"],
+		values: { rev: "v2" },
+	});
+	const named = hf.parse(["pull", "owner/repo"]);
+	assert.equal(named.kind === "run" && named.args[0], "owner/repo");
+	assert.equal(hf.parse(["ls"]).kind === "run" && "ls", "ls");
+	assert.throws(
+		() => hf.parse(["lss"]),
+		(e) =>
+			e instanceof CliError && e.message === 'No command "lss": hf-get ls?',
+	);
+	assert.throws(
+		() => hf.parse(["repo"]),
+		(e) =>
+			e instanceof CliError && e.message === 'No command "repo": hf-get help',
+	);
+	const anything = program({
+		name: "notify",
+		version: "1",
+		says: "n",
+		commands: {
+			send: { args: "<words...>", says: "send it" },
+			stop: { args: "<name>", says: "stop one" },
+		},
+		default: { command: "send", claims: () => true },
+	});
+	const sent = anything.parse(["build", "done"]);
+	assert.equal(sent.kind === "run" && sent.args.join(" "), "build done");
+	assert.throws(
+		() => anything.parse(["stpo"]),
+		(e) =>
+			e instanceof CliError &&
+			e.message === 'No command "stpo": notify stop?, or notify send stpo',
+	);
+	const over = stripAnsi(hf.overview());
+	assert.match(over, /hf-get \[pull\] <repo> {2,}fetch a repo/);
+	assert.equal((hf.describe() as { default: string }).default, "pull");
+	assert.throws(
+		() =>
+			program({
+				...base,
+				commands: { a: { args: "<x>", says: "a" } },
+				default: { command: "nope", claims: () => true },
+			}),
+		/default is "nope", which it does not declare/,
+	);
+	assert.throws(
+		() =>
+			program({
+				...base,
+				commands: { a: { says: "a" } },
+				default: { command: "a", claims: () => true },
+			}),
+		/give it args/,
+	);
+}
+
 // a required flag: refused when absent, saying what it is for; typed as there
 {
 	const mail = program({

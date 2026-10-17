@@ -94,6 +94,18 @@ export interface ProgramSpec {
 	readonly env?: readonly (readonly [string, string])[];
 	/** Said after "<name> help <command> for one in full". */
 	readonly foot?: string;
+	/**
+	 * The command a first word no command spells is given to, as its first
+	 * argument, when `claims` holds for it: `hf-get owner/repo` runs `hf-get pull
+	 * owner/repo`. A word it does not claim is a command misspelt, and so is a
+	 * word it claims that is a slip of a command's name (`lss`): `claims` says
+	 * what the default may take, never which mistakes it hides. The command keeps
+	 * its name, the spelling for scripts and for a word the guard refuses.
+	 */
+	readonly default?: {
+		readonly command: string;
+		readonly claims: (word: string) => boolean;
+	};
 }
 
 type One<S extends FlagSpec> = S["type"] extends "boolean"
@@ -349,6 +361,18 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 		return null;
 	};
 
+	if (spec.default) {
+		const d = commands[spec.default.command];
+		if (!d || spec.default.command === "help")
+			throw new Error(
+				`cli: ${spec.name}'s default is "${spec.default.command}", which it does not declare`,
+			);
+		if (argsOf(d.args).length === 0)
+			throw new Error(
+				`cli: ${spec.name} ${spec.default.command} is the default, so it takes the word as an argument: give it args`,
+			);
+	}
+
 	const flagsOf = (command: string): FlagSpecs => ({
 		...BUILT_IN,
 		...global,
@@ -434,13 +458,18 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 			throw new Error(`cli: ${missing.join(", ")} in no section`);
 	}
 
-	// A command as typed: `discord message|msg <ref>`, its aliases quiet beside it.
+	// A command as typed: `discord message|msg <ref>`, its aliases quiet beside it;
+	// the default's name in brackets, as it may go unsaid: `hf-get [pull] <repo>`.
 	const usageOf = (name: string) => {
 		const c = commands[name];
 		const aliases = c?.aliases?.length
 			? ui.muted(`|${c.aliases.join("|")}`)
 			: "";
-		return `${ui.muted(spec.name)} ${ui.head(name)}${aliases}${c?.args ? ` ${ui.muted(c.args)}` : ""}`;
+		const said =
+			name === spec.default?.command
+				? `${ui.muted("[")}${ui.head(name)}${aliases}${ui.muted("]")}`
+				: `${ui.head(name)}${aliases}`;
+		return `${ui.muted(spec.name)} ${said}${c?.args ? ` ${ui.muted(c.args)}` : ""}`;
 	};
 	const typed = (name: string) =>
 		`${spec.name} ${name}${commands[name]?.args ? ` ${commands[name]?.args}` : ""}`;
@@ -535,6 +564,7 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 		return {
 			name: spec.name,
 			version: spec.version,
+			...(spec.default && { default: spec.default.command }),
 			commands: Object.entries(commands).map(([name, c]) => ({
 				name,
 				usage: typed(name),
@@ -593,16 +623,31 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 		});
 		// A word no command answers: the nearest spelling where one is near, else
 		// where the list is.
+		// The default, when the word is not one a command answers to, too: one
+		// the default would take, but a slip of a command's name, is refused with
+		// both readings.
 		const noCommand = (word: string) => {
 			const guess = nearest(word, Object.keys(commands));
+			const d = spec.default;
+			const meant = d?.claims(word)
+				? `, or ${spec.name} ${d.command} ${word}`
+				: "";
 			return new CliError(
-				`No command "${word}": ${guess ? `${spec.name} ${guess}?` : `${spec.name} help`}`,
+				`No command "${word}": ${guess ? `${spec.name} ${guess}?${meant}` : `${spec.name} help`}`,
 				"usage",
 			);
 		};
 		const words = loose.positionals.map(stand);
-		const found = spelled(words.length ? words : ["help"]);
-		if (!found) throw noCommand(words[0] as string);
+		const first = words[0];
+		const found =
+			spelled(words.length ? words : ["help"]) ??
+			(spec.default &&
+			first !== undefined &&
+			spec.default.claims(first) &&
+			!nearest(first, Object.keys(commands))
+				? { name: spec.default.command, rest: words }
+				: null);
+		if (!found) throw noCommand(first as string);
 		const { name, rest } = found;
 		// Under a command with actions (`invoice create`), an argument a typo away
 		// from an action is the action misspelt, never a value: run as one, `bank
