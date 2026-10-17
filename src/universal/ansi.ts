@@ -49,3 +49,26 @@ export const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
 /** The string minus its ANSI style escapes. */
 export const stripAnsi = (s: string): string => s.replace(ANSI_RE, "");
+
+/**
+ * The house's semantic roles, each as the escape that opens it: what `cli`'s
+ * `ui` paints with whenever it paints. The one map of role to colour, so what
+ * a CLI prints and a page drawing that CLI's output (a terminal on a landing)
+ * cannot disagree.
+ */
+export const ROLES = {
+	head: BOLD,
+	accent: fg(6),
+	muted: DIM,
+	ok: fg(2),
+	warn: fg(3),
+	bad: fg(1),
+	/** ids / refs: de-emphasized */
+	ref: fg(8),
+} as const;
+
+export type Role = keyof typeof ROLES;
+
+/** `s` in a role, always on: for a consumer that renders ANSI whatever stdout is. */
+export const inRole = (role: Role, s: string): string =>
+	`${ROLES[role]}${s}${RESET}`;

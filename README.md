@@ -347,6 +347,18 @@ stripAnsi(styled)                    // the string minus its escapes
 `cli`'s ANSI-aware `width()` / `clip()` measure strings styled with these
 (they share `ANSI_RE`).
 
+The semantic roles live here too, the one map of role to escape that `cli`'s
+`ui` paints with: `ROLES` (`head`, `accent`, `muted`, `ok`, `warn`, `bad`,
+`ref`) and `inRole(role, s)`, always on. A page that draws a CLI's output (a
+terminal on a landing page) writes it in the same roles, so the two cannot
+disagree on a colour.
+
+```typescript
+import { inRole } from '@adriangalilea/utils/ansi'
+
+`${inRole('muted', 'code')} ${inRole('head', 'BCDF-GHJK')}`
+```
+
 ### Time (`time`)
 
 Humanized time — three questions, three functions: how long is a duration

@@ -5,7 +5,7 @@
  * region/spinner) build on these; keeping them here avoids an import cycle.
  */
 
-import { ANSI_RE, BOLD, DIM, fg, RESET } from "../universal/ansi.js";
+import { ANSI_RE, BOLD, DIM, fg, RESET, ROLES } from "../universal/ansi.js";
 
 export { ANSI_RE };
 
@@ -119,13 +119,15 @@ export const padStartV = (s: string, n: number): string =>
 	" ".repeat(Math.max(0, n - width(s))) + s;
 
 /** Semantic palette — use these, not raw colors, so intent stays consistent. */
+/** The semantic palette: each role painted with its escape from `ROLES` (the
+ *  one map, ../universal/ansi), when this process colors at all. */
 export const ui = {
-	head: (s: string) => bold(s),
-	accent: (s: string) => cyan(s),
-	muted: (s: string) => dim(s),
-	ok: (s: string) => green(s),
-	warn: (s: string) => yellow(s),
-	bad: (s: string) => red(s),
+	head: paint(ROLES.head),
+	accent: paint(ROLES.accent),
+	muted: paint(ROLES.muted),
+	ok: paint(ROLES.ok),
+	warn: paint(ROLES.warn),
+	bad: paint(ROLES.bad),
 	/** ids / refs — de-emphasized monospace-ish */
-	ref: (s: string) => gray(s),
+	ref: paint(ROLES.ref),
 };
