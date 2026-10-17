@@ -86,6 +86,18 @@ const refused = (argv: string[], like: RegExp) =>
 			e instanceof CliError && e.code === "usage" && like.test(e.message),
 		`${argv.join(" ")} should be refused like ${like}`,
 	);
+/** The same refusal, for any program. */
+const refused2 = (
+	p: { parse(a: string[]): unknown },
+	argv: string[],
+	like: RegExp,
+) =>
+	assert.throws(
+		() => p.parse(argv),
+		(e: unknown) =>
+			e instanceof CliError && e.code === "usage" && like.test(e.message),
+		`${argv.join(" ")} should be refused like ${like}`,
+	);
 
 // grouping, values glued or spaced, --x=v, flags anywhere, -- ends the flags
 {
@@ -407,6 +419,76 @@ bad(
 	assert.throws(() => parseWhen("soon"), /can't read time "soon"/);
 	assert.throws(() => parseWhen("25:00"), /no time of day/);
 	assert.throws(() => parseWhen("2026-02-30"), /no day/);
+}
+
+// a name of words: the longest the leading words spell, each its own flags
+{
+	const bank = program({
+		name: "bank",
+		version: "1",
+		says: "b",
+		commands: {
+			invoice: {
+				args: "<number>",
+				says: "one invoice",
+				flags: { json: { type: "boolean", says: "j" } },
+			},
+			"invoice create": {
+				says: "a draft",
+				flags: { amount: { type: "string", required: true, says: "how much" } },
+			},
+			"invoice cancel": {
+				args: "<number>",
+				says: "burn it",
+				flags: { confirm: { type: "boolean", says: "c" } },
+			},
+		},
+	});
+	const show = bank.parse(["invoice", "F-12", "--json"]);
+	assert.deepEqual(show.kind === "run" && [show.command, show.args], [
+		"invoice",
+		["F-12"],
+	]);
+	const make = bank.parse(["invoice", "create", "--amount", "100"]);
+	assert.deepEqual(make.kind === "run" && [make.command, make.values], [
+		"invoice create",
+		{ amount: "100" },
+	]);
+	const burn = bank.parse(["invoice", "--confirm", "cancel", "F-12"]);
+	assert.deepEqual(burn.kind === "run" && [burn.command, burn.args], [
+		"invoice cancel",
+		["F-12"],
+	]);
+	refused2(
+		bank,
+		["invoice", "create", "--json"],
+		/--json is not a flag of bank invoice create: it is bank invoice's/,
+	);
+	refused2(
+		bank,
+		["invoice", "create"],
+		/bank invoice create needs --amount <value>: how much/,
+	);
+	// help of a name lists what is under it; help of a two-word name is that one
+	const h = stripAnsi(
+		(bank.parse(["help", "invoice"]) as { text: string }).text,
+	);
+	assert.match(
+		h,
+		/commands\n {4}bank invoice create {2,}a draft\n {4}bank invoice cancel <number> {2,}burn it/,
+	);
+	const h2 = stripAnsi(
+		(bank.parse(["invoice", "cancel", "--help"]) as { text: string }).text,
+	);
+	assert.match(h2, /bank invoice cancel <number>\n {2}burn it/);
+	const h3 = stripAnsi(
+		(bank.parse(["help", "invoice", "cancel"]) as { text: string }).text,
+	);
+	assert.equal(h3, h2);
+	assert.throws(
+		() => program({ ...base, commands: { "a  b": { says: "a" } } }),
+		/one space apart/,
+	);
 }
 
 // aliases: answered as the command itself, shown beside it, each word one command

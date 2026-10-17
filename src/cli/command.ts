@@ -307,7 +307,11 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 
 	// Every word a command answers to, its name and its aliases, each meaning one.
 	const canonical = new Map<string, string>();
-	for (const [name, c] of Object.entries(commands))
+	for (const [name, c] of Object.entries(commands)) {
+		if (!/^[a-z][a-z0-9-]*( [a-z][a-z0-9-]*)*$/.test(name))
+			throw new Error(
+				`cli: command "${name}": words of lower case, digits and hyphens, one space apart`,
+			);
 		for (const word of [name, ...(c.aliases ?? [])]) {
 			const had = canonical.get(word);
 			if (had)
@@ -316,6 +320,19 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 				);
 			canonical.set(word, name);
 		}
+	}
+	// A name may be words (`invoice create`): the leading words of argv spell the
+	// longest one they can, so `invoice create` wins over `invoice` with an argument.
+	const mostWords = Math.max(
+		...[...canonical.keys()].map((k) => k.split(" ").length),
+	);
+	const spelled = (words: readonly string[]) => {
+		for (let k = Math.min(words.length, mostWords); k >= 1; k--) {
+			const name = canonical.get(words.slice(0, k).join(" "));
+			if (name) return { name, rest: words.slice(k) };
+		}
+		return null;
+	};
 
 	const flagsOf = (command: string): FlagSpecs => ({
 		...BUILT_IN,
@@ -449,11 +466,24 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 		const flags = Object.entries(c.flags ?? {});
 		const column =
 			Math.max(0, ...flags.map(([n, f]) => width(flagText(n, f)))) + 2;
+		// The commands whose name begins with this one's: `invoice create` under `invoice`.
+		const under = Object.keys(commands).filter((n) => n.startsWith(`${name} `));
 		return [
 			"",
 			`  ${usageOf(name)}`,
 			`  ${c.says}`,
 			...(c.more ? ["", wrap(c.more, 2)] : []),
+			...(under.length
+				? aligned([
+						[
+							"commands",
+							under.map((n): [string, string] => [
+								usageOf(n),
+								commands[n]?.says ?? "",
+							]),
+						],
+					])
+				: []),
 			...(flags.length
 				? [
 						"",
@@ -555,9 +585,10 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 				"usage",
 			);
 		};
-		const [named, ...rest] = loose.positionals.map(stand);
-		const name = canonical.get(named ?? "help");
-		if (name === undefined) throw noCommand(named as string);
+		const words = loose.positionals.map(stand);
+		const found = spelled(words.length ? words : ["help"]);
+		if (!found) throw noCommand(words[0] as string);
+		const { name, rest } = found;
 
 		const allowed = flagsOf(name);
 		for (const t of loose.tokens) {
@@ -648,11 +679,10 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 				data: { version: spec.version },
 			};
 		if (asked.help || name === "help") {
-			const asking = asked.help && name !== "help" ? name : rest[0];
-			if (asking === undefined)
+			if (!(asked.help && name !== "help") && rest.length === 0)
 				return { kind: "print", text: overview(), data: describe() };
-			const about = canonical.get(asking);
-			if (about === undefined) throw noCommand(asking);
+			const about = asked.help && name !== "help" ? name : spelled(rest)?.name;
+			if (about === undefined) throw noCommand(rest[0] as string);
 			const data = (describe().commands as { name: string }[]).find(
 				(c) => c.name === about,
 			);
