@@ -52,6 +52,24 @@ export const ANSI_RE = /\x1b\[[0-9;]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)/g;
 /** The string minus its ANSI escapes, styles and hyperlinks (their words stay). */
 export const stripAnsi = (s: string): string => s.replace(ANSI_RE, "");
 
+/**
+ * What the environment says about colour, before any TTY is asked: true forced
+ * on, false forced off, undefined for the TTY to decide. Node's own rule, so a
+ * program reads it as node does: `FORCE_COLOR` decides when set (`0` or `false`
+ * off, anything else on), then `NO_COLOR` turns it off, as does `TERM=dumb`.
+ * Takes the values rather than reading them: this module reads no environment.
+ */
+export function colorAsked(env: {
+	FORCE_COLOR?: string;
+	NO_COLOR?: string;
+	TERM?: string;
+}): boolean | undefined {
+	if (env.FORCE_COLOR !== undefined)
+		return env.FORCE_COLOR !== "0" && env.FORCE_COLOR !== "false";
+	if (env.NO_COLOR || env.TERM === "dumb") return false;
+	return undefined;
+}
+
 /** `text` as a hyperlink to `url` (OSC 8), always on: a terminal that knows the
  *  escape makes the words clickable, one that does not shows the words alone. */
 export function link(text: string, url: string): string {

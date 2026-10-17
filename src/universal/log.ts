@@ -97,7 +97,7 @@
 
 import { assert, panic, SourcedError } from "../offensive.js";
 import { runtime } from "../runtime.js";
-import { BOLD, DIM, fg, RESET } from "./ansi.js";
+import { BOLD, colorAsked, DIM, fg, RESET } from "./ansi.js";
 
 // --- the wire format -------------------------------------------------------
 
@@ -363,11 +363,15 @@ function service(): string {
 }
 
 function colorEnabled(): boolean {
-	if (runtime.env("NO_COLOR")) return false;
-	if (runtime.env("FORCE_COLOR")) return true;
+	const asked = colorAsked({
+		FORCE_COLOR: runtime.env("FORCE_COLOR"),
+		NO_COLOR: runtime.env("NO_COLOR"),
+		TERM: runtime.env("TERM"),
+	});
+	if (asked !== undefined) return asked;
 	if (sink === "browser") return true;
 	if (sink === "worker") return false;
-	return runtime.stderr.isTTY && runtime.env("TERM") !== "dumb";
+	return runtime.stderr.isTTY;
 }
 
 // --- ids and traceparent ---------------------------------------------------

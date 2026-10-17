@@ -8,6 +8,7 @@
 import {
 	ANSI_RE,
 	BOLD,
+	colorAsked,
 	DIM,
 	fg,
 	link as osc8,
@@ -22,11 +23,13 @@ export { ANSI_RE };
 // so color requires BOTH to be TTYs: any redirection means some cli string
 // may land in a file, and a file never gets escapes. NO_COLOR / FORCE_COLOR
 // override. `ansi` stays the always-on vocabulary underneath.
-const colorEnabled: boolean = process.env.FORCE_COLOR
-	? true
-	: process.env.NO_COLOR || process.env.TERM === "dumb"
-		? false
-		: process.stdout.isTTY === true && process.stderr.isTTY === true;
+const colorEnabled: boolean =
+	colorAsked({
+		FORCE_COLOR: process.env.FORCE_COLOR,
+		NO_COLOR: process.env.NO_COLOR,
+		TERM: process.env.TERM,
+	}) ??
+	(process.stdout.isTTY === true && process.stderr.isTTY === true);
 
 const paint = (open: string) =>
 	colorEnabled

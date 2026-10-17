@@ -6,7 +6,7 @@
  */
 import { strict as assert } from "node:assert";
 import { clip, width } from "../src/cli/text.js";
-import { link as osc8, stripAnsi } from "../src/universal/ansi.js";
+import { colorAsked, link as osc8, stripAnsi } from "../src/universal/ansi.js";
 
 // width: terminal cells per grapheme, not code points
 assert.equal(width("hello"), 5);
@@ -44,5 +44,15 @@ assert.equal(
 	"\x1b]8;;https://eid.to/ada\x1b\\eid.…\x1b]8;;\x1b\\\x1b[0m",
 );
 assert.throws(() => osc8("x", "https://a\x1b]8;;b"), /control character/);
+
+// colorAsked: node's rule, FORCE_COLOR deciding when set
+assert.equal(colorAsked({}), undefined);
+assert.equal(colorAsked({ FORCE_COLOR: "1" }), true);
+assert.equal(colorAsked({ FORCE_COLOR: "" }), true);
+assert.equal(colorAsked({ FORCE_COLOR: "0" }), false);
+assert.equal(colorAsked({ FORCE_COLOR: "false" }), false);
+assert.equal(colorAsked({ FORCE_COLOR: "1", NO_COLOR: "1" }), true);
+assert.equal(colorAsked({ NO_COLOR: "1" }), false);
+assert.equal(colorAsked({ TERM: "dumb" }), false);
 
 console.log("✓ text-test: width/clip hold");
