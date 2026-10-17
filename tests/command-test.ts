@@ -470,6 +470,15 @@ bad(
 		["invoice", "create"],
 		/bank invoice create needs --amount <value>: how much/,
 	);
+	// an action misspelt is refused, never run as the parent with an argument
+	refused2(
+		bank,
+		["invoice", "crate", "--amount", "1"],
+		/^bank invoice crate: no such action — bank invoice create\?$/,
+	);
+	refused2(bank, ["invoice", "cancle", "F-12"], /bank invoice cancel\?$/);
+	const real = bank.parse(["invoice", "F-2026-005"]);
+	assert.deepEqual(real.kind === "run" && real.args, ["F-2026-005"]);
 	// help of a name lists what is under it; help of a two-word name is that one
 	const h = stripAnsi(
 		(bank.parse(["help", "invoice"]) as { text: string }).text,

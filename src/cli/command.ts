@@ -589,6 +589,21 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 		const found = spelled(words.length ? words : ["help"]);
 		if (!found) throw noCommand(words[0] as string);
 		const { name, rest } = found;
+		// Under a command with actions (`invoice create`), an argument a typo away
+		// from an action is the action misspelt, never a value: run as one, `bank
+		// invoice crate` looked up an invoice named "crate" and asked for credentials.
+		const actions = Object.keys(commands)
+			.filter(
+				(n) =>
+					n.startsWith(`${name} `) && !n.slice(name.length + 1).includes(" "),
+			)
+			.map((n) => n.slice(name.length + 1));
+		const meant = rest[0] === undefined ? undefined : nearest(rest[0], actions);
+		if (meant)
+			throw new CliError(
+				`${spec.name} ${name} ${rest[0]}: no such action — ${spec.name} ${name} ${meant}?`,
+				"usage",
+			);
 
 		const allowed = flagsOf(name);
 		for (const t of loose.tokens) {
