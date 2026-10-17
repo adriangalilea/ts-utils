@@ -139,6 +139,10 @@ refused(
 	["inbox", "--zzzzzz"],
 	/^--zzzzzz is no flag of eid inbox: eid help inbox$/,
 );
+// a guess only for a slip: one edit in a short word, a swap counting as one
+refused(["inbox", "-x"], /^-x is no flag of eid inbox: eid help inbox$/);
+refused(["sned"], /^No command "sned": eid send\?$/);
+refused(["inbox", "--wacth"], /--watch\?$/);
 refused(["inbox", "--dir"], /--dir needs a value: -d, --dir <path>/);
 refused(["inbox", "--watch=yes"], /--watch takes no value/);
 
