@@ -225,7 +225,8 @@ export interface ProviderConfig {
 	maxTokens?: number;
 	/** Per-model temperature overrides, keyed by model name. */
 	temperatures?: Record<string, number>;
-	/** Fallback temperature for models not in `temperatures`. */
+	/** Fallback temperature for models not in `temperatures`. With neither, no
+	 *  temperature is sent: the model samples its own way (Claude 5.5 takes none). */
 	temperature?: number;
 	/** Operator kill switch: skip this declaration entirely. */
 	disabled?: boolean;
@@ -451,7 +452,6 @@ export interface ChatRequest {
 }
 
 const DEFAULT_MAX_TOKENS = 4096;
-const DEFAULT_TEMPERATURE = 0.7;
 const REQUEST_TIMEOUT_MS = 120_000;
 
 // ─── Circuit breaker ───────────────────────────────────────────────
@@ -783,6 +783,7 @@ export class Llm {
 			const instructions = [req.instructions, stated]
 				.filter((t) => t)
 				.join("\n\n");
+			const temperature = resolveTemperature(provider);
 			const result = streamText({
 				model: this.modelFor(provider, req),
 				...(req.prompt !== undefined
@@ -795,7 +796,7 @@ export class Llm {
 				...(req.schema
 					? { output: Output.object({ schema: req.schema }) }
 					: {}),
-				temperature: resolveTemperature(provider),
+				...(temperature !== undefined ? { temperature } : {}),
 				maxOutputTokens: resolveMaxTokens(provider, req.maxTokens),
 				maxRetries: 0, // retry policy lives in the failover loop, not the transport
 				// The failover loop consumes error parts and reports once per attempt;
@@ -1217,15 +1218,15 @@ function healthState(
 	return now >= health.recoveryAt + jitter ? "available" : "probe-deferred";
 }
 
-function resolveTemperature(provider: ProviderConfig): number {
+function resolveTemperature(provider: ProviderConfig): number | undefined {
 	const preferred = [
 		provider.temperatures?.[provider.defaultModel],
 		provider.temperature,
 	].find((t): t is number => typeof t === "number" && Number.isFinite(t));
-	const base = preferred ?? DEFAULT_TEMPERATURE;
+	if (preferred === undefined) return undefined;
 	// Anthropic accepts [0, 1]; everything OpenAI-shaped accepts [0, 2].
 	const ceiling = provider.type === "anthropic" ? 1 : 2;
-	return Math.max(0, Math.min(base, ceiling));
+	return Math.max(0, Math.min(preferred, ceiling));
 }
 
 function resolveMaxTokens(

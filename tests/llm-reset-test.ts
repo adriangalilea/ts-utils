@@ -659,6 +659,12 @@ const ACTING = {
 	pass(
 		"reasoning reaches the server per call, and a step's for that step alone",
 	);
+	assert.deepEqual(
+		requests.map((r) => "temperature" in r),
+		[false, false],
+		"a provider that configures no temperature sent one",
+	);
+	pass("no temperature configured, none sent");
 }
 
 // The anthropic dialect: every request marks its prompt for the cache, and a step that
