@@ -625,8 +625,9 @@ const clock = new WatchClock({
 })
 for await (const m of stream) {
   if (!matchFlag(values.match ?? '').test(m.subject)) continue
-  console.log(JSON.stringify(m))
-  clock.hit()   // ends a --once watch, after stdout drains
+  // emits the match unless the watch has ended, then counts it: a --once watch ends
+  // here (after stdout drains), and a batch delivered at once still yields one match
+  clock.hit(() => console.log(JSON.stringify(m)))
 }
 ```
 

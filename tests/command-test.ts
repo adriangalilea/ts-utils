@@ -5,6 +5,7 @@
  *   pnpm test:command
  */
 import { strict as assert } from "node:assert";
+import { spawnSync } from "node:child_process";
 import { CliError, program } from "../src/cli/index.js";
 import { stripAnsi } from "../src/universal/ansi.js";
 import { localDay, parseDeadline, parseWhen } from "../src/universal/time.js";
@@ -648,6 +649,33 @@ bad(
 		shared.run({ get: handlers.get }, ["get", "a"]),
 		/t's handlers: none for ls/,
 	);
+}
+
+// the watch contract: under --once a batch delivered at once yields exactly one
+// match and exit 0; at a deadline with nothing, exit 2. The clock ends the
+// process, so each runs in a child.
+{
+	const watch = (script: string) =>
+		spawnSync(
+			process.execPath,
+			["--import", "tsx", "--input-type=module", "-e", script],
+			{ encoding: "utf8", cwd: import.meta.dirname },
+		);
+	const once = watch(`
+		import { WatchClock } from "../src/cli/watch.ts";
+		const clock = new WatchClock({ once: true, cleanup: () => {} });
+		for (const m of ["a", "b", "c"]) clock.hit(() => console.log(m));
+		await new Promise(() => {});
+	`);
+	assert.equal(once.status, 0, once.stderr);
+	assert.equal(once.stdout, "a\n");
+	const none = watch(`
+		import { WatchClock } from "../src/cli/watch.ts";
+		new WatchClock({ once: true, until: new Date(Date.now() + 300), cleanup: () => {} });
+		await new Promise(() => {});
+	`);
+	assert.equal(none.status, 2, none.stderr);
+	assert.match(none.stderr, /deadline reached: no match/);
 }
 
 console.log("command: ok");

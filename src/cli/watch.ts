@@ -112,9 +112,24 @@ export class WatchClock {
 		}
 	}
 
-	hit(): void {
+	/** Whether the watch has ended (its first match under --once, its deadline,
+	 *  a failure): nothing more is emitted. */
+	get ended(): boolean {
+		return this.finishing;
+	}
+
+	/**
+	 * A match: `emit` writes it, then the watch counts it, a --once watch ending
+	 * there. Once the watch has ended nothing is emitted, so a batch delivered in
+	 * one go (a backfill) yields exactly one match under --once. False when it
+	 * was not emitted.
+	 */
+	hit(emit: () => void): boolean {
+		if (this.finishing) return false;
+		emit();
 		this.matched++;
 		if (this.opts.once) void this.finish(0);
+		return true;
 	}
 
 	async finish(code: number): Promise<void> {
