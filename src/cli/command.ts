@@ -62,6 +62,8 @@ export interface CommandSpec {
 	readonly examples?: readonly string[];
 	/** What `--json` prints. */
 	readonly json?: string;
+	/** Shorter names it answers to (`msg` for `message`), shown beside it. */
+	readonly aliases?: readonly string[];
 }
 
 export interface ProgramSpec {
@@ -300,6 +302,18 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 				`cli: --${name} is built in, ${spec.name} cannot declare it`,
 			);
 
+	// Every word a command answers to, its name and its aliases, each meaning one.
+	const canonical = new Map<string, string>();
+	for (const [name, c] of Object.entries(commands))
+		for (const word of [name, ...(c.aliases ?? [])]) {
+			const had = canonical.get(word);
+			if (had)
+				throw new Error(
+					`cli: ${spec.name}: "${word}" names both ${had} and ${name}`,
+				);
+			canonical.set(word, name);
+		}
+
 	const flagsOf = (command: string): FlagSpecs => ({
 		...BUILT_IN,
 		...global,
@@ -383,9 +397,13 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 			throw new Error(`cli: ${missing.join(", ")} in no section`);
 	}
 
+	// A command as typed: `discord message|msg <ref>`, its aliases quiet beside it.
 	const usageOf = (name: string) => {
-		const args = commands[name]?.args;
-		return `${ui.muted(spec.name)} ${ui.head(name)}${args ? ` ${ui.muted(args)}` : ""}`;
+		const c = commands[name];
+		const aliases = c?.aliases?.length
+			? ui.muted(`|${c.aliases.join("|")}`)
+			: "";
+		return `${ui.muted(spec.name)} ${ui.head(name)}${aliases}${c?.args ? ` ${ui.muted(c.args)}` : ""}`;
 	};
 	const typed = (name: string) =>
 		`${spec.name} ${name}${commands[name]?.args ? ` ${commands[name]?.args}` : ""}`;
@@ -465,6 +483,7 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 			commands: Object.entries(commands).map(([name, c]) => ({
 				name,
 				usage: typed(name),
+				...(c.aliases?.length && { aliases: c.aliases }),
 				says: c.says,
 				flags: flagsData(c.flags),
 				...(c.more && { more: c.more }),
@@ -527,8 +546,8 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 			);
 		};
 		const [named, ...rest] = loose.positionals.map(stand);
-		const name = named ?? "help";
-		if (!(name in commands)) throw noCommand(name);
+		const name = canonical.get(named ?? "help");
+		if (name === undefined) throw noCommand(named as string);
 
 		const allowed = flagsOf(name);
 		for (const t of loose.tokens) {
@@ -612,10 +631,11 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 				data: { version: spec.version },
 			};
 		if (asked.help || name === "help") {
-			const about = asked.help && name !== "help" ? name : rest[0];
-			if (about === undefined)
+			const asking = asked.help && name !== "help" ? name : rest[0];
+			if (asking === undefined)
 				return { kind: "print", text: overview(), data: describe() };
-			if (!(about in commands)) throw noCommand(about);
+			const about = canonical.get(asking);
+			if (about === undefined) throw noCommand(asking);
 			const data = (describe().commands as { name: string }[]).find(
 				(c) => c.name === about,
 			);

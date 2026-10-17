@@ -360,6 +360,38 @@ bad(
 	assert.throws(() => parseWhen("2026-02-30"), /no day/);
 }
 
+// aliases: answered as the command itself, shown beside it, each word one command
+{
+	const dc = program({
+		name: "discord",
+		version: "1",
+		says: "d",
+		commands: {
+			message: { args: "<ref>", says: "one message", aliases: ["msg"] },
+			attachment: { args: "<ref>", says: "a file", aliases: ["att"] },
+		},
+	});
+	const c = dc.parse(["msg", "123"]);
+	assert.equal(c.kind === "run" && c.command, "message");
+	const h = dc.parse(["help", "att"]);
+	assert.match(
+		stripAnsi((h as { text: string }).text),
+		/discord attachment\|att <ref>/,
+	);
+	assert.match(
+		stripAnsi(dc.overview()),
+		/discord message\|msg <ref> {2,}one message/,
+	);
+	assert.throws(
+		() =>
+			program({
+				...base,
+				commands: { a: { says: "a", aliases: ["b"] }, b: { says: "b" } },
+			}),
+		/"b" names both a and b/,
+	);
+}
+
 // a required flag: refused when absent, saying what it is for; typed as there
 {
 	const mail = program({
