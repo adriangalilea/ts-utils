@@ -6,6 +6,7 @@
  */
 import { strict as assert } from "node:assert";
 import { clip, width } from "../src/cli/text.js";
+import { link as osc8, stripAnsi } from "../src/universal/ansi.js";
 
 // width: terminal cells per grapheme, not code points
 assert.equal(width("hello"), 5);
@@ -33,5 +34,15 @@ assert.equal(
 	clip("\x1b[36mhello\x1b[0m world", 8),
 	"\x1b[36mhello\x1b[0m w…\x1b[0m",
 );
+
+// a hyperlink takes the cells of its words alone, and a clip keeps it closed
+const linked = osc8("eid.to/ada", "https://eid.to/ada");
+assert.equal(width(linked), 10);
+assert.equal(stripAnsi(`from ${linked}`), "from eid.to/ada");
+assert.equal(
+	clip(linked, 5),
+	"\x1b]8;;https://eid.to/ada\x1b\\eid.…\x1b]8;;\x1b\\\x1b[0m",
+);
+assert.throws(() => osc8("x", "https://a\x1b]8;;b"), /control character/);
 
 console.log("✓ text-test: width/clip hold");

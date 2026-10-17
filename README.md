@@ -341,7 +341,8 @@ import { fg, bg, rgb, BOLD, RESET, stripAnsi, ANSI_RE } from '@adriangalilea/uti
 fg(196)                              // red foreground
 bg(238)                              // dark gray background
 rgb(173, 127, 168)                   // 24-bit, when the consumer renders it
-stripAnsi(styled)                    // the string minus its escapes
+stripAnsi(styled)                    // the string minus its escapes (hyperlinks too)
+link('docs', 'https://example.com')  // OSC 8 hyperlink, always on
 ```
 
 `cli`'s ANSI-aware `width()` / `clip()` measure strings styled with these
@@ -477,6 +478,10 @@ kv([['name', 'Ada'], ['email', 'ada@x.com']], { indent: 2 })
 tree('Ada', ['email: ada@x.com', 'phone: +1…'])   // labeled node + children
 indent(block, 4)                                    // indent every line
 clip('a very long value', 10)                       // "a very lo…" (ANSI-aware — styled input stays styled)
+
+// A clickable link (OSC 8) where this process colors; the words alone in a pipe.
+// Measured as its words, so a linked cell aligns like any other.
+link('eid.to/ada', 'https://eid.to/ada')
 ```
 
 Run the demo: `FORCE_COLOR=1 pnpm tsx tests/cli-demo.ts`.

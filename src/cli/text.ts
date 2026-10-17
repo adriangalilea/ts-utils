@@ -5,7 +5,15 @@
  * region/spinner) build on these; keeping them here avoids an import cycle.
  */
 
-import { ANSI_RE, BOLD, DIM, fg, RESET, ROLES } from "../universal/ansi.js";
+import {
+	ANSI_RE,
+	BOLD,
+	DIM,
+	fg,
+	link as osc8,
+	RESET,
+	ROLES,
+} from "../universal/ansi.js";
 
 export { ANSI_RE };
 
@@ -33,8 +41,14 @@ export const yellow = paint(fg(3));
 export const cyan = paint(fg(6));
 export const gray = paint(fg(8));
 
+/** `text` linked to `url` where this process colors (a terminal on both streams):
+ *  clickable in one that knows hyperlinks, the words alone everywhere else, and
+ *  the words alone in a pipe or a file. Measured as its words (`width`, `clip`). */
+export const link = (text: string, url: string): string =>
+	colorEnabled ? osc8(text, url) : text;
+
 // biome-ignore lint/suspicious/noControlCharactersInRegex: split on ANSI escapes, keeping them
-const ANSI_SPLIT_RE = /(\x1b\[[0-9;]*m)/;
+const ANSI_SPLIT_RE = /(\x1b\[[0-9;]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\))/;
 
 // Grapheme clusters, not code points: what the terminal renders as ONE symbol
 // (ZWJ emoji 👨‍👩‍👧, flags 🇪🇸, skin tones) is several code points — counting

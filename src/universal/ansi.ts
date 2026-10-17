@@ -44,11 +44,24 @@ export function rgb(r: number, g: number, b: number): string {
 	return `\x1b[38;2;${r};${g};${b}m`;
 }
 
+// The escapes that take no cells: a style (`ESC [ … m`) and a hyperlink's open and
+// close (`ESC ] 8 ; ; url ST`, ST being `ESC \` or BEL).
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escapes is the point
-export const ANSI_RE = /\x1b\[[0-9;]*m/g;
+export const ANSI_RE = /\x1b\[[0-9;]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)/g;
 
-/** The string minus its ANSI style escapes. */
+/** The string minus its ANSI escapes, styles and hyperlinks (their words stay). */
 export const stripAnsi = (s: string): string => s.replace(ANSI_RE, "");
+
+/** `text` as a hyperlink to `url` (OSC 8), always on: a terminal that knows the
+ *  escape makes the words clickable, one that does not shows the words alone. */
+export function link(text: string, url: string): string {
+	assert(
+		[...url].every((c) => c.charCodeAt(0) >= 0x20),
+		"link: a url with a control character:",
+		url,
+	);
+	return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
+}
 
 /**
  * The house's semantic roles, each as the escape that opens it: what `cli`'s

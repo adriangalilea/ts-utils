@@ -24,7 +24,7 @@
 import { padEndV, padStartV, ui, width } from "./text.js";
 
 export * from "./live.js";
-export { clip, ui, width } from "./text.js";
+export { clip, link, ui, width } from "./text.js";
 
 export interface TableOpts {
 	/** Column headers (bolded). */
