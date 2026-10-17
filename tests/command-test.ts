@@ -641,7 +641,17 @@ bad(
 	assert.match(over, /environment\n {4}CAL_ACCOUNT +the account/);
 	assert.throws(
 		() => src.parse(["--version"]),
-		(e) => e instanceof CliError && /--version is no flag/.test(e.message),
+		(e) =>
+			e instanceof CliError &&
+			e.message ===
+				"cal has no version: it runs from its source, never released",
+	);
+	// no command typed: the program refuses the flag, never an unsaid `help`
+	assert.throws(
+		() => src.parse(["--frob"]),
+		(e) =>
+			e instanceof CliError &&
+			e.message === "--frob is no flag of cal: cal help",
 	);
 	const lines = stripAnsi(src.detail("agenda"))
 		.split("\n")

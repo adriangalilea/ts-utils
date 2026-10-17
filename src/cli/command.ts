@@ -529,7 +529,7 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 		return [
 			"",
 			`  ${ui.head(spec.name)}${spec.version === undefined ? "" : ` ${ui.muted(spec.version)}`}  ${spec.says}`,
-			...(spec.about ?? []).map((l) => `  ${ui.muted(l)}`),
+			...(spec.about ?? []).map((l) => ui.muted(wrap(l, 2))),
 			...aligned(groups),
 			"",
 			`  ${ui.muted([`${spec.name} help <command> for one in full`, spec.foot].filter(Boolean).join(" · "))}`,
@@ -706,17 +706,29 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 			);
 
 		const allowed = flagsOf(name);
+		// No command typed reads as `help`, which the person never said: a flag
+		// is then refused by the program, and the list is `help`.
+		const typedName = words.length ? `${spec.name} ${name}` : spec.name;
+		const list = words.length
+			? `${spec.name} help ${name}`
+			: `${spec.name} help`;
 		for (const t of loose.tokens) {
 			if (t.kind !== "option" || t.name in allowed) continue;
 			const said = t.rawName;
 			const whose = owners[t.name];
+			if (whose)
+				throw new CliError(
+					`${said} is not a flag of ${typedName}: it is ${whose.map((w) => `${spec.name} ${w}`).join(", ")}'s`,
+					"usage",
+				);
+			if (t.name === "version" && spec.version === undefined)
+				throw new CliError(
+					`${spec.name} has no version: it runs from its source, never released`,
+					"usage",
+				);
+			const guess = nearest(t.name, Object.keys(allowed));
 			throw new CliError(
-				whose
-					? `${said} is not a flag of ${spec.name} ${name}: it is ${whose.map((w) => `${spec.name} ${w}`).join(", ")}'s`
-					: `${said} is no flag of ${spec.name} ${name}: ${(() => {
-							const guess = nearest(t.name, Object.keys(allowed));
-							return guess ? `--${guess}?` : `${spec.name} help ${name}`;
-						})()}`,
+				`${said} is no flag of ${typedName}: ${guess ? `--${guess}?` : list}`,
 				"usage",
 			);
 		}
