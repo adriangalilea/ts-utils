@@ -578,19 +578,19 @@ const eid = program({
 })
 
 main(() =>
-  eid.run(
-    {
+  eid
+    // built once from the call, given to every handler as its second argument
+    .context(({ values }) => client({ json: values.json === true }))
+    .run({
       // one handler per command, each given its own call: args, and values typed by its flags
       send: ({ args: [path], values }, api) => send(api, path, values.to),
       inbox: ({ values }, api) => inbox(api, values.watch, values.once),
-    },
-    // built once from the call, given to every handler
-    { context: (call) => client({ json: call.values.json === true }) },
-  ),
+    }),
 )
 ```
 
-`run` answers `help`, `--help` and `--version` itself (their data as JSON under `--json`) and gives any other command to its handler; a handler missing or a handler for no command is a type error, and screams when it runs. `parse` is the same reading without the dispatch, for a program that routes its own calls.
+`run` answers `help`, `--help` and `--version` itself (their data as JSON under `--json`) and gives any other command to its handler; a handler missing or a handler for no command is a type error, and screams when it runs. `context` is its own step so its type is settled before any handler is read; a program with nothing to share calls `run` straight on the program. `parse` is the same reading without the dispatch, for a program that routes its own calls.
+- **A command may answer to aliases** (`aliases: ['msg']`), shown beside it as `message|msg`. A flag may be `required`: absent, the command refuses, saying what the flag is for, and its value is typed as there.
 
 - **The parse is node's `parseArgs`**: short flags group (`-wo`, `-wd ~/x`, a flag taking a value last), `--dir=x` works, `--` ends the flags. A dash and a digit that no flag spells (`-5`, `--09-29`) is an argument.
 - **A flag is `boolean`, `string` or `integer`** (a whole number, typed `number`, `--limit lots` refused). A string flag whose `value` names words, `<new|old>`, takes only those. `multiple: true` keeps every value given, in order.

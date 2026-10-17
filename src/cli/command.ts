@@ -151,16 +151,18 @@ export interface Program<P extends ProgramSpec> {
 	parse(argv?: readonly string[]): Call<P> | Print;
 	/**
 	 * `argv` read and answered: help and the version printed (their data as JSON
-	 * under `--json`), any other command given to its handler. `context` builds,
-	 * once and from the call, what every handler shares (a session, a client).
+	 * under `--json`), any other command given to its handler.
 	 */
-	run<Ctx = undefined>(
-		handlers: Handlers<P, Ctx>,
-		opts?: {
-			argv?: readonly string[];
-			context?: (call: Call<P>) => Ctx | Promise<Ctx>;
-		},
-	): Promise<void>;
+	run(handlers: Handlers<P>, argv?: readonly string[]): Promise<void>;
+	/**
+	 * What every handler shares (a session, a client), built once from the call
+	 * and given to each as its second argument; never built for help or the
+	 * version. A step of its own so its type is known before any handler is
+	 * read.
+	 */
+	context<Ctx>(build: (call: Call<P>) => Ctx | Promise<Ctx>): {
+		run(handlers: Handlers<P, Ctx>, argv?: readonly string[]): Promise<void>;
+	};
 	/** The overview: every command on a line, by section. */
 	overview(): string;
 	/** One command in full. */
@@ -680,7 +682,12 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 		return { kind: "run", command: name, args: rest, values } as Call<P>;
 	}
 
-	const run: Program<P>["run"] = async (handlers, opts = {}) => {
+	/** The one dispatch `run` and `context(…).run` share. */
+	async function answer(
+		handlers: object,
+		argv: readonly string[],
+		build: ((call: Call<P>) => unknown) | undefined,
+	): Promise<void> {
 		// The handlers are the commands: one each, none for a command that is not.
 		const named = Object.keys(spec.commands);
 		const given = Object.keys(handlers);
@@ -695,26 +702,31 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 					.filter(Boolean)
 					.join("; ")}`,
 			);
-		const argv = opts.argv ?? process.argv.slice(2);
 		const call = parse(argv);
 		if (call.kind === "print")
 			return emit(argv.includes("--json"), call.data, () =>
 				process.stdout.write(call.text),
 			);
-		const ctx = opts.context ? await opts.context(call) : undefined;
+		const ctx = build ? await build(call) : undefined;
 		// A call and its handler name one command; TypeScript cannot follow a
 		// union through an index, so the pairing is this one line's.
-		const handler = handlers[call.command as Named<P>] as (
+		const handler = (handlers as Record<string, unknown>)[call.command] as (
 			c: Call<P>,
 			x: unknown,
 		) => void | Promise<void>;
 		await handler(call, ctx);
-	};
+	}
+
+	const argvOf = (argv: readonly string[] | undefined) =>
+		argv ?? process.argv.slice(2);
 
 	return {
 		spec,
 		parse,
-		run,
+		run: (handlers, argv) => answer(handlers, argvOf(argv), undefined),
+		context: (build) => ({
+			run: (handlers, argv) => answer(handlers, argvOf(argv), build),
+		}),
 		overview,
 		detail: detail as Program<P>["detail"],
 		describe,

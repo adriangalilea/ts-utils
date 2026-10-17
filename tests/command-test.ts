@@ -468,10 +468,34 @@ bad(
 			seen.push(`ls ${c.values.limit} ${ctx}`);
 		},
 	};
-	const context = (c: { command: string }) => `ctx:${c.command}`;
-	await tiny.run(handlers, { argv: ["get", "a", "--dir", "/x"], context });
-	await tiny.run(handlers, { argv: ["ls", "--limit", "3"], context });
+	const shared = tiny.context((c) => `ctx:${c.command}`);
+	await shared.run(handlers, ["get", "a", "--dir", "/x"]);
+	await shared.run(handlers, ["ls", "--limit", "3"]);
 	assert.deepEqual(seen, ["get a /x ctx:get", "ls 3 ctx:ls"]);
+
+	// handlers written inline take their call and the context typed, with a
+	// context that reads the call
+	await tiny
+		.context(({ values }) => ({ json: values.json === true }))
+		.run(
+			{
+				get({ args, values }, { json }) {
+					const dir: string | undefined = values.dir;
+					seen.push(`inline get ${args[0]} ${dir} ${json}`);
+				},
+				ls({ values }, { json }) {
+					const n: number | undefined = values.limit;
+					seen.push(`inline ls ${n} ${json}`);
+				},
+			},
+			["get", "b", "--json"],
+		);
+	assert.equal(seen.at(-1), "inline get b undefined true");
+	await tiny.run({ get: () => void seen.push("bare get"), ls: () => {} }, [
+		"get",
+		"c",
+	]);
+	assert.equal(seen.at(-1), "bare get");
 
 	// help is printed, never run: its text, or its data under --json
 	const out: string[] = [];
@@ -479,18 +503,18 @@ bad(
 	const log = console.log;
 	process.stdout.write = ((s: string) => out.push(s) > 0) as typeof write;
 	console.log = (s: string) => void out.push(s);
-	await tiny.run(handlers, { argv: ["help", "get"], context });
-	await tiny.run(handlers, { argv: ["--version", "--json"], context });
+	await shared.run(handlers, ["help", "get"]);
+	await shared.run(handlers, ["--version", "--json"]);
 	process.stdout.write = write;
 	console.log = log;
 	assert.match(stripAnsi(out[0] ?? ""), /t get <x>\n {2}get/);
 	assert.deepEqual(JSON.parse(out[1] ?? ""), { version: "1" });
-	assert.equal(seen.length, 2);
+	assert.equal(seen.length, 4);
 
 	// one handler per command, checked as it runs
 	await assert.rejects(
 		// @ts-expect-error ls has no handler
-		tiny.run({ get: handlers.get }, { argv: ["get", "a"], context }),
+		shared.run({ get: handlers.get }, ["get", "a"]),
 		/t's handlers: none for ls/,
 	);
 }
