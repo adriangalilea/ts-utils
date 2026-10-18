@@ -158,8 +158,79 @@ assert.deepEqual(run("set", "bio", "hello", "there").args, [
 	"hello",
 	"there",
 ]);
-// args are shape only: what a value may be is the handler's
-assert.deepEqual(run("vouches", "maybe").args, ["maybe"]);
+// `<on|off>` takes only those words, the near one guessed
+assert.deepEqual(run("vouches", "on").args, ["on"]);
+refused(
+	["vouches", "maybe"],
+	/^"maybe" is no <on\|off> of eid vouches: on, off$/,
+);
+refused(["vouches", "of"], /^"of" is no <on\|off> of eid vouches: on\?$/);
+
+// choices from the domain's own array: refused naming the nearest, typed as its
+// words, listed by the help; `args` typed from its grammar
+{
+	const LIGHTS = ["pasillo", "tragaluz", "baño"] as const;
+	const lights = program({
+		name: "lights",
+		says: "lights",
+		commands: {
+			set: {
+				args: "<light> <level> [ct]",
+				choices: { light: LIGHTS },
+				says: "hold a level",
+			},
+			say: { args: "<words...>", says: "words" },
+			maybe: { args: "[x...]", says: "any" },
+			none: { says: "nothing" },
+		},
+	});
+	const c = lights.parse(["set", "baño", "10"]);
+	assert.equal(c.kind, "run");
+	if (c.kind === "run" && c.command === "set") {
+		const [light, level, ct] = c.args;
+		const l: (typeof LIGHTS)[number] = light;
+		const v: string = level;
+		const k: string | undefined = ct;
+		assert.deepEqual([l, v, k], ["baño", "10", undefined]);
+		// still a string[] for code that takes one
+		const passed: string[] = c.args;
+		void passed;
+		// @ts-expect-error a value no choice spells is not a light
+		const wrong: "cocina" = light;
+		void wrong;
+	}
+	if (c.kind === "run" && c.command === "say") {
+		const [first, ...more]: [string, ...string[]] = c.args;
+		void first;
+		void more;
+	}
+	if (c.kind === "run" && c.command === "maybe") {
+		const all: string[] = c.args;
+		void all;
+	}
+	if (c.kind === "run" && c.command === "none") {
+		const empty: [] = c.args;
+		void empty;
+	}
+	refused2(
+		lights,
+		["set", "cocina", "1"],
+		/^"cocina" is no <light> of lights set: pasillo, tragaluz, baño$/,
+	);
+	refused2(
+		lights,
+		["set", "pasilo", "1"],
+		/^"pasilo" is no <light> of lights set: pasillo\?$/,
+	);
+	const help = stripAnsi(lights.detail("set"));
+	assert.match(help, /arguments\n\s+<light>\s+pasillo, tragaluz, baño/);
+	assert.deepEqual(
+		(
+			lights.describe() as { commands: { name: string; choices?: unknown }[] }
+		).commands.find((x) => x.name === "set")?.choices,
+		{ light: LIGHTS },
+	);
+}
 
 // a command that does not exist, with a guess
 refused(["sned"], /^No command "sned": eid send\?$/);
@@ -367,6 +438,46 @@ bad(
 	/only the last may take the rest/,
 );
 bad({ ...base, commands: { a: { args: "x", says: "a" } } }, /"x" is not <x>/);
+bad(
+	{
+		...base,
+		commands: { a: { args: "[x] <y>", choices: { x: ["1"] }, says: "a" } },
+	},
+	/choices need positions the parse can tell/,
+);
+// `[who] <msgId>`: the handler decides what the first word is, so it is allowed
+// and typed string[]
+{
+	const tg = program({
+		...base,
+		commands: { edit: { args: "[who] <msgId>", says: "edit" } },
+	});
+	const c = tg.parse(["edit", "42"]);
+	if (c.kind === "run") {
+		const all: string[] = c.args;
+		assert.deepEqual(all, ["42"]);
+	}
+}
+bad(
+	{
+		...base,
+		commands: { a: { args: "<x>", choices: { y: ["1"] }, says: "a" } },
+	},
+	/choices for <y>, which it does not take/,
+);
+bad(
+	{
+		...base,
+		commands: {
+			a: { args: "<on|off>", choices: { "on|off": ["on"] }, says: "a" },
+		},
+	},
+	/spells its words and has choices too/,
+);
+bad(
+	{ ...base, commands: { a: { args: "<x>", choices: { x: [] }, says: "a" } } },
+	/choices for <x> name nothing/,
+);
 bad(
 	{
 		...base,

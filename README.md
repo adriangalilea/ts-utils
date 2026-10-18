@@ -595,7 +595,8 @@ main(() =>
 
 - **The parse is node's `parseArgs`**: short flags group (`-wo`, `-wd ~/x`, a flag taking a value last), `--dir=x` works, `--` ends the flags. A dash and a digit that no flag spells (`-5`, `--09-29`) is an argument.
 - **A flag is `boolean`, `string` or `integer`** (a whole number, typed `number`, `--limit lots` refused). `choices` are the only values a string flag takes, and its type narrows to them: pass the domain's own array (`choices: FOLDERS`) so the flag cannot drift from it, and `--folder spam` is refused naming the words. `list: true` reads `--to a,b` (and repeats, `--to a --to b`) as an array, trimmed, empties dropped, each item checked. `value` is only the placeholder the help shows; absent, the help shows the choices (`<credit|debit>`), and where a placeholder like `<kind>` hides them, the detail lists them after the words.
-- **`args` is shape only**: the parse counts it, and what a value may be is the handler's to check.
+- **`args` types the handler**, one tuple per length the parse can hand over: `args: '<light> <level> [ct]'` gives `[string, string] | [string, string, string]`, so `const [light, level, ct] = args` has `light` and `level` as `string` and `ct` as `string | undefined`, and `args` still passes as a `string[]`. A last `<x...>` adds at least one more, `[x...]` any number. A needed argument after one that may be missing (`[who] <msgId>`, where the handler decides whether the first word is a who) is allowed and typed `string[]`, since the positions are the handler's.
+- **`choices` are the only words an argument takes**, by its name in `args`: `choices: { light: LIGHTS }` refuses `lights set cocina` naming the nearest (`"pasilo" is no <light> of lights set: pasillo?`), narrows the argument's type to `LIGHTS[number]`, and lists the words under `arguments` in `help <command>`. Pass the domain's own array so the argument cannot drift from it, as with a flag's `choices`. `<on|off>` is the same, for words fixed in the grammar. A grammar whose positions are the handler's (`[who] <msgId>`) cannot have choices, refused at start. Any other value is the handler's to check.
 - **A name may be words**, for a command with actions under it: `invoice` (show one), `'invoice create'`, `'invoice cancel'`, each in the same flat table with its own flags and handler. The leading words of argv spell the longest name they can, so `bank invoice create` is the action and `bank invoice F-12` the invoice; `help invoice` lists the actions under it.
 - **A program may have a `default`**, for one whose main act needs no verb: `default: { command: 'pull', claims: (w) => w.includes('/') }` makes `hf-get owner/repo` run `hf-get pull owner/repo`. A first word goes to the default only when no command spells it and `claims` holds for it; a word it claims that is a slip of a command's name (`lss`) is refused naming both readings, so `claims` decides what the default takes, never which typos it swallows. The tighter the claim, the better the guard: a shape no command name can have (a `/`, a path, a number) leaves every mistake caught, while `() => true` (free text, as a message) catches only the slips. The command keeps its name, shown as `hf-get [pull] <repo>`, and scripts should say it.
 - **A mistake throws `CliError` (code `usage`) saying what to type**: a flag of another command (`--watch is not a flag of eid send: it is eid inbox's`), a flag of none with the nearest spelling, a missing value, a command misspelt (`No command "sned": eid send?`), and arguments counted from `args`: each `<x>` is needed, each `[x]` may be given, a last `<x...>` takes the rest, `<on|off>` takes only those words.
@@ -634,6 +635,11 @@ for await (const m of stream) {
 ```
 
 `whenFlag(flag, s, edge)` and `deadlineFlag(s)` read the time vocabulary (Time, below) and turn a mistake into a `CliError`.
+
+#### Migrating from 12.2
+
+- `<on|off>` in `args` now refuses any other word, as this README always said it did; the parse used to pass it through.
+- A handler's `args` is typed from the grammar instead of `string[]`: `const [x] = args` gives `x: string` for a `<x>`, so a handler that wrote `x!` can drop the `!`. It still passes as a `string[]`. Indexing past the grammar (`args[2]` on `<x>`) is now a type error, as it always was at run time.
 
 #### Migrating from 10.11
 

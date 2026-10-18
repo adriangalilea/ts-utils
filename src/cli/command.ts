@@ -55,10 +55,18 @@ export interface CommandSpec {
 	/**
 	 * Its arguments as typed after its name, a usage grammar the parse counts:
 	 * `<path> [name]`, `<words...>`. Each `<x>` must be given and each `[x]` may
-	 * be; a last one ending in `...` takes the rest. Shape only: what a value may
-	 * be is the handler's to check.
+	 * be; a last one ending in `...` takes the rest; `<on|off>` takes only those
+	 * words. The handler's `args` is typed from it: `<x> [y]` is `[string,
+	 * string?]`.
 	 */
 	readonly args?: string;
+	/**
+	 * The only values an argument takes, by its name in `args`, its type narrowed
+	 * to them: pass the domain's own array (`choices: { light: LIGHTS }`) so the
+	 * argument cannot drift from it. The parse refuses anything else, naming the
+	 * nearest; the help lists them. `<on|off>` is the same, for fixed words.
+	 */
+	readonly choices?: { readonly [arg: string]: readonly string[] };
 	/** One line: what it does, in the person's words. */
 	readonly says: string;
 	readonly flags?: FlagSpecs;
@@ -146,12 +154,76 @@ type GlobalOf<P extends ProgramSpec> = P extends {
 	: NoFlags;
 type Named<P extends ProgramSpec> = keyof P["commands"] & string;
 
+// `args` read at the type level the way argsOf reads it at run time: words split
+// on spaces, `<x>` a value, `[x]` one that may be missing, a last `...` the rest,
+// `a|b` and `choices` the value's words.
+type Words<S extends string> = S extends `${infer A} ${infer B}`
+	? A extends ""
+		? Words<B>
+		: [A, ...Words<B>]
+	: S extends ""
+		? []
+		: [S];
+type Bar<N extends string> = N extends `${infer A}|${infer B}` ? A | Bar<B> : N;
+type ChoicesOf<C> = C extends {
+	readonly choices: infer M extends {
+		readonly [arg: string]: readonly string[];
+	};
+}
+	? M
+	: Record<never, never>;
+type ArgValue<N extends string, M> = N extends keyof M
+	? M[N] extends readonly (infer V extends string)[]
+		? V
+		: string
+	: N extends `${string}|${string}`
+		? Bar<N>
+		: string;
+// Every length the parse can hand over, one tuple each: `<x> [y]` is `[X] |
+// [X, Y]`, which destructures with `y` possibly undefined and still passes as a
+// `string[]` (an optional element `[Y?]` would not). Needed words first.
+type Needed<W extends string[], M, Acc extends unknown[]> = W extends [
+	infer H extends string,
+	...infer T extends string[],
+]
+	? H extends `<${infer N}...>`
+		? [...Acc, ArgValue<N, M>, ...ArgValue<N, M>[]]
+		: H extends `[${infer N}...]`
+			? [...Acc, ...ArgValue<N, M>[]]
+			: H extends `<${infer N}>`
+				? Needed<T, M, [...Acc, ArgValue<N, M>]>
+				: H extends `[${infer N}]`
+					? Optional<T, M, Acc, [...Acc, ArgValue<N, M>]>
+					: string[]
+	: Acc;
+// Then words that may be missing, each length one more tuple. A needed word
+// after one of them leaves the positions to the handler (`[who] <msgId>`: one
+// word is the id), so the honest type is `string[]`.
+type Optional<
+	W extends string[],
+	M,
+	Shorter,
+	Acc extends unknown[],
+> = W extends [infer H extends string, ...infer T extends string[]]
+	? H extends `[${infer N}...]`
+		? Shorter | [...Acc, ...ArgValue<N, M>[]]
+		: H extends `[${infer N}]`
+			? Optional<T, M, Shorter | Acc, [...Acc, ArgValue<N, M>]>
+			: string[]
+	: Shorter | Acc;
+/** A command's arguments as its `args` spells them: `<x> [y]` is `[string] | [string, string]`. */
+export type ArgsOf<C> = C extends { readonly args: infer S extends string }
+	? string extends S
+		? string[]
+		: Needed<Words<S>, ChoicesOf<C>, []>
+	: [];
+
 /** One command asked for: its name, its arguments and its flags, typed by its own spec. */
 export type Call<P extends ProgramSpec> = {
 	[K in Named<P>]: {
 		kind: "run";
 		command: K;
-		args: string[];
+		args: ArgsOf<P["commands"][K]>;
 		values: ValuesOf<FlagsOf<P["commands"][K]> & GlobalOf<P>>;
 	};
 }[Named<P>];
@@ -211,20 +283,59 @@ const VERSION_FLAG: FlagSpecs = {
 	version: { type: "boolean", says: "the version" },
 };
 
-type Arg = { name: string; needed: boolean; rest: boolean };
+type Arg = {
+	name: string;
+	needed: boolean;
+	rest: boolean;
+	/** The only words it takes: its `a|b` spelling, or the command's `choices`. */
+	choices?: readonly string[];
+};
 
-/** `args` as the parse counts them. */
-function argsOf(args: string | undefined): Arg[] {
+/** `args` as the parse counts them, each with the words it takes. */
+function argsOf(c: CommandSpec | undefined): Arg[] {
+	const args = c?.args;
 	const words = args ? args.split(/\s+/).filter(Boolean) : [];
-	return words.map((w, i) => {
+	const shape = words.map((w, i): Arg => {
 		const m = w.match(/^([<[])([^>\]]+?)(\.\.\.)?([>\]])$/);
 		if (!m || (m[1] === "<") !== (m[4] === ">"))
 			throw new Error(`cli: args "${args}": "${w}" is not <x>, [x] or <x...>`);
 		const rest = m[3] !== undefined;
 		if (rest && i !== words.length - 1)
 			throw new Error(`cli: args "${args}": only the last may take the rest`);
-		return { name: m[2] as string, needed: m[1] === "<", rest };
+		const name = m[2] as string;
+		const listed = c?.choices?.[name];
+		if (listed && name.includes("|"))
+			throw new Error(
+				`cli: args "${args}": <${name}> spells its words and has choices too: one`,
+			);
+		if (listed?.length === 0)
+			throw new Error(
+				`cli: args "${args}": choices for <${name}> name nothing`,
+			);
+		const own = name.includes("|") ? name.split("|") : listed;
+		return {
+			name,
+			needed: m[1] === "<",
+			rest,
+			...(own && { choices: own }),
+		};
 	});
+	// `[who] <msgId>` is a real shape (the handler decides whether the first word
+	// is a who), but its positions are the handler's: with one word the parse
+	// cannot say which argument it is, so it cannot check that word's choices.
+	const firstOptional = shape.findIndex((a) => !a.needed);
+	const positional =
+		firstOptional === -1 || !shape.slice(firstOptional).some((a) => a.needed);
+	if (!positional && shape.some((a) => a.choices))
+		throw new Error(
+			`cli: args "${args}": choices need positions the parse can tell, and a needed argument after one that may be missing leaves them to the handler`,
+		);
+	for (const name of Object.keys(c?.choices ?? {}))
+		if (!shape.some((a) => a.name === name))
+			throw new Error(
+				`cli: args "${args ?? ""}": choices for <${name}>, which it does not take`,
+			);
+	return shape;
 }
 
 /** A flag's value as the help shows it: its `value`, else its choices, else its type's. */
@@ -391,7 +502,7 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 			throw new Error(
 				`cli: ${spec.name}'s default is "${spec.default.command}", which it does not declare`,
 			);
-		if (argsOf(d.args).length === 0)
+		if (argsOf(d).length === 0)
 			throw new Error(
 				`cli: ${spec.name} ${spec.default.command} is the default, so it takes the word as an argument: give it args`,
 			);
@@ -407,7 +518,7 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 	const every: Record<string, FlagSpec> = {};
 	const owners: Record<string, string[]> = {};
 	for (const [command, c] of Object.entries(commands)) {
-		argsOf(c.args);
+		argsOf(c);
 		const shorts = new Map<string, string>();
 		for (const [name, f] of Object.entries(flagsOf(command))) {
 			if (!/^[a-z][a-z0-9-]*$/.test(name))
@@ -544,6 +655,8 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 		const flags = Object.entries(c.flags ?? {});
 		const column =
 			Math.max(0, ...flags.map(([n, f]) => width(flagText(n, f)))) + 2;
+		// Words an argument takes that its usage does not show (`<light>`, not `<a|b>`).
+		const listed = argsOf(c).filter((a) => a.choices && !a.name.includes("|"));
 		// The commands whose name begins with this one's: `invoice create` under `invoice`.
 		const under = Object.keys(commands).filter((n) => n.startsWith(`${name} `));
 		return [
@@ -558,6 +671,17 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 							under.map((n): [string, string] => [
 								usageOf(n),
 								commands[n]?.says ?? "",
+							]),
+						],
+					])
+				: []),
+			...(listed.length
+				? aligned([
+						[
+							"arguments",
+							listed.map((a): [string, string] => [
+								`<${a.name}>`,
+								(a.choices ?? []).join(", "),
 							]),
 						],
 					])
@@ -607,6 +731,7 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 				usage: typed(name),
 				...(c.aliases?.length && { aliases: c.aliases }),
 				says: c.says,
+				...(c.choices && { choices: c.choices }),
 				flags: flagsData(c.flags),
 				...(c.more && { more: c.more }),
 				...(c.examples && { examples: c.examples }),
@@ -669,7 +794,7 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 					`No command "${word}": ${spec.name} ${guess}?${d?.claims(word) ? `, or ${spec.name} ${d.command} ${word}` : ""}`,
 					"usage",
 				);
-			const takes = d && argsOf(commands[d.command]?.args)[0]?.name;
+			const takes = d && argsOf(commands[d.command])[0]?.name;
 			return new CliError(
 				takes
 					? `"${word}" is no command and no <${takes}>: ${spec.name} help`
@@ -816,7 +941,7 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 			return { kind: "print", text: detail(about), data };
 		}
 
-		const shape = argsOf(commands[name]?.args);
+		const shape = argsOf(commands[name]);
 		const most = shape.at(-1)?.rest ? Number.POSITIVE_INFINITY : shape.length;
 		const least = shape.filter((a) => a.needed).length;
 		if (rest.length < least)
@@ -835,6 +960,17 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 					: `${spec.name} ${name} takes no arguments; "${rest[0]}" is one too many`,
 				"usage",
 			);
+		// Each value against the words its argument takes; the rest argument's
+		// words hold for every value it collects.
+		rest.forEach((value, i) => {
+			const a = shape[Math.min(i, shape.length - 1)];
+			if (!a?.choices || a.choices.includes(value)) return;
+			const guess = nearest(value, a.choices);
+			throw new CliError(
+				`"${value}" is no <${a.name}> of ${spec.name} ${name}: ${guess ? `${guess}?` : a.choices.join(", ")}`,
+				"usage",
+			);
+		});
 		for (const [flag, f] of Object.entries(allowed))
 			if (f.required && !(flag in values))
 				throw new CliError(
