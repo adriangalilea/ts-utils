@@ -613,6 +613,11 @@ if (!(await confirm('take it?', 'say --yes to take it'))) return
 const password = await askHidden('password: ', '--password <words>')
 ```
 
+#### Migrating from 12.2
+
+- `<on|off>` in `args` now refuses any other word, as this README always said it did; the parse used to pass it through.
+- A handler's `args` is typed from the grammar instead of `string[]`: `const [x] = args` gives `x: string` for a `<x>`, so a handler that wrote `x!` can drop the `!`. It still passes as a `string[]`. Indexing past the grammar (`args[2]` on `<x>`) is now a type error, as it always was at run time.
+
 ### Watching (`cli`)
 
 Every `watch` command keeps one contract, so an agent that learned one has learned them all: it streams every match until Ctrl-C; `--once` (`-o`) exits 0 at the first; `--until <t>` exits at the deadline, 0 if anything matched and 2 if nothing; exit 1 is a real failure. Matches go to stdout (one JSON line each under `--json`), everything else to stderr, so an agent backgrounds the watch and branches on its exit code.
@@ -635,11 +640,6 @@ for await (const m of stream) {
 ```
 
 `whenFlag(flag, s, edge)` and `deadlineFlag(s)` read the time vocabulary (Time, below) and turn a mistake into a `CliError`.
-
-#### Migrating from 12.2
-
-- `<on|off>` in `args` now refuses any other word, as this README always said it did; the parse used to pass it through.
-- A handler's `args` is typed from the grammar instead of `string[]`: `const [x] = args` gives `x: string` for a `<x>`, so a handler that wrote `x!` can drop the `!`. It still passes as a `string[]`. Indexing past the grammar (`args[2]` on `<x>`) is now a type error, as it always was at run time.
 
 #### Migrating from 10.11
 
