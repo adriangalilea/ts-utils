@@ -1,5 +1,9 @@
 name: release
 
+# One chain per package (build, publish, release), each with its own gate,
+# tarball artifact, tag line and notes. A package publishes when its version
+# has no GitHub release yet, so bumping one package releases only that one.
+
 on:
   push:
     branches: [main]
@@ -13,27 +17,82 @@ concurrency:
 permissions: {}
 
 jobs:
-  build:
-    uses: adriangalilea/ci/.github/workflows/node.yml@7018e276a6c519cef370fb1eeb1b8b5ee34da500 # v1.2.2
+  build-utils:
+    uses: adriangalilea/ci/.github/workflows/node.yml@ed8ed6ae57fb8f6bd9f601d4e81d686a39539eab # v1.5.0
+    with:
+      directory: packages/utils
+      verify: verify:utils
+      artifact: utils
     permissions:
       contents: read
 
+  build-llm:
+    uses: adriangalilea/ci/.github/workflows/node.yml@ed8ed6ae57fb8f6bd9f601d4e81d686a39539eab # v1.5.0
+    with:
+      directory: packages/llm
+      tag-prefix: llm-
+      verify: verify:llm
+      artifact: llm
+    permissions:
+      contents: read
+
+  build-bot:
+    uses: adriangalilea/ci/.github/workflows/node.yml@ed8ed6ae57fb8f6bd9f601d4e81d686a39539eab # v1.5.0
+    with:
+      directory: packages/bot
+      tag-prefix: bot-
+      verify: verify:bot
+      artifact: bot
+    permissions:
+      contents: read
+
+  build-metrics:
+    uses: adriangalilea/ci/.github/workflows/node.yml@ed8ed6ae57fb8f6bd9f601d4e81d686a39539eab # v1.5.0
+    with:
+      directory: packages/metrics
+      tag-prefix: metrics-
+      verify: verify:metrics
+      artifact: metrics
+    permissions:
+      contents: read
+
+  # npm trusted publishing names this file and the `npm` environment, so every
+  # package's publish job lives here.
   publish:
-    needs: build
-    if: needs.build.outputs.release == 'true'
+    needs: [build-utils, build-llm, build-bot, build-metrics]
+    if: >-
+      needs.build-utils.outputs.release == 'true' ||
+      needs.build-llm.outputs.release == 'true' ||
+      needs.build-bot.outputs.release == 'true' ||
+      needs.build-metrics.outputs.release == 'true'
     runs-on: ubuntu-latest
     environment: npm
     permissions:
       id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact: utils
+            release: ${{ needs.build-utils.outputs.release }}
+          - artifact: llm
+            release: ${{ needs.build-llm.outputs.release }}
+          - artifact: bot
+            release: ${{ needs.build-bot.outputs.release }}
+          - artifact: metrics
+            release: ${{ needs.build-metrics.outputs.release }}
     steps:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: matrix.release == 'true'
         with:
           node-version: 24
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: matrix.release == 'true'
         with:
-          name: dist
+          name: ${{ matrix.artifact }}
           path: dist
       - name: Publish
+        if: matrix.release == 'true'
         run: |
           # ./ is load-bearing: npm reads `dist/x.tgz` as the GitHub repo dist/x.tgz.
           TGZ=$(echo ./dist/*.tgz)
@@ -45,10 +104,45 @@ jobs:
             npm publish "$TGZ" --access public
           fi
 
-  release:
-    needs: [build, publish]
-    uses: adriangalilea/ci/.github/workflows/release.yml@7018e276a6c519cef370fb1eeb1b8b5ee34da500 # v1.2.2
+  release-utils:
+    needs: [build-utils, publish]
+    if: needs.build-utils.outputs.release == 'true'
+    uses: adriangalilea/ci/.github/workflows/release.yml@ed8ed6ae57fb8f6bd9f601d4e81d686a39539eab # v1.5.0
     with:
-      tag: ${{ needs.build.outputs.tag }}
+      tag: ${{ needs.build-utils.outputs.tag }}
+      paths: packages/utils/**
+    permissions:
+      contents: write
+
+  release-llm:
+    needs: [build-llm, publish]
+    if: needs.build-llm.outputs.release == 'true'
+    uses: adriangalilea/ci/.github/workflows/release.yml@ed8ed6ae57fb8f6bd9f601d4e81d686a39539eab # v1.5.0
+    with:
+      tag: ${{ needs.build-llm.outputs.tag }}
+      tag-prefix: llm-
+      paths: packages/llm/**
+    permissions:
+      contents: write
+
+  release-bot:
+    needs: [build-bot, publish]
+    if: needs.build-bot.outputs.release == 'true'
+    uses: adriangalilea/ci/.github/workflows/release.yml@ed8ed6ae57fb8f6bd9f601d4e81d686a39539eab # v1.5.0
+    with:
+      tag: ${{ needs.build-bot.outputs.tag }}
+      tag-prefix: bot-
+      paths: packages/bot/**
+    permissions:
+      contents: write
+
+  release-metrics:
+    needs: [build-metrics, publish]
+    if: needs.build-metrics.outputs.release == 'true'
+    uses: adriangalilea/ci/.github/workflows/release.yml@ed8ed6ae57fb8f6bd9f601d4e81d686a39539eab # v1.5.0
+    with:
+      tag: ${{ needs.build-metrics.outputs.tag }}
+      tag-prefix: metrics-
+      paths: packages/metrics/**
     permissions:
       contents: write
