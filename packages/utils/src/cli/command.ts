@@ -69,7 +69,7 @@ export interface CommandSpec {
 	readonly args?: string;
 	/**
 	 * The only values an argument takes, by its name in `args`, its type narrowed
-	 * to them: pass the domain's own array (`choices: { light: LIGHTS }`) so the
+	 * to them: pass the domain's own array (`choices: { env: ENVS }`) so the
 	 * argument cannot drift from it. The parse refuses anything else, naming the
 	 * nearest; the help lists them. `<on|off>` is the same, for fixed words.
 	 */

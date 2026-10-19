@@ -147,7 +147,7 @@ export function helpOf({ spec, commands, global, sections }: HelpModel) {
 		const flags = Object.entries(c.flags ?? {});
 		const column =
 			Math.max(0, ...flags.map(([n, f]) => width(flagText(n, f)))) + 2;
-		// Words an argument takes that its usage does not show (`<light>`, not `<a|b>`).
+		// Words an argument takes that its usage does not show (`<env>`, not `<a|b>`).
 		const listed = argsOf(c).filter((a) => a.choices && !a.name.includes("|"));
 		// The commands whose name begins with this one's: `invoice create` under `invoice`.
 		const under = Object.keys(commands).filter((n) => n.startsWith(`${name} `));

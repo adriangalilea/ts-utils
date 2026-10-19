@@ -179,34 +179,34 @@ refused(["vouches", "of"], /^"of" is no <on\|off> of eid vouches: on\?$/);
 // choices from the domain's own array: refused naming the nearest, typed as its
 // words, listed by the help; `args` typed from its grammar
 {
-	const LIGHTS = ["pasillo", "tragaluz", "baño"] as const;
-	const lights = program({
-		name: "lights",
-		says: "lights",
+	const ENVS = ["staging", "production", "preview"] as const;
+	const ship = program({
+		name: "ship",
+		says: "ship",
 		commands: {
-			set: {
-				args: "<light> <level> [ct]",
-				choices: { light: LIGHTS },
-				says: "hold a level",
+			deploy: {
+				args: "<env> <version> [note]",
+				choices: { env: ENVS },
+				says: "deploy a version",
 			},
 			say: { args: "<words...>", says: "words" },
 			maybe: { args: "[x...]", says: "any" },
 			none: { says: "nothing" },
 		},
 	});
-	const c = lights.parse(["set", "baño", "10"]);
+	const c = ship.parse(["deploy", "preview", "1.2.0"]);
 	assert.equal(c.kind, "run");
-	if (c.kind === "run" && c.command === "set") {
-		const [light, level, ct] = c.args;
-		const l: (typeof LIGHTS)[number] = light;
-		const v: string = level;
-		const k: string | undefined = ct;
-		assert.deepEqual([l, v, k], ["baño", "10", undefined]);
+	if (c.kind === "run" && c.command === "deploy") {
+		const [env, version, note] = c.args;
+		const e: (typeof ENVS)[number] = env;
+		const v: string = version;
+		const n: string | undefined = note;
+		assert.deepEqual([e, v, n], ["preview", "1.2.0", undefined]);
 		// still a string[] for code that takes one
 		const passed: string[] = c.args;
 		void passed;
-		// @ts-expect-error a value no choice spells is not a light
-		const wrong: "cocina" = light;
+		// @ts-expect-error a value no choice spells is not an env
+		const wrong: "local" = env;
 		void wrong;
 	}
 	if (c.kind === "run" && c.command === "say") {
@@ -223,22 +223,22 @@ refused(["vouches", "of"], /^"of" is no <on\|off> of eid vouches: on\?$/);
 		void empty;
 	}
 	refused2(
-		lights,
-		["set", "cocina", "1"],
-		/^"cocina" is no <light> of lights set: pasillo, tragaluz, baño$/,
+		ship,
+		["deploy", "local", "1.2.0"],
+		/^"local" is no <env> of ship deploy: staging, production, preview$/,
 	);
 	refused2(
-		lights,
-		["set", "pasilo", "1"],
-		/^"pasilo" is no <light> of lights set: pasillo\?$/,
+		ship,
+		["deploy", "stagin", "1.2.0"],
+		/^"stagin" is no <env> of ship deploy: staging\?$/,
 	);
-	const help = stripAnsi(lights.detail("set"));
-	assert.match(help, /arguments\n\s+<light>\s+pasillo, tragaluz, baño/);
+	const help = stripAnsi(ship.detail("deploy"));
+	assert.match(help, /arguments\n\s+<env>\s+staging, production, preview/);
 	assert.deepEqual(
 		(
-			lights.describe() as { commands: { name: string; choices?: unknown }[] }
-		).commands.find((x) => x.name === "set")?.choices,
-		{ light: LIGHTS },
+			ship.describe() as { commands: { name: string; choices?: unknown }[] }
+		).commands.find((x) => x.name === "deploy")?.choices,
+		{ env: ENVS },
 	);
 }
 
