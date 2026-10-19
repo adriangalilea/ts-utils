@@ -212,7 +212,7 @@ const menu = botMenu({
 });
 
 const bot = new Bot(token)
-	.extend(adminContext(190202471))
+	.extend(adminContext(123456789))
 	.extend(userSession) // session first
 	.extend(accessControl({ session: userSession, storage, defaults: [] }))
 	.extend(coalesceLongMessages()) // BOT_COALESCE_LOG_LEVEL=debug traces each fragment

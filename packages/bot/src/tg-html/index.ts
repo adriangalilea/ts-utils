@@ -23,7 +23,7 @@
  * markup while keeping its content.
  *
  * @example
- * import { transform } from '@adriangalilea/utils/tg-html'
+ * import { transform } from '@adriangalilea/bot/tg-html'
  *
  * transform('<h1>Title</h1><ul><li>Point</li></ul>')
  * // '<b><u>Title</u></b>\n\n• Point'

@@ -45,8 +45,8 @@
  *
  * @example  Personal LLM bot — language only, no retention
  *
- * import { language } from '@adriangalilea/utils/bot/language'
- * import { botMenu } from '@adriangalilea/utils/bot/menu'
+ * import { language } from '@adriangalilea/bot/language'
+ * import { botMenu } from '@adriangalilea/bot/menu'
  *
  * const lang = language({ session: userSession, supported: ['en','es'] as const, default: 'en' })
  *

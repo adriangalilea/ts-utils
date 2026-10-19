@@ -37,7 +37,7 @@
  * provider used is picked per {@link ProviderConfig.type} at runtime).
  *
  * @example one-shot with failover
- * import { createLlm } from '@adriangalilea/utils/llm'
+ * import { createLlm } from '@adriangalilea/llm'
  *
  * const llm = createLlm({
  *   providers: [
@@ -49,7 +49,7 @@
  * const { text, usage } = await llm.complete({ prompt })
  *
  * @example streaming with tools
- * import { tool } from '@adriangalilea/utils/llm'
+ * import { tool } from '@adriangalilea/llm'
  * import { z } from 'zod'
  *
  * const events = llm.stream({

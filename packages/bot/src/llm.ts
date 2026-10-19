@@ -1,7 +1,7 @@
 /**
  * GramIO LLM toolkit — the Telegram side of an LLM chatbot. The model side
  * (providers, failover, usage accounting, tools) lives in
- * `@adriangalilea/utils/llm`; this module renders its event stream into a
+ * `@adriangalilea/llm`; this module renders its event stream into a
  * chat and remembers conversations:
  *
  *   `streamChatReply(ctx, events)` — OUTPUT. Consumes an
@@ -32,8 +32,8 @@
  * Peer deps: `gramio`, `@gramio/session`, `@gramio/format`, `@gramio/split`.
  *
  * @example  chatbot turn: history → llm.stream → streamed reply
- * import { createLlm } from '@adriangalilea/utils/llm'
- * import { streamChatReply, llmHistory, toModelMessages } from '@adriangalilea/utils/bot/llm'
+ * import { createLlm } from '@adriangalilea/llm'
+ * import { streamChatReply, llmHistory, toModelMessages } from '@adriangalilea/bot/llm'
  *
  * const llm = createLlm({ providers })
  * const chat = llmHistory({ session: userSession, maxTurns: 20, retentionDays: 7 })

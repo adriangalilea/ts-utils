@@ -1,96 +1,33 @@
-# ts-utils
+# @adriangalilea/utils
 
 TypeScript utilities - logger, currency, offensive programming, file operations, environment management, and more. The sibling of [swift-utils](https://github.com/adriangalilea/swift-utils), [py-utils](https://github.com/adriangalilea/py-utils), and [go-utils](https://github.com/adriangalilea/go-utils). The logging contract the three share, and the harness that proves they write the same event stream, live in [utils](https://github.com/adriangalilea/utils).
 
-## Product metrics
-
-```ts
-import { createClient } from "@libsql/client"
-import { defineMetrics } from "@adriangalilea/utils/metrics"
-import { libsqlDriver } from "@adriangalilea/utils/metrics/libsql"
-import { metricsStore } from "@adriangalilea/utils/metrics/sqlite"
-
-const driver = libsqlDriver(createClient({ url: process.env.METRICS_DATABASE_URL!, authToken: process.env.METRICS_AUTH_TOKEN }))
-const metrics = defineMetrics({
-  installCopy: { kind: "counter", label: "install command copies", dimensions: { component: ["chat", "glass"] } },
-}, { store: metricsStore(driver, "my-project") })
-
-await metrics.installCopy.bump({ dimensions: { component: "chat" } })
-```
-
-One SQLite dialect, many stores. `metrics/sqlite` holds the schema, the store and
-the readers over a `MetricsDriver`: two verbs, `query(statement)` for rows and
-`transact(statements)` for an all-or-nothing write batch. `metrics/libsql` wraps a
-Turso / libSQL client, `metrics/d1` wraps a Cloudflare D1 binding (`d1Driver(env.DB)`),
-each with the driver's native calls and structural types, so no database client is
-bundled. Any other SQLite driver implements the two verbs in a few lines (the test
-does it over `node:sqlite`). Readers need only `query`, a `MetricsReader`:
-`metrics/d1-rest` reads a D1 database over Cloudflare's REST API from a process with
-no binding (`d1RestReader({ accountId, databaseId, token })`). A store that does not
-speak SQLite implements the `MetricsStore` contract, `declare(schema)` and
-`write(measurement)`, and its own readers returning the `metrics/report` types.
-
-**The store describes itself.** `declare` runs once per process before the first
-sample and carries the whole schema: kinds, labels, help, units, per-user flags and
-overlaps. Every later sample is one small transaction. A reader therefore never needs
-the declaring code: `readSchema(reader, project)` returns what a project declared,
-and `readReport(reader, { project, days, includeToday? })` returns everything a panel
-renders in one call, `{ project, window, schema, daily, audience }`. A changed kind or
-unit is refused at declaration and every sample of that process fails loudly; a store
-that was briefly away is asked again by the next sample.
-
-Provision the exported `METRICS_SCHEMA` once before collecting. `readMetrics(reader,
-{ from, to, project? })` returns daily rows with labels and dimensions, using inclusive
-UTC dates. `readAudience(reader, { from, to, project }, schema)` answers who did it
-from the opt-in per-user rows: one row per declared per-user metric (zeros when nobody
-touched it), with distinct actors, actors with more than one sample on a single day,
-actors seen on more than one day, then each declared overlap as `fromUsers` and
-`bothUsers`. Readers propagate database errors rather than presenting missing data
-as zero.
-`summarizeMetrics(rows)` from `metrics/report` produces one generic report shape;
-`renderMetrics(rows, { daily? })` from `metrics/cli` renders it with the existing
-ANSI-aware `cli.table` helpers. Both discover every recorded metric from its
-declaration metadata. No product-specific metric list belongs in a renderer.
-
-For period comparisons, `metricWindows(days, { now?, includeToday? })` from
-`metrics/report` returns adjacent equal-length `current` and `previous` UTC ranges.
-By default both contain completed days; `includeToday` marks the current window
-`partial`. Fetch those ranges through your adapter, then call
-`compareMetrics(currentRows, previousRows)` and
-`renderMetricComparison(comparisons)` from `metrics/cli`. Comparisons include
-disappearing series, count changes and weighted timing-average changes. Percent
-change is null without a nonzero baseline; missing timing samples stay null.
-Changing a metric's kind or unit across the inputs is rejected. Missing observations
-are not proof that collection was running: deltas compare recorded data only.
-Use a new key for a new meaning; labels, help and the per-user flag can be edited.
-
-Measurements validate finite nonnegative samples, positive integer counts, and
-declared dimension values. Calls resolve even when validation or storage fails;
-`onError(error, key)` observes failures (the default logs a warning without actor
-data). Await calls or attach them to the runtime's request lifetime (`after` in
-Next.js, `waitUntil` in Workers). Unattached promises are not reliable delivery.
-Counters are best-effort observations, not exactly-once ledgers; retries can count
-twice. Money and successful-install accounting belong elsewhere.
-
-`perUser: true` accepts an optional string or numeric `user` for daily actor rows.
-Enable it only with a deletion and retention policy; no identity is inferred.
-`overlaps: [["a", "b"]]` declares unordered audience overlap, not an ordered funnel.
-Daily totals support counts and averages, not percentile latency or event ordering.
-
-## Visits
-
-A site's own visits live in the [ui registry](https://ui.adriangalilea.com/visits) as one family: `page-sensor` (the page), `visits` (the route, the store, the readers) and `user-flows` (the views), installed into the site as code it owns (`npx shadcn add @ag/page-sensor` brings `visits`). They build on this package's logger (the event stream the pages write) and its metrics drivers (the store).
-
-#### Migrating from 9.x
-
-`@adriangalilea/utils/visits` is gone. Install the registry's `visits` and import from your copy (`@/lib/visits`): the same functions, the same tables and rows.
-
+The Telegram bot plugins, the LLM caller and product metrics are their own packages in the same repo: [`@adriangalilea/bot`](https://github.com/adriangalilea/ts-utils/tree/main/packages/bot#readme), [`@adriangalilea/llm`](https://github.com/adriangalilea/ts-utils/tree/main/packages/llm#readme) and [`@adriangalilea/metrics`](https://github.com/adriangalilea/ts-utils/tree/main/packages/metrics#readme).
 
 ## Installation
 
 ```bash
 pnpm add @adriangalilea/utils
 ```
+
+## Features
+
+- **Logger**: one event stream shared byte for byte with go-utils and py-utils (lines and spans, W3C trace ids), json or human rendering, scoped env-controlled levels
+- **Currency**:
+  - 13,750+ crypto symbols from CoinGecko (auto-updatable)
+  - Alternative ticker support (XBT→BTC, wrapped tokens, etc.)
+  - Optimal decimal calculations
+  - Percentage and basis point utilities
+  - Fiat and stablecoin detection
+- **Format**: Number and currency formatting with compact notation
+- **CLI**: ANSI-aware tables/kv/trees + semantic palette, and live output — pinned self-repainting region, spinner, progress bar, with logs flowing above and clean non-TTY degradation
+- **Offensive Programming**: assert, panic, assertNever, must, unwrap (throw `Panic`) + SourcedError for typed boundary failures
+- **File Operations**: Read, write with automatic path resolution
+- **Directory Operations**: Create, list, walk directories
+- **KEV**: Redis-style environment variable management with monorepo support
+- **XDG**: XDG Base Directory paths — reads env vars set by [xdg-dirs](https://github.com/adriangalilea/xdg-dirs), falls back to spec defaults
+- **Unseen**: Persistent dedup filter — "what's new since last time?" for cron/monitoring workflows
+- **Project Discovery**: Find project/monorepo roots, detect JS/TS projects
 
 ## Usage
 
@@ -183,7 +120,7 @@ LOG_SHIP=https://logs.example.com/ingest LOG_SHIP_TOKEN=… node server.js
 
 What ships is the stream's json line, byte for byte, whatever the console renders (human at a terminal included). A batch is lines joined by `\n`, `Content-Type: text/plain;charset=utf-8`, at most 64 KB and 50 events. It leaves 2s after its first event, at 50 events, when a span opened outside any local span ends (a root span, or a request joined from its caller: its whole trace leaves together), before a Node or Bun process exits on its own (`beforeExit`), and in a browser on `visibilitychange: hidden` and `pagehide`; whatever a hidden page sends goes through `sendBeacon`, the one request a browser finishes after the page is gone. `flushLog()` sends what waits and resolves when nothing is in flight: a Worker hands it to `ctx.waitUntil(flushLog())`, a serverless function to its runtime's `after`, and a process that calls `process.exit()` awaits it first (nothing else runs after `exit`). Shipping never throws and never blocks a write: a refused or lost batch is one `warnOnce` under scope `ship`, an event over 64 KB stays on the console and warns once. The wire and the collector's answers are the contract's, in [utils](https://github.com/adriangalilea/utils#shipping).
 
-**A page's trace on a Next.js server** (`@adriangalilea/utils/log/next`, `next` an optional peer). A page that writes the stream (utils README, "Web pages") puts its `traceparent` on every same-origin request; these wrappers make the server's work a child of that request, in the page's trace, and hand `flushLog` to Next's `after` so a frozen instance holds nothing unsent. A request with no `traceparent` is a root span of its own.
+**A page's trace on a Next.js server** (`@adriangalilea/utils/log/next`, `next` an optional peer). A page that writes the stream ([utils](https://github.com/adriangalilea/utils) README, "Web pages") puts its `traceparent` on every same-origin request; these wrappers make the server's work a child of that request, in the page's trace, and hand `flushLog` to Next's `after` so a frozen instance holds nothing unsent. A request with no `traceparent` is a root span of its own.
 
 ```typescript
 import { traced, tracedAction } from '@adriangalilea/utils/log/next'
@@ -221,25 +158,6 @@ for (const line of text.split('\n')) {
 ```typescript
 breakdown(events) // { wall_ms: 26800, by: { inference: 18600, input: 4600, wait: 2300, other: 900, perception: 300 } }
 ```
-
-#### Migrating from 8.x
-
-- Messages are one string plus fields: `log.warn('retry', n, err)` becomes `log.warn('retry', { attempt: n, err })`, and `log.scope(e.source).error(e.operation, e.toJSON())` becomes `log.scope(e.source).error(e.operation, { err: e })`.
-- Import `log` and call its verbs: the bare `info`, `warn`, `scope`, … exports are gone.
-- `time`/`timeEnd` are gone: wrap the work in `log.span(name, fn)`, which writes its duration.
-- `LOG_FORMAT=record` and `setLogFormat('record')` are gone: `json` replaces the record line, and `logs` from go-utils renders a file back into a greppable line.
-- The environment now wins over `setLogFormat` and `setLogTime`, and `LOG_TIME` is off by default.
-- A Worker that writes json must call `setLogService(name)`.
-- `SourcedError.message` is the message given, without the `[source:operation]` prefix.
-
-#### Migrating from 9.0
-
-Library code writes every diagnostic through the logger (`pnpm test:raw-writes` refuses a raw `console.*`), so the per-module switches are gone and the environment does their job:
-
-- `gracefulStart`'s `log` option: its lines are scope `["bot", "kit"]`, `BOT_KIT_LOG_LEVEL=silent` quiets them.
-- `coalesceLongMessages`'s `log` option: `BOT_COALESCE_LOG_LEVEL=debug`.
-- `kev.debug = true`: `KEV_LOG_LEVEL=debug`. The trace names each lookup's source, never its value.
-- Bot modules log under `["bot", "<module>"]` (was `["bot/<module>"]`), so `BOT_LOG_LEVEL` governs them all; the per-module variable names are unchanged.
 
 ### Currency
 
@@ -407,7 +325,7 @@ parsing is the WHATWG URL API, never regexes; the knowledge of WHICH params
 are tracking is vendored from
 [@protontech/tidy-url](https://www.npmjs.com/package/@protontech/tidy-url)
 (Proton's maintained fork of DrKain/tidy-url, MIT; refresh with
-`pnpm update-url-rules`) plus a small tested overlay; per-site content
+`pnpm --filter @adriangalilea/utils update-url-rules`) plus a small tested overlay; per-site content
 identity is an adapter registry (YouTube built in). Global rules only for
 unambiguous trackers (utm_*, fbclid, gclid, …); ambiguous names stay per-host —
 `si` is junk on YouTube/Spotify but `ref` on GitHub names a branch and
@@ -496,7 +414,7 @@ clip('a very long value', 10)                       // "a very lo…" (ANSI-awar
 link('eid.to/ada', 'https://eid.to/ada')
 ```
 
-Run the demo: `FORCE_COLOR=1 pnpm tsx tests/cli-demo.ts`.
+Run the demo: `FORCE_COLOR=1 pnpm --filter @adriangalilea/utils demo:cli`.
 
 ### Live output (`cli`) — pinned region, spinner, progress
 
@@ -547,7 +465,7 @@ What makes it hold up:
 - **Measurement is in terminal cells**: a ZWJ emoji / flag is one grapheme, and CJK characters and emoji take two cells, so `width()`/`clip()`/`table()` line up what a terminal shows (py-utils `cli` measures the same way). `clip()` never splits a wide character at the cut.
 - One **region** at a time, by design (`assert`): two pinned regions can't share the bottom of one screen — compose into a single `render()`. A `spinner()` started *under* an active region is legitimate composition and degrades gracefully: its final line prints above the region.
 
-Run the demo: `pnpm tsx tests/live-demo.ts` (and pipe it through `| cat` to see the non-TTY degradation).
+Run the demo: `pnpm --filter @adriangalilea/utils demo:live` (and pipe it through `| cat` to see the non-TTY degradation).
 
 ### Command-line programs (`cli`)
 
@@ -593,10 +511,10 @@ main(() =>
 - **A flag may be `required`**: absent, the command refuses, saying what the flag is for, and its value is typed as there.
 - **A command may answer to aliases** (`aliases: ['msg']`), shown beside it as `message|msg`. They are input only: the handler, the help, the JSON and every message name the command itself. Use them sparingly. Their cost is two spellings of one command in scripts, transcripts and docs, so a skill written with `msg` and one written with `message` no longer grep alike; examples and skills should always use the name. A shell alias or a fish abbr is often the better tool for a shorter spelling: it is the person's own, and an abbr expands to the full command as it is typed, so history, transcripts and agents only ever see the name. Reach for `aliases` when the tool itself should accept a word, an obvious synonym people will guess (`del` for `rm`), not to save keystrokes.
 
-- **The parse is node's `parseArgs`**: short flags group (`-wo`, `-wd ~/x`, a flag taking a value last), `--dir=x` works, `--` ends the flags. A dash and a digit that no flag spells (`-5`, `--09-29`) is an argument.
+- **The parse reads argv once, against the program's flag table**: short flags group (`-wo`, `-wd ~/x`, a flag taking a value last, glued or next), `--dir=x` works, `--` ends the flags, a lone `-` is an argument. A dash and a digit that no flag spells (`-5`, `--09-29`) is an argument, and a flag where a value should be leaves the value missing.
 - **A flag is `boolean`, `string` or `integer`** (a whole number, typed `number`, `--limit lots` refused). `choices` are the only values a string flag takes, and its type narrows to them: pass the domain's own array (`choices: FOLDERS`) so the flag cannot drift from it, and `--folder spam` is refused naming the words. `list: true` reads `--to a,b` (and repeats, `--to a --to b`) as an array, trimmed, empties dropped, each item checked. `value` is only the placeholder the help shows; absent, the help shows the choices (`<credit|debit>`), and where a placeholder like `<kind>` hides them, the detail lists them after the words.
-- **`args` types the handler**, one tuple per length the parse can hand over: `args: '<light> <level> [ct]'` gives `[string, string] | [string, string, string]`, so `const [light, level, ct] = args` has `light` and `level` as `string` and `ct` as `string | undefined`, and `args` still passes as a `string[]`. A last `<x...>` adds at least one more, `[x...]` any number. A needed argument after one that may be missing (`[who] <msgId>`, where the handler decides whether the first word is a who) is allowed and typed `string[]`, since the positions are the handler's.
-- **`choices` are the only words an argument takes**, by its name in `args`: `choices: { light: LIGHTS }` refuses `lights set cocina` naming the nearest (`"pasilo" is no <light> of lights set: pasillo?`), narrows the argument's type to `LIGHTS[number]`, and lists the words under `arguments` in `help <command>`. Pass the domain's own array so the argument cannot drift from it, as with a flag's `choices`. `<on|off>` is the same, for words fixed in the grammar. A grammar whose positions are the handler's (`[who] <msgId>`) cannot have choices, refused at start. Any other value is the handler's to check.
+- **`args` types the handler**, one tuple per length the parse can hand over: `args: '<env> <version> [note]'` gives `[string, string] | [string, string, string]`, so `const [env, version, note] = args` has `env` and `version` as `string` and `note` as `string | undefined`, and `args` still passes as a `string[]`. A last `<x...>` adds at least one more, `[x...]` any number. A needed argument after one that may be missing (`[who] <msgId>`, where the handler decides whether the first word is a who) is allowed and typed `string[]`, since the positions are the handler's.
+- **`choices` are the only words an argument takes**, by its name in `args`: `choices: { env: ENVS }` refuses `ship deploy local` naming the nearest (`"stagin" is no <env> of ship deploy: staging?`), narrows the argument's type to `ENVS[number]`, and lists the words under `arguments` in `help <command>`. Pass the domain's own array so the argument cannot drift from it, as with a flag's `choices`. `<on|off>` is the same, for words fixed in the grammar. A grammar whose positions are the handler's (`[who] <msgId>`) cannot have choices, refused at start. Any other value is the handler's to check.
 - **A name may be words**, for a command with actions under it: `invoice` (show one), `'invoice create'`, `'invoice cancel'`, each in the same flat table with its own flags and handler. The leading words of argv spell the longest name they can, so `bank invoice create` is the action and `bank invoice F-12` the invoice; `help invoice` lists the actions under it.
 - **A program may have a `default`**, for one whose main act needs no verb: `default: { command: 'pull', claims: (w) => w.includes('/') }` makes `hf-get owner/repo` run `hf-get pull owner/repo`. A first word goes to the default only when no command spells it and `claims` holds for it; a word it claims that is a slip of a command's name (`lss`) is refused naming both readings, so `claims` decides what the default takes, never which typos it swallows. The tighter the claim, the better the guard: a shape no command name can have (a `/`, a path, a number) leaves every mistake caught, while `() => true` (free text, as a message) catches only the slips. The command keeps its name, shown as `hf-get [pull] <repo>`, and scripts should say it.
 - **A mistake throws `CliError` (code `usage`) saying what to type**: a flag of another command (`--watch is not a flag of eid send: it is eid inbox's`), a flag of none with the nearest spelling, a missing value, a command misspelt (`No command "sned": eid send?`), and arguments counted from `args`: each `<x>` is needed, each `[x]` may be given, a last `<x...>` takes the rest, `<on|off>` takes only those words.
@@ -612,11 +530,6 @@ main(() =>
 if (!(await confirm('take it?', 'say --yes to take it'))) return
 const password = await askHidden('password: ', '--password <words>')
 ```
-
-#### Migrating from 12.2
-
-- `<on|off>` in `args` now refuses any other word, as this README always said it did; the parse used to pass it through.
-- A handler's `args` is typed from the grammar instead of `string[]`: `const [x] = args` gives `x: string` for a `<x>`, so a handler that wrote `x!` can drop the `!`. It still passes as a `string[]`. Indexing past the grammar (`args[2]` on `<x>`) is now a type error, as it always was at run time.
 
 ### Watching (`cli`)
 
@@ -640,10 +553,6 @@ for await (const m of stream) {
 ```
 
 `whenFlag(flag, s, edge)` and `deadlineFlag(s)` read the time vocabulary (Time, below) and turn a mistake into a `CliError`.
-
-#### Migrating from 10.11
-
-- `clock.hit()` takes the match's output: `print(m); clock.hit()` becomes `clock.hit(() => print(m))`. A once-watch started its exit asynchronously while a batch kept printing, so a backfill emitted every match; now nothing is emitted once the watch has ended. `clock.ended` says whether it has.
 
 ### Offensive Programming
 
@@ -723,27 +632,6 @@ catch (e) {
 
 Every `SourcedError` carries `source`, `operation`, `status`, `context`, and the original exception via `cause`. Call `.toJSON()` for serialization across process boundaries.
 
-## Features
-
-- **Logger**: one event stream shared byte for byte with go-utils and py-utils (lines and spans, W3C trace ids), json or human rendering, scoped env-controlled levels
-- **Currency**:
-  - 13,750+ crypto symbols from CoinGecko (auto-updatable)
-  - Alternative ticker support (XBT→BTC, wrapped tokens, etc.)
-  - Optimal decimal calculations
-  - Percentage and basis point utilities
-  - Fiat and stablecoin detection
-- **Format**: Number and currency formatting with compact notation
-- **CLI**: ANSI-aware tables/kv/trees + semantic palette, and live output — pinned self-repainting region, spinner, progress bar, with logs flowing above and clean non-TTY degradation
-- **Offensive Programming**: assert, panic, assertNever, must, unwrap (throw `Panic`) + SourcedError for typed boundary failures
-- **File Operations**: Read, write with automatic path resolution
-- **Directory Operations**: Create, list, walk directories
-- **KEV**: Redis-style environment variable management with monorepo support
-- **XDG**: XDG Base Directory paths — reads env vars set by [xdg-dirs](https://github.com/adriangalilea/xdg-dirs), falls back to spec defaults
-- **Unseen**: Persistent dedup filter — "what's new since last time?" for cron/monitoring workflows
-- **Project Discovery**: Find project/monorepo roots, detect JS/TS projects
-- **LLM caller (`llm`)**: multi-provider failover on top of the Vercel AI SDK — priority ordering, per-key circuit breaker (KV-backed), reset events for live previews, usage accounting with actual billed cost (OpenRouter), tool calling. Worker-safe.
-- **Bot plugins (GramIO)**: `kit` (graceful shutdown + admin context), `access-control` (gate + approve/deny menu, backed by sessions), `llm` (draft-streamed replies `streamChatReply` + per-thread conversation history `ctx.llm`), `payments` (Telegram Stars: VIP tiers + credits + perks + waiver + refund flow, ToS-compliant, Spanish-autónomo-aware), `coalesce`, `language`, `menu`
-
 ### XDG Base Directories
 
 XDG paths that respect env vars from [xdg-dirs](https://github.com/adriangalilea/xdg-dirs) with spec-compliant fallbacks:
@@ -811,7 +699,7 @@ const notify = (msg: Polyglot<'en' | 'es'>, lang: 'en' | 'es') =>
   transport.send(say(msg, lang))
 ```
 
-In a bot, `bot/language` adds `ctx.lang` + `ctx.say`. Both resolve stored explicit pick → Telegram client hint → configured default, at READ time — the hint is never persisted, and `session.language` is written only by an explicit pick (the plugin's menuItem action):
+In a bot, `@adriangalilea/bot/language` adds `ctx.lang` + `ctx.say`. Both resolve stored explicit pick → Telegram client hint → configured default, at READ time — the hint is never persisted, and `session.language` is written only by an explicit pick (the plugin's menuItem action):
 
 ```typescript
 ctx.say({ en: 'Continue', es: 'Continuar' })       // → string
@@ -819,248 +707,6 @@ await ctx.say.send({ en: 'Hi', es: 'Hola' })       // → ctx.send(resolved)
 await ctx.say.edit({ en: 'Done', es: 'Listo' })    // → ctx.editText (callback only)
 await ctx.say.answer({ en: 'OK', es: 'OK' })       // → ctx.answer (callback only)
 ```
-
-### Telegram HTML (`tg-html`)
-
-Transform arbitrary (LLM-emitted) HTML into Telegram-compatible `parse_mode=HTML` with opinionated, consistent spacing. Telegram's HTML subset has no headings, lists, or block layout — send it `<h1>`/`<ul>` and the API rejects the whole message. `transform()` accepts the HTML a model naturally writes and renders the structure typographically: `h1` → bold+underline + blank line, `h2…h6` → bold + blank line, `ul/li` → `• ` bullets, blocks get blank lines, blockquotes keep their internal line breaks, allowed tags pass through with attributes filtered, unknown tags drop their markup (content kept), and stray `<`/`>` escape instead of vanishing. Zero dependencies, no DOM, Worker-safe.
-
-```typescript
-import { transform } from '@adriangalilea/utils/tg-html'
-
-transform('<h1>Title</h1><ul><li>Point one</li><li>Point two</li></ul>')
-// '<b><u>Title</u></b>\n\n• Point one\n• Point two'
-```
-
-### Telegram Markdown (`tg-md`)
-
-The MARKDOWN twin of `tg-html`, for the markdown LLMs actually emit (grown in xtldr's bot, moved here verbatim). One opinionated dialect — `_` is NEVER emphasis so `snake_case` survives, every tag balanced by construction so Telegram can't reject a render, pure whole-string functions so full-frame draft repaints (`bot/draft`) degrade malformed mid-stream markdown to literal text — rendered to every shape a bot sends:
-
-```typescript
-import { markdownToRichHtml, markdownToTelegramHtml, toPlainText, tidyRichMarkdown } from '@adriangalilea/utils/tg-md'
-
-markdownToRichHtml(md, coverUrl) // rich-message HTML (Bot API 10.1): real <h1>/<ul>, cover <img> spliced after the title
-markdownToTelegramHtml(md)       // strict parse_mode=HTML subset: bold-underlined title, breathing headings, • bullets, ###### footer stays quiet
-toPlainText(md)                  // last-ditch fallback; quotes keep their > marker
-tidyRichMarkdown(md)             // strip the stray ```fence``` models wrap replies in
-```
-
-Zero dependencies, Worker-safe. Typography (heading air, bullet glyph, title underline) IS the opinion; it gets options when a second consumer needs a different look, not before.
-
-### Telegram bot plugins (GramIO)
-
-Plugins for personal Telegram bots built on [GramIO](https://gramio.dev). Each plugin lives at its own subpath; peer deps (`gramio`, `@gramio/storage`, `@gramio/session`, `@gramio/format`) are **all optional** — install only what you import.
-
-```bash
-pnpm add @adriangalilea/utils gramio @gramio/storage @gramio/session
-```
-
-#### One bot file, ideation → production (`bot/create`)
-
-`createBot` is the composer: it constructs the storage + session pair ONCE and threads it into every feature, so "must be the SAME instance you passed to session()" is unrepresentable instead of a doc warning. The same file runs in every stage — **storage and transport are environment decisions, never code shape**:
-
-| stage | run | session | transport |
-|---|---|---|---|
-| ideation | `BOT_TOKEN=… tsx bot.ts` | memory (ephemeral, announced) | long-poll |
-| experiment | `BOT_PERSIST=./bot.sqlite tsx bot.ts` | sqlite | long-poll |
-| prod · your own hardware | systemd/launchd unit running the same command | sqlite / `BOT_PERSIST=redis://…` | long-poll (a legitimate prod mode: dials out, no inbound port/TLS) |
-| prod · Cloudflare Worker | `wrangler deploy` (D1 binding `DB`) | D1 (`bot/storage-d1`) | webhook (`bot/worker`) |
-| prod · Node/Bun server | webhook behind your HTTP server | sqlite/redis | fetch-shaped handler |
-
-```typescript
-import { createBot } from '@adriangalilea/utils/bot/create'
-
-const app = createBot({
-  admins: 190202471,
-  language: { supported: ['en', 'es'] as const, default: 'en' },
-  menu: {
-    adminContact: '@you',
-    header: async (ctx) => `⚙️ hi ${ctx.from?.firstName}`,   // async — read your db here
-    items: [/* … */],
-    personalData: { onForget: async (ctx, userId) => {/* wipe YOUR tables */} },
-  },
-  handlers: (bot) => bot.command('start', (ctx) => ctx.say({ en: 'hi', es: 'hola' })),
-})
-
-export default app                       // Worker: webhook + /setup + /pause + deploy DMs
-if (app.isMain(import.meta)) app.poll()  // Node: `tsx bot.ts` long-polls
-```
-
-Cloudflare is one adapter, not the architecture: `bot/worker` and `bot/storage-d1` are the workerd cap (~each 100 lines, both optional); `bot/kit`'s `gracefulStart` is the Node twin (signals + start/stop DMs) and stays the one deliberately Node-only corner. The worker-safe tripwire (`pnpm test:worker-safe`) guarantees the core never grows a Node dependency.
-
-#### Design rules the bot plugins hold to (each learned the hard way)
-
-- **Resolution is read-time.** Language resolves stored pick → live Telegram hint → default on every surface (`ctx.lang`, `ctx.say`, menu chrome, picker highlight). Inferred values are NEVER persisted — a user who switches their client language moves with it until they pick.
-- **Only explicit user signals are stored.** The session holds picks, consent, state the user created — never derived values, never render caches. If a sync signature ever tempts you to cache a rendered string into the session, the signature is the bug (menu resolvers are async for exactly this reason).
-- **Derives cover every event the user can speak through** — message, callback, AND inline. A feature that skips inline forces consumers to fork shadow helpers that read the session directly; those forks then read as design.
-- **Forget actually forgets.** `personalData.onForget` runs inside the same try as the session delete: your message logs/metrics/credit rows get wiped too, or the user is told it failed — never a partial erasure reading as success.
-- **The composer owns instance wiring.** Features still compose manually (below) when you need full control, but every "same instance" contract has one home.
-
-#### Threaded Mode
-
-Telegram's [Threaded Mode](https://telegram.org/blog/threaded-conversations) for private chats (BotFather → Bot Settings → Threaded Mode) auto-threads out of the box: `@gramio/contexts` ≥0.9 (what gramio ≥0.12 resolves) forwards `message_thread_id` on every `ctx.send` / `ctx.sendDocument` / `ctx.reply` — including from callback handlers, which carry `threadId` too. No fork, no override.
-
-**Runs on Cloudflare Workers / bun / anywhere.** Every bot subpath below is import-safe off Node — no filesystem access, no `node:*` modules, no import-time side effects anywhere in its graph — **except `bot/kit`**, whose `gracefulStart` handles process signals. `pnpm test:worker-safe` walks every graph and screams on regression.
-
-| Subpath | What it does |
-|---|---|
-| `@adriangalilea/utils/bot/ctx` | Structural ctx types (`BotMessageCtx`, `BotCallbackCtx`, …) and the `narrow<T>(ctx)` cast helper. Pure typing — no runtime state. |
-| `@adriangalilea/utils/bot/keys` | The bot-id key namespace, a **persisted contract**: `botId(ctx)`, `botStorageKey(ctx, userId)` → `bot-<id>:<userId>`, `botSubKey(ctx, sub)` → `bot-<id>:<sub>`. Every storage key the library writes derives from here, and those keys live in YOUR Redis/D1 rows — the shape never changes. Pure functions of `ctx.bot.info.id` (no env/fs), which is what keeps the whole bot surface Worker-safe. |
-| `@adriangalilea/utils/bot/kit` | The Node-only corner, one function: `gracefulStart(bot, opts?)` — SIGINT/SIGTERM → `bot.stop()` → exit; force-kills if shutdown hangs; calls `bot.syncCommands()` before `bot.start()`. DMs the admin `@<bot> started.` / `@<bot> shutting down.` by default when `KEV.TELEGRAM_ADMIN_ID` is set (graceful only — crashes don't trigger `onStop`); pass `notifyAdmin: false` to disable or `notifyAdmin: 12345` for an explicit chat id. |
-| `@adriangalilea/utils/bot/admin` | `adminContext(admins)` — decorates `ctx.adminId` (the primary admin: the approve/deny and notification target) and `ctx.isAdmin` (any admin) on every event. Ids arrive POSITIONALLY as a number, an array, or a FUNCTION consulted per update, so a db-backed resolver changes who is admin with no restart. Reads no env and touches no OS, which is what keeps it Worker-safe; a Node bot composes env in at the call site (`adminContext(kev.int('TELEGRAM_ADMIN_ID', 123))`). `parseIdList("123, 456 789")` turns an env string into clean ids. `accessControl` and the payments refund flow declare a gramio dependency on this plugin, so gramio throws at `bot.start()` if you forget it. |
-| `@adriangalilea/utils/bot/session` | `botSession(opts)` — **drop-in replacement for `@gramio/session`'s `session()`** that auto-namespaces every key as `bot-<id>:<senderId>` using `ctx.bot.info.id` (populated by `getMe()` at startup). Use this instead of `session()` — full stop. Multiple bots sharing one Redis/D1 stay isolated by construction; every plugin in this package derives the same prefix internally via `botStorageKey(ctx, userId)` / `botSubKey(ctx, sub)` (from `bot/keys`). No regex, no manual prefix argument, no way to forget. Worker-safe. |
-| `@adriangalilea/utils/bot/notify` | Best-effort admin DMs, worker-safe (you pass the ids; no env, no process). `notifyAdmins(bot, adminIds, text, extra?)` — DM each admin, failures logged and swallowed (a notification must never take the bot down). `alertAdminError(bot, adminIds, label, error, throttle?)` — truncated `🚨 label\nName: message`, rate-limited through a caller-owned `alertThrottle(ms?)` so a failure storm sends one alert per window. `gracefulStart`'s start/stop DMs are built on this. |
-| `@adriangalilea/utils/bot/profile` | `syncBotProfile(bot, { name?, description?, about?, photo?, commands?, expects?, adminIds? })` — the bot's Telegram-facing identity as CODE, never BotFather: localized name / description / About / public command list, reconciled idempotently on every boot (get → compare → set per field per language; unchanged values cost one read, so cold-start firing is rate-limit-free). `expects: { inline: true }` declares the BotFather-only capabilities the code assumes — a mismatch (inline mode off on an inline-dependent bot) DMs the admins, since the API can only detect it, not fix it. Never throws; failures log and the bot keeps running. |
-| `@adriangalilea/utils/bot/access-control` | Personal-bot ACL — gates non-admin/non-default users; admin gets DM with `[✅ Aprobar][❌ Denegar]` on first attempt; `/access` opens a persistent menu (revoke / reapprove / list pending). Backed by `@gramio/session` per-user + a small index. **Native alternative**: BotFather → Bot Settings → Access → "Restrict bot usage" — flat allow-list at Telegram. Use this plugin when you want in-bot approval flow instead of a BotFather round-trip; both can coexist. |
-| `@adriangalilea/utils/bot/allow-list` | Static allow-list by **id and/or @username** — stateless, no session/storage. `allowList({ ids?, usernames? })` is a plugin that decorates `ctx.allowed` (boolean); gate in your handlers (`if (!ctx.allowed) return`). `makeAllowList(...)` is the pure framework-free predicate. The light counterpart to `access-control` (which adds an approve/deny flow + revocable store, needing session+storage). Username caveat: a `@username` is optional and mutable, and the Bot API can't resolve username→id ahead of time — prefer `ids` when known, `usernames` is the pragmatic fallback. |
-| `@adriangalilea/utils/bot/groups` | Group-chat identity as plain functions: `chatIdOf(ctx)` (the chat id on any ctx flavour), `isGroupChat(ctx)` / `isPrivateChat(ctx)`, and `isGroupAdmin(ctx, { chatId?, userId? }?)` — the `getChatMember` creator/administrator check behind every admin-gated group setting (auto-summary toggles, "dismiss" buttons on group welcomes), chat/user defaulted from the ctx. Every reader resolves both gramio spellings — message ctxs carry `chat`, callback ctxs (inline-button taps) only `chatId`/`message.chat` — so the same gate works in handlers and taps; read chat ids via `chatIdOf`, never `ctx.chat?.id`. Takes real gramio ctxs and `MenuCtx` with no cast; a miswired ctx panics, an API rejection fails closed (`false`). Composition over policy: bot-owner override stays at your call site (`ctx.isAdmin \|\| await isGroupAdmin(ctx)`). |
-| `@adriangalilea/utils/bot/language` (picker surface) | The language-picker vocabulary and surfaces, so bots don't fork label lists: `flagFor` / `autonym` / `languageLabel` ("🇪🇸 Español"), `languagePickerItem({ label, codes, isActive, pick })` (the 2-up primary-highlighted MenuItem factory — storage and policy live in your closures), and `addLanguageRows(kb, { codes, pack, active?, activeStyle? })` (the raw-InlineKeyboard twin for onboarding / group-welcome keyboards; `activeStyle: "success"` when primary already marks something else on the keyboard). |
-| `@adriangalilea/utils/bot/user` | `userLabel(u)` — the conditional "[name] [@username] [id]" line every bot re-rolls for admin DMs and logs: `Ada Lovelace (@ada · 42)` / `Ada (42)` / `@ada (42)` / `id 42`, missing pieces drop instead of padding. Reads both gramio spellings (`firstName` / `first_name`); plain text by design. |
-| `@adriangalilea/utils/bot/urls` | Telegram-message URL + entity parsing, on what the platform ALREADY parsed (entities carry exact UTF-16 spans — never `startsWith("/")` or a mention regex). `urlsInMessage(msg)` → the url module's `Url[]`: the visible text scanned by `urlsIn` PLUS `text_link` entities — hyperlinked words whose URL never appears in the text, invisible to any text scanner (what forwarded newsletters carry); a text_link's `raw` is its anchor words and its span covers them, so span-cutting treats linked words as the link. `isCommandMessage(msg)` (a `bot_command` entity at offset 0), `commandToken(msg)` (the leading command without any `@botname` suffix, `/summary@my_bot` → `/summary`; null for ordinary text), `commandAddressee(msg)` (the bot a command is explicitly addressed to, lowercased, null when bare — the group addressing gate: a bare command may belong to any bot in the room, one addressed elsewhere never concerns yours), `cutEntities(text, entities, shouldCut)` (exact span surgery; the predicate sees each visible slice), `messageTextAndEntities(msg)` (text or caption with ITS entity set). Framework-agnostic by shape: gramio's `MessageEntity` class and the raw Bot API object both fit. |
-| `@adriangalilea/utils/bot/announce` | The house announcement (news) template for bot mass messages, first-class: an `Announcement` = banner (`# 📰 <bot> News`), ordered sections (canonical `section.info/features/fixes` with 💬/✨/🐛, free-form allowed), italic closer, `· signature` (middle dot by design, never an em dash). `renderAnnouncement(a)` → the Telegram-markdown subset; `renderAnnouncementBodies({en, es, …})` → per-language bodies for a polyglot broadcast engine ("en" is the required fallback anchor). Pure, zero deps. |
-| `@adriangalilea/utils/bot/updates` | The pending-update queue of a webhook-less bot token, treated as the destroy-on-read resource it is (`getUpdates` with an offset CONFIRMS — destroys — everything below it). `updateQueue({ token, fetch?, apiRoot? })` → `peek({ limit? })` (webhook state + pending count + the queue head, verbatim; sends NO offset so nothing is ever confirmed — repeatable, zero risk), `count()`, `webhookInfo()`, and `drain({ onBatch, limit?, timeoutS?, quietPolls? })` — the one-chance-safe sweep: each raw batch is handed to `onBatch` (persist it somewhere durable) and AWAITED before the offset advances, because the next call is the confirmation; a crash re-delivers the unconfirmed tail on re-run, and the drain ends only after several consecutive silent long-polls, never on the first empty response. A 409 (webhook registered / competing poller) is a typed `SourcedError`, never a silent retry. Plain `fetch`, injectable for tests; no framework. |
-| `@adriangalilea/utils/bot/inline-feedback` | Behavioral tripwire for BotFather's inline feedback probability (gates `chosen_inline_result`; defaults 0%, silently resets on bot transfer and inline-mode toggling, invisible to `getMe`): served-but-never-chosen crosses a threshold → throttled admin DM naming the exact BotFather switch. Storage injected as three ops; never throws into the answer path. |
-| `@adriangalilea/utils/bot/coalesce` | Joins client-split inbound messages back into one. When a user pastes >4096 chars, Telegram clients fragment it into separate `message` updates with no marker. Middleware detects the burst and emits one combined event. |
-| `@adriangalilea/utils/llm` | Multi-provider LLM caller on the Vercel AI SDK — the policy layer the SDK doesn't ship. `createLlm({ providers, health? })` → `.stream(req)` (typed events: `delta` / `reasoning` / `reset` / `tool-call` / `end`) and `.complete(req)`. **Failover:** priority-ordered across OpenAI-compatible, Anthropic-compatible, and OpenRouter endpoints; multiple keys per provider (health tracked per key fingerprint); per-key circuit breaker with exponential cool-down persisted in any KV-shaped `HealthStore`; an attempt that dies after emitting yields `reset` (discard, next candidate regenerates); empty completions count as failures. **Accounting:** tokens summed across billed attempts; `costUsd` is the ACTUAL charge (OpenRouter usage accounting via `providerMetadata`, or a `cost` field on the raw usage frame) — never a price-table estimate. **Knobs:** per-model temperature (none configured, none sent: the model samples its own way, and Claude 5.5 takes none), maxTokens caps, `disableThinking` mapped to each dialect. **Tools:** AI SDK `tool()` + `toolChoice` pass through (re-exported). **Tool loop:** tools with an `execute` run when called, and `stopWhen` (the AI SDK's stop conditions, re-exported: `stepCountIs`, `hasToolCall`, or any function of the steps) calls the model again with their results until one holds; the result's `messages` are every turn the call added (the model's and its tools' results), to append to the conversation; usage sums every step. `prepareStep` (the AI SDK's step hook) may replace what the model reads from a step on, which carries forward: a conversation kept inside its window; and it may say how much the model reasons on that step (`reasoning`, mapped to the provider's own option: openai-compatible, OpenRouter, and Anthropic's adaptive thinking at that effort), over the request's `reasoning`: a loop that thinks only where its task gets hard. **Anthropic prompt cache:** every anthropic request marks its prompt for the cache, since Anthropic caches only what a request asks it to; a tool loop unmarked would read its whole conversation again, at full price, on every step. `requestTimeoutMs` times each request to a model, never the tools between them (a tool may wait on a person). Once a tool has run, a failure is the call's own: no other provider is tried, since its tools would act again. The AI SDK runs a turn's calls at once; tools that must run in order share a `SerialJobExecutor` (re-exported). **Trace:** each call is a `chat` span (kind `inference`) under `log` (a logger or span you pass; the root logger otherwise), and each provider tried is an `attempt` span inside it with OpenTelemetry's gen_ai fields (provider, model, `server.address`, input, cached and output tokens), `cost_usd` when the gateway reports one, `ttft_ms` and `decode_ms`; each model call of a tool loop is a `step` span inside the attempt, with its calls, its finish reason, its tokens and its own `ttft_ms`/`decode_ms` (a turn's tools run as their calls stream in, so a step's decode includes them). **Structured output:** `schema` (zod, or `jsonSchema(…, { validate })`) returns the answer parsed and validated as `object`; an answer that fails it fails its provider and the next is tried. A provider with `structuredOutputs: true` enforces the schema while decoding; otherwise the schema is stated in the instructions. **Failures:** an `LlmError` carries `failures`, one per provider tried, typed: `off-schema` (the model answered, not in the schema's shape: its `text`, and `cut` when its token cap stopped it), `empty`, or `failed` (the call itself: its message and HTTP `status`), so a caller tells an answer it can send back to the model from a server that is down. Worker-safe; peers: `ai`, `@ai-sdk/openai-compatible`, `@ai-sdk/anthropic`, `@openrouter/ai-sdk-provider`. |
-| `@adriangalilea/utils/bot/llm` | The Telegram side of an LLM chatbot; the model side is `@adriangalilea/utils/llm`. **Output:** `streamChatReply(ctx, events, opts?)` consumes an `AsyncIterable<LlmStreamEvent>` and paints it with Telegram's native message-draft streaming (`sendMessageDraft` full-frame repaints, throttled ~1/s, keepalive under the ~30s draft TTL), then persists the finished markdown via `ctx.send`, entity-split across 4096 by `@gramio/split`. Reasoning models get a thinking phase — streams into the ephemeral draft and evaporates (`reasoning: 'preview'`, default), persists as an expandable blockquote (`'message'`), or never renders at all (`'hidden'`). Upstream `reset` (provider failover) repaints the draft from scratch. Drafts are private-chat-only (+ BotFather forum-topic mode); elsewhere the preview phase is skipped and only the final send happens. Returns `{ content, reasoning, toolCalls, usage, messages }`. The painter underneath is `@adriangalilea/utils/bot/draft` (`createDraftPreview(ctx, { render, throttleMs? })`): dependency-light (no markdown machinery), for producers that push deltas or own their per-frame rendering (plain or rich-message frames) and persist path, with `streamForensics` (render-regression + reset warnings) built in and exported standalone. **History:** `llmHistory({...})` returns `.plugin` (decorates `ctx.llm` with `.add() / .get() / .clear() / .all() / .clearAll()`, per-(user, thread) OpenAI `ChatMessage` shape, persisted in the shared session record so the menu's 🗑 Forget wipes it automatically) AND `.menuItem` (drop-in "🗑 Delete this thread" for `botMenu` — wipes the LLM history AND calls `deleteForumTopic` so the Telegram thread + all its messages disappear from the chat; falls back to history-only clear when no `threadId` is present). |
-| `@adriangalilea/utils/metrics` | Declared counters and timings, bounded dimensions, optional actor IDs, and a schema for generic reporting. Inject a store (`store: metricsStore(driver, project)`); measurement failures are reported without rejecting calls. See Product metrics below. |
-| `@adriangalilea/utils/metrics/sqlite` | Atomic SQLite driver, explicit provisioning schema, and inclusive UTC daily reports; libSQL is its own module (`metrics/libsql`) over the same driver shape. Connections and credentials belong to the application. |
-| `@adriangalilea/utils/bot/menu` | `botMenu({ command, description, items, privacy?, personalData?, adminContact })` — `/settings` command + InlineKeyboard router. Root view always renders a `🛡️ Privacy & data` submenu button that wraps the privacy policy link plus (if `personalData: { storage }`) 🗑 Forget + 📥 Export buttons. Items take `keepRow` (render on the same row as the next item — e.g. a two-per-row language picker) and `rootExtra` (render at the bottom of the root menu, below Privacy & data). `label` / `header` / `style` / `visible` resolvers may be **async** (read your db at render time — never cache render strings in the session); `parseMode: 'HTML'` renders the header formatted (you own escaping); `personalData.onForget(ctx, userId)` wipes YOUR tables inside the same try as the session delete, so Forget either forgets everything or reports failure. `toggleMenuItem({ id, read, write, label: { off, on }, toast? })` — convenience factory for boolean-toggle items with dynamic label + optional toast, storage-agnostic via `read`/`write` closures. |
-| `@adriangalilea/utils/bot/payments` | `botPayments({ session, storage, paysupport, paysupportHint?, legal, waiver, vip?, credits?, perks? })` — Telegram Stars monetization in one drop-in plugin. **Three axes, all optional:** `vip` (positional tier ladder — single rung in v1 is just `vip: [{...}]`, ladder is `vip: [{...}, {...}]`; ids are `vip.1`, `vip.2`, …), `credits` (consumable balance + top-up packs `credits.1`, `credits.2`, …), `perks` (orthogonal one-shot unlocks `perks.<key>`). **Surface:** `ctx.payments.atLeast('vip')` / `atLeast('vip.2')` (typed rank check), `ctx.payments.tier()` / `.tier.level()` / `.tier.label()`, `ctx.payments.credits.{balance, consume, tryConsume}` (throws `InsufficientCredits`), `ctx.payments.has(perkId)`, `await ctx.payments.require('vip', { feature? })` (gate that sends a localized upgrade prompt deep-linked to `/settings → 💎 VIP`), `await ctx.payments.invoice(productKey)` (threads Art. 103(m) TRLGDCU consent inline before `sendInvoice`). **Owns:** waiver consent flow (versioned text → forces re-consent on bump, snapshotted on every charge for audit), `/paysupport` slash command (Telegram ToS §6.5; `paysupportHint` overrides the where-to-manage-charges line when your menu isn't `/settings`), idempotent `successful_payment` fulfillment via `pay:idempotency:{chargeId}` sentinel, lazy subscription expiry (no cron needed), tier upgrade auto-cancel of the lower rung's renewal, and admin-DM refund approval (mirror of `accessControl`'s [✅ Aprobar][❌ Denegar] pattern). **Returns:** `{ plugin, menuItem, payouts, admin, onFulfilled, onRefunded }` — `menuItem` is the drop-in `💎 VIP` entry for `botMenu`; `admin.{listCharges, getCharge}` backs custom admin commands; `payouts.{record, list, export, exportForUsers}` is the Fragment payout ledger (you receive TON, log the EUR conversion, export time-windowed CSV/JSON for your gestor); `onFulfilled(productKey \| '*', handler)` / `onRefunded(...)` register fire-and-forget hooks (purchase applied / admin-approved refund — a revenue ledger writes on one, reverses on the other). **Stars-only by design** — Telegram ToS §6.2 forbids third-party payment providers for digital goods. Crypto Pay deferred (MiCA risk); Stripe-outside-Telegram is a future v2 channel. Full compliance memo (Spanish-autónomo seller-of-record analysis, Verifactu vs Crea y Crece, MiCA, Art. 103(m) waiver text, GDPR retention) in `src/bot/payments/CLAUDE.md`. |
-| `@adriangalilea/utils/bot/create` | `createBot<S>({ token?, storage?, initial?, admins?, language?, menu?, access?, payments?, handlers?, worker? })` — the composer (see "One bot file, ideation → production" above). Returns `{ build, session, poll, isMain, fetch }`: `poll()` long-polls, `export default app` is a complete Worker, `app.session(ctx)` / the `handlers` callback's `session(ctx)` is the TYPED accessor for your `S` fields. Owns storage+session wiring; resolves storage per environment (D1 binding → `bot/storage-d1`; `BOT_PERSIST` path → sqlite, `redis://` → redis, lazily-imported optional peers; else announced-ephemeral memory) — or pass `storage: (env) => Storage` when the choice is env-dependent (e.g. a D1 binding not named `DB`). Boot NARRATES the composition (`session storage kind="memory (ephemeral …)"`, `features features=["language(en,es)","menu(/settings)"]`) so every implicit decision is visible where you're looking. Runnable demo: `pnpm demo:bot`. |
-| `@adriangalilea/utils/bot/worker` | `botWorkerFetch(resolve)` — the Cloudflare Worker cap: secret-checked webhook (ack fast, work + storage flush ride `ctx.waitUntil`, errors DM admins throttled), `POST /setup` (webhook registration with handler-derived `allowed_updates` + a commit-narrating 🚀 deploy DM from the request body), `POST /deploy-started` (the 🛳 "what is shipping" DM — curl it from your deploy script on the still-live version, body `{sha, author, message, etaSeconds?}`), operator-authed `/pause` `/resume` `/webhook-status` (+ `statusExtra`), and a `routes` escape hatch tried before the built-ins. `afterUpdate(ctx.updateId, work)` hands off work the reply does not wait for (a cache warm-up): the update ends without it, so it never holds the conversation's next update or counts toward the durable runner's attempt bound, and the Worker stays alive until it settles (`afterWorkMs` on the runner). Structural bot type — no workers-types dependency. |
-| `@adriangalilea/utils/bot/flags` | `defineFlags(spec, { read, write? })` — feature flags declared ONCE in code, resolved LIVE from the bot's operator-config record (D1 json row, Redis hash — storage-agnostic, Worker-safe, zero deps). Each flag: `{ kind: 'bool'\|'number'\|'string', label, help?, default }`, where `default` is a scalar or a **tier map** `{ free, vip?, 'vip.N'? }` resolved off `ctx.payments.tier()` — "free users get this limit, premium users get that model" is one declaration, zero branching at the call site (ladder walks down: exact rung → lower rungs → `vip` → `free`). Read sites: `await flags.<key>(ctx)` — stored override wins over the code default, per-ctx reads coalesce into one config fetch. `flags.describe()` is the JSON schema admin panels render generically, so a new flag appears in every panel with zero panel edits; `flags.set(ctx, key, value)` writes a kind-checked live override (`null` clears it — RFC 7386 null-delete, matching SQLite `json_patch`); `flags.overrides(ctx)` lists what's overridden. Corrupt stored values scream (`SourcedError`); bad specs panic at construction. |
-| `@adriangalilea/utils/bot/storage-d1` | `d1Storage({ db, table? })` — `@gramio/storage` adapter over a D1 `session` table (schema in the module doc). `flush()` matters: the session plugin writes un-awaited and workerd freezes the isolate the instant `fetch()` returns — hand `flush` to `bot/worker` (automatic via `createBot`) so writes survive. |
-
-#### Migrating from 11.1
-
-- `llm`: a provider with no `temperature` (and no `temperatures` entry for its model) sends none, so its server's default applies; it used to send 0.7. Set `temperature: 0.7` to keep the old sampling.
-
-Standard wiring:
-
-```typescript
-import { Bot } from 'gramio'
-import { redisStorage } from '@gramio/storage-redis'
-import { adminContext } from '@adriangalilea/utils/bot/admin'
-import { gracefulStart } from '@adriangalilea/utils/bot/kit'
-import { botSession } from '@adriangalilea/utils/bot/session'
-import { accessControl } from '@adriangalilea/utils/bot/access-control'
-import { createLlm } from '@adriangalilea/utils/llm'
-import { streamChatReply, llmHistory, toModelMessages } from '@adriangalilea/utils/bot/llm'
-import { kev } from '@adriangalilea/utils'
-
-// Raw redis is fine — bot-id namespacing happens inside botSession +
-// every plugin via ctx.bot.info.id. Multiple bots sharing this Redis
-// stay isolated by construction. No manual prefix to remember.
-const storage = redisStorage()
-const userSession = botSession({ storage, key: 'session', initial: () => ({}) })
-const chat = llmHistory({ session: userSession, maxTurns: 20, retentionDays: 7 })
-
-// Any OpenAI-compatible endpoint: vllm-mlx, mlx-lm, llama.cpp, Together, Groq, OpenAI, …
-// More entries = priority failover; a KV-shaped `health` store adds the circuit breaker.
-const llm = createLlm({
-  providers: [{ id: 'local', type: 'openai', baseUrl: process.env.LLM_URL!, apiKey: 'none', defaultModel: process.env.LLM_MODEL! }],
-})
-
-const bot = new Bot(process.env.BOT_TOKEN!)
-  .extend(adminContext(kev.int('TELEGRAM_ADMIN_ID', 190202471)))   // or a live resolver
-  .extend(userSession)
-  .extend(accessControl({ session: userSession, storage, defaults: [] }))
-  .extend(chat.plugin)
-  .on('message', async (ctx) => {
-    if (!ctx.access.allowed) return
-    ctx.llm.add({ role: 'user', content: ctx.text ?? '' })
-
-    // Draft-streamed reply: thinking phase previews + final entity-split send.
-    const { content } = await streamChatReply(ctx, llm.stream({
-      instructions: 'You are helpful.',
-      messages: toModelMessages(ctx.llm.get()),
-    }))
-    ctx.llm.add({ role: 'assistant', content })
-  })
-
-await gracefulStart(bot)
-```
-
-Inside handlers, `ctx.access` is a typed discriminated union — `{ allowed: true, source: 'admin' | 'default' | 'store', record? }` or `{ allowed: false, reason }`. `ctx.adminId` and `ctx.isAdmin` are available on every event from `adminContext`.
-
-For tests/demos without a second Telegram account, `simulateAccessRequest(bot, storage, adminId, fakeUser, msg)` injects a synthetic pending request so admin can exercise the approve/deny flow.
-
-### Menu items — coloured buttons, refresh, toast-return, confirm
-
-`MenuItem` supports four cooperating fields for richer UX. Each is opt-in:
-
-```typescript
-import { botMenu, toggleMenuItem } from '@adriangalilea/utils/bot/menu'
-
-const menu = botMenu({
-  command: 'settings',
-  description: 'Open settings',
-  adminContact: '@yourhandle',
-  personalData: { storage },
-  items: [
-    lang.menuItem,           // ← submenu, selected lang renders as a blue (primary) button
-    chat.menuItem,           // ← red (danger) button with built-in "⚠️ Sure?" confirm step
-
-    // Boolean toggle — dynamic label + automatic colour + auto-refresh + toast.
-    toggleMenuItem({
-      id: 'thinking',
-      read: (ctx) => (ctx.session as { thinking?: boolean }).thinking ?? false,
-      write: (ctx, v) => { (ctx.session as { thinking?: boolean }).thinking = v },
-      label: {
-        off: { en: '💭 Thinking: OFF', es: '💭 Razonamiento: OFF' },
-        on:  { en: '💭 Thinking: ON',  es: '💭 Razonamiento: ON'  },
-      },
-      toast: {
-        on:  { en: 'Thinking on.',  es: 'Razonamiento activado.'  },
-        off: { en: 'Thinking off.', es: 'Razonamiento desactivado.' },
-      },
-    }),
-
-    // Custom destructive action with an explicit confirm step. The
-    // action only runs after the user taps Confirm in the overlay.
-    {
-      id: 'reset',
-      label: { en: '💥 Reset everything', es: '💥 Resetear todo' },
-      style: 'danger',
-      confirm: {
-        prompt: {
-          en: '⚠️ Reset ALL your data?\n\nThis is irreversible.',
-          es: '⚠️ ¿Resetear TODOS tus datos?\n\nNo se puede deshacer.',
-        },
-      },
-      action: (ctx) => {
-        ctx.session.somethingHeavy = undefined
-        // Return the toast string — the menu plugin owns the single
-        // answerCallbackQuery for the tap. Calling ctx.answer here
-        // would be a double-answer and would break refresh.
-        return { en: '✅ Reset.', es: '✅ Reseteado.' }
-      },
-    },
-  ],
-})
-```
-
-Field summary:
-
-- `style: 'primary' | 'success' | 'danger'` (or `(ctx) => …` for state-dependent colouring) maps to Telegram's native [InlineKeyboardButton.style](https://core.telegram.org/bots/api#inlinekeyboardbutton). Use `style` instead of emoji markers (`●`/`○`) for active-selection signalling — same UX, native rendering.
-- `refresh: true` re-renders the menu in place after `action` runs, so dynamic `label` / `style` resolvers reflect mutated state without the user re-opening `/settings`. `toggleMenuItem` enables this by default.
-- `action` returns `void | string | Polyglot<string>`; the menu plugin sends a single `answerCallbackQuery` with that text. **Never call `ctx.answer(...)` from inside an action** — Telegram rejects the second answer, the action throws, and `refresh` never runs.
-- `confirm: { prompt }` adds a one-step confirmation overlay before the action runs. Cancel returns to root. Use this for destructive actions instead of `ctx.answer({ show_alert: true })` — Telegram's alert UI doesn't compose with refresh / toast.
-- `disabled` (a `(ctx) => boolean` predicate on action items) renders the button greyed-out and non-tappable (Bot API 10.3 DisabledButton — no callback ever fires). A disabled button can't explain itself: pair it with header/body copy saying why, and keep a guard in the action for clients predating the field. `radioMenuItem` exposes it per choice as `disabledWhen(ctx, value)`.
-
-**Live state inside resolvers**: `label` / `style` / `header` / `visible` resolvers fire AFTER the action mutated the session, and they may be **async** — read your database (or `ctx.session.<field>`) directly at render time; never cache render strings into the session to satisfy a signature. `ctx.lang` from `bot/language` is a snapshot at event start and goes stale within the same callback; `ctx.say(...)` IS live and safe to use anywhere.
-
-See `src/bot/CLAUDE.md` for storage layout, design decisions, and gotchas.
-
-## Release
-
-Bump version in `package.json`, push to `main`. CI runs the shared workflows in [adriangalilea/ci](https://github.com/adriangalilea/ci):
-
-1. `pnpm run verify` (type-check, lint, tests), build, pack, all without publish rights
-2. Publish the packed tarball to npm via [OIDC trusted publishing](https://docs.npmjs.com/trusted-publishers) (no tokens: GitHub Actions proves identity directly to npm)
-3. Create the tag `vX.Y.Z` and the GitHub release, with a changelog from [git-cliff](https://github.com/orhun/git-cliff)
-
-A version with no GitHub release yet is what triggers this, so a run that fails after publishing is finished by the next push.
 
 ## License
 

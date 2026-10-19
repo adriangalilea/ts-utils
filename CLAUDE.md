@@ -1,4 +1,8 @@
 @README.md
+@packages/utils/README.md
+@packages/llm/README.md
+@packages/bot/README.md
+@packages/metrics/README.md
 
 ## Metrics operations
 
@@ -7,7 +11,7 @@ module over a two-verb driver, and every store gets a driver of its own (libSQL,
 never a client shaped like another client's. Applications own their connections and
 their database: ui writes to a dedicated Turso database, xtldr to its bot's D1, both
 through `METRICS_SCHEMA`, so one reader and one report serve every product. A new
-SQLite store is a new `metrics/<driver>.ts` implementing `query` and `transact` with
+SQLite store is a new `packages/metrics/src/<driver>.ts` implementing `query` and `transact` with
 that driver's native calls; a read-only path (REST) implements `query` alone. The
 store is self-describing: `declare` writes the schema rows once per process, so a
 console reads any product's database with `readReport` and no product endpoint sits
@@ -19,4 +23,4 @@ Daily aggregate rows are retained for long-term trends. Actor rows are opt-in;
 products enabling them must implement deletion and retention before collecting IDs.
 The registry website collects aggregate component counts only.
 
-Public API and migration instructions belong in README.md, imported above.
+Each package's README.md documents its current public API, nothing about past versions. A breaking change is explained in its commit's BREAKING CHANGE footer (it reaches the release notes) and checked with `pnpm consumers` before release.

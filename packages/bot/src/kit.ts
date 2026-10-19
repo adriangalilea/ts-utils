@@ -16,9 +16,9 @@
  * @example
  * import { Bot } from 'gramio'
  * import { redisStorage } from '@gramio/storage-redis'
- * import { botSession } from '@adriangalilea/utils/bot/session'
- * import { gracefulStart } from '@adriangalilea/utils/bot/kit'
- * import { adminContext } from '@adriangalilea/utils/bot/admin'
+ * import { botSession } from '@adriangalilea/bot/session'
+ * import { gracefulStart } from '@adriangalilea/bot/kit'
+ * import { adminContext } from '@adriangalilea/bot/admin'
  * import { kev } from '@adriangalilea/utils/platform/kev'
  *
  * const storage = redisStorage()                          // share across bots, safe

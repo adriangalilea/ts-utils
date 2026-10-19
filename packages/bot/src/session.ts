@@ -16,7 +16,7 @@
  *
  * @example
  * import { redisStorage } from '@gramio/storage-redis'
- * import { botSession } from '@adriangalilea/utils/bot/session'
+ * import { botSession } from '@adriangalilea/bot/session'
  *
  * const storage = redisStorage()                          // share across bots, safe
  * const userSession = botSession({ storage, initial: () => ({}) })

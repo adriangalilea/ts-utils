@@ -43,7 +43,7 @@
  *
  * @example
  * import { Bot } from 'gramio'
- * import { coalesceLongMessages } from '@adriangalilea/utils/bot/coalesce'
+ * import { coalesceLongMessages } from '@adriangalilea/bot/coalesce'
  *
  * const bot = new Bot(process.env.BOT_TOKEN!)
  *   .extend(coalesceLongMessages())     // ← before .on / .command handlers
@@ -54,7 +54,7 @@
  *
  * @example  Power-user escape hatch
  *
- * import { isCoalescent } from '@adriangalilea/utils/bot/coalesce'
+ * import { isCoalescent } from '@adriangalilea/bot/coalesce'
  *
  * if (isCoalescent(prev, curr)) {
  *   // do your own thing

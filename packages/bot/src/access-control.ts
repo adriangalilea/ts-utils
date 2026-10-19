@@ -121,8 +121,8 @@
  * import { Bot } from 'gramio'
  * import { session } from '@gramio/session'
  * import { redisStorage } from '@gramio/storage-redis'
- * import { adminContext, gracefulStart } from '@adriangalilea/utils/bot/kit'
- * import { accessControl } from '@adriangalilea/utils/bot/access-control'
+ * import { adminContext, gracefulStart } from '@adriangalilea/bot/kit'
+ * import { accessControl } from '@adriangalilea/bot/access-control'
  *
  * const storage = redisStorage()
  * const userSession = session({ storage, key: 'session', initial: () => ({}) })

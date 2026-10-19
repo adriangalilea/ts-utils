@@ -11,7 +11,7 @@
  * has no way to resolve a username → id ahead of time. Prefer `ids` when you
  * know them; `usernames` is the pragmatic fallback when you only have the handle.
  *
- *   import { allowList } from '@adriangalilea/utils/bot/allow-list'
+ *   import { allowList } from '@adriangalilea/bot/allow-list'
  *
  *   bot
  *     .extend(allowList({ ids: [123456789], usernames: ['mrwagecuck'] }))

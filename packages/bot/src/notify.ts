@@ -17,7 +17,7 @@
  *     independent budgets).
  *
  * @example
- * import { alertAdminError, alertThrottle, notifyAdmins } from '@adriangalilea/utils/bot/notify'
+ * import { alertAdminError, alertThrottle, notifyAdmins } from '@adriangalilea/bot/notify'
  *
  * const errorAlerts = alertThrottle()          // 60s budget, module-level
  * bot.onError(({ kind, error }) => void alertAdminError(bot, adminIds, `error [${kind}]`, error, errorAlerts))

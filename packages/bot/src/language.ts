@@ -41,7 +41,7 @@
  * import { Bot } from 'gramio'
  * import { session } from '@gramio/session'
  * import { redisStorage } from '@gramio/storage-redis'
- * import { language } from '@adriangalilea/utils/bot/language'
+ * import { language } from '@adriangalilea/bot/language'
  *
  * const userSession = session({
  *   storage: redisStorage(),

@@ -17,7 +17,7 @@
  * kind of drift nobody notices until users do).
  *
  * @example
- * import { syncBotProfile } from '@adriangalilea/utils/bot/profile'
+ * import { syncBotProfile } from '@adriangalilea/bot/profile'
  *
  * void syncBotProfile(bot, {
  *   description: { en: 'What I do…', es: 'Lo que hago…' },   // first key = the default

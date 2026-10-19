@@ -33,7 +33,7 @@
  * wired, every user resolves as `free`.
  *
  * @example
- * import { defineFlags } from '@adriangalilea/utils/bot/flags'
+ * import { defineFlags } from '@adriangalilea/bot/flags'
  *
  * export const flags = defineFlags(
  *   {

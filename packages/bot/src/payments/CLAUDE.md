@@ -17,12 +17,12 @@ re-deriving from scratch.
 ```ts
 import { Bot } from 'gramio'
 import { redisStorage } from '@gramio/storage-redis'
-import { adminContext } from '@adriangalilea/utils/bot/admin'
-import { gracefulStart } from '@adriangalilea/utils/bot/kit'
-import { botSession } from '@adriangalilea/utils/bot/session'
-import { language } from '@adriangalilea/utils/bot/language'
-import { botMenu } from '@adriangalilea/utils/bot/menu'
-import { botPayments } from '@adriangalilea/utils/bot/payments'
+import { adminContext } from '@adriangalilea/bot/admin'
+import { gracefulStart } from '@adriangalilea/bot/kit'
+import { botSession } from '@adriangalilea/bot/session'
+import { language } from '@adriangalilea/bot/language'
+import { botMenu } from '@adriangalilea/bot/menu'
+import { botPayments } from '@adriangalilea/bot/payments'
 
 const storage = redisStorage()
 const userSession = botSession({ storage, key: 'session', initial: () => ({}) })
@@ -437,7 +437,7 @@ charge log. Telegram doesn't push expiry events; we compute.
 ### File layout
 
 ```
-src/bot/payments/
+src/payments/
 ├── CLAUDE.md       ← this file: compliance memo + design + flows
 │
 ├── ── data + config ──
