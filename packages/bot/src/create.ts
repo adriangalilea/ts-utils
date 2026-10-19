@@ -43,6 +43,7 @@ import {
 	type PersonalDataOptions,
 } from "./menu.js";
 import { type BotPaymentsConfig, botPayments } from "./payments/index.js";
+import { longPoll } from "./poll.js";
 import { botSession } from "./session.js";
 import { type D1Like, d1Storage } from "./storage-d1.js";
 import { type BotWorkerRuntime, botWorkerFetch } from "./worker.js";
@@ -334,11 +335,7 @@ export function createBot<
 		session: sessionOf,
 		async poll() {
 			const { bot } = await build();
-			await bot.start();
-			log.ready("polling", {
-				bot: opts.name ?? "bot",
-				username: bot.info?.username,
-			});
+			await longPoll(bot);
 		},
 		isMain(meta: ImportMeta): boolean {
 			const main = (meta as { main?: boolean }).main;

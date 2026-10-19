@@ -1,6 +1,6 @@
 {
 	"name": "@adriangalilea/bot",
-	"version": "1.0.1",
+	"version": "1.1.0",
 	"description": "Telegram bot plugins for GramIO (session, menu, access, language, payments in Stars, LLM replies, Worker cap) and Telegram text (tg-html, tg-md)",
 	"type": "module",
 	"exports": {
@@ -98,6 +98,11 @@
 			"adriangalilea-source": "./src/payments/index.ts",
 			"types": "./dist/payments/index.d.ts",
 			"default": "./dist/payments/index.js"
+		},
+		"./poll": {
+			"adriangalilea-source": "./src/poll.ts",
+			"types": "./dist/poll.d.ts",
+			"default": "./dist/poll.js"
 		},
 		"./profile": {
 			"adriangalilea-source": "./src/profile.ts",

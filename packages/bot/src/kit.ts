@@ -5,8 +5,10 @@
  * sessions) and `bot/notify` (admin DMs) hold the pieces that never
  * needed an OS.
  *
- *   `gracefulStart(bot, opts?)` — wires SIGINT/SIGTERM to bot.stop(),
- *     runs an optional shutdown hook, force-kills if it hangs. DMs the
+ *   `gracefulStart(bot, opts?)` — starts the bot long-polling through
+ *     `bot/poll` (every poll bounded by a deadline), wires SIGINT/SIGTERM
+ *     to stop the poll and bot.stop(), runs an optional shutdown hook,
+ *     force-kills if it hangs. DMs the
  *     admin on start/stop by default (`@<bot> started.` /
  *     `@<bot> shutting down.`) when `KEV.TELEGRAM_ADMIN_ID` is set —
  *     pass `notifyAdmin: false` to disable.
@@ -36,6 +38,7 @@ import { kev } from "@adriangalilea/utils/kev";
 import { log as root } from "@adriangalilea/utils/log";
 import type { AnyBot } from "gramio";
 import { notifyAdmins } from "./notify.js";
+import { type LongPoll, longPoll } from "./poll.js";
 
 const log = root.scope("bot").scope("kit");
 
@@ -78,6 +81,8 @@ export const gracefulStart = async (
 	const forceMs = opts.forceExitAfterMs ?? 10_000;
 
 	let stopping = false;
+	// Set once the bot is polling; a signal during startup finds none to end.
+	let poll: LongPoll | undefined;
 
 	const stop = async (signal: string) => {
 		if (stopping) return;
@@ -91,6 +96,7 @@ export const gracefulStart = async (
 		force.unref?.();
 
 		try {
+			await poll?.stop();
 			await bot.stop();
 			await opts.onShutdown?.();
 			log.success("shutdown clean");
@@ -138,5 +144,5 @@ export const gracefulStart = async (
 		);
 	}
 
-	await bot.start();
+	poll = await longPoll(bot);
 };
