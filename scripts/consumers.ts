@@ -51,10 +51,57 @@ type Exports = Record<string, Record<string, string>>;
 const ours = readdirSync(PACKAGES).map((d) => {
 	const json = JSON.parse(
 		readFileSync(join(PACKAGES, d, "package.json"), "utf8"),
-	) as { name: string; exports: Exports };
-	return { dir: join(PACKAGES, d), name: json.name, exports: json.exports };
+	) as {
+		name: string;
+		exports: Exports;
+		peerDependencies?: Record<string, string>;
+	};
+	return {
+		dir: join(PACKAGES, d),
+		name: json.name,
+		exports: json.exports,
+		peers: Object.keys(json.peerDependencies ?? {}),
+	};
 });
 const names = new Set(ours.map((p) => p.name));
+
+// A peer is the consumer's: installed, a package reads the copy of each peer
+// beside it in the consumer's tree. Compiled from this repo's src, an import
+// there would find this repo's own dev copy instead, and two versions of one
+// package (ai 7.0.130 here, 7.0.143 there) make one type two: a break no
+// install would see.
+
+/** For each peer of a package of ours the consumer has installed, the copy
+ *  beside that installed package, as an install resolves it. Where the
+ *  installed package is comes from the consumer's own program (tsc
+ *  --listFilesOnly), so it holds for any layout: pnpm, bun's isolated store,
+ *  hoisted. A package the consumer never reaches leaves its peers alone. */
+function theirPeers(dir: string, tsc: string): Record<string, string[]> {
+	const listed = spawnSync(tsc, ["--listFilesOnly", "-p", "tsconfig.json"], {
+		cwd: dir,
+		encoding: "utf8",
+		maxBuffer: 64 * 1024 * 1024,
+	}).stdout.split("\n");
+	const out: Record<string, string[]> = {};
+	for (const p of ours) {
+		const marker = `/node_modules/${p.name}/`;
+		const file = listed.find((f) => f.includes(marker));
+		if (!file) continue;
+		const installed = file.slice(0, file.indexOf(marker) + marker.length - 1);
+		for (const peer of p.peers) {
+			if (names.has(peer) || out[peer]) continue;
+			for (let d = installed; dirname(d) !== d; d = dirname(d)) {
+				const at = join(d, "node_modules", peer);
+				if (existsSync(join(at, "package.json"))) {
+					out[peer] = [at];
+					out[`${peer}/*`] = [`${at}/*`];
+					break;
+				}
+			}
+		}
+	}
+	return out;
+}
 
 // Every subpath of every package, to its source: the paths a consumer's tsc
 // reads instead of node_modules. Any other subpath of one of our packages is
@@ -172,7 +219,13 @@ function check(dir: string): Result {
 		temp,
 		JSON.stringify({
 			extends: "./tsconfig.json",
-			compilerOptions: { paths: { ...theirPaths(tsconfig), ...ourPaths } },
+			compilerOptions: {
+				paths: {
+					...theirPaths(tsconfig),
+					...theirPeers(dir, tsc),
+					...ourPaths,
+				},
+			},
 		}),
 	);
 	try {
