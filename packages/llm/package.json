@@ -35,15 +35,6 @@
 		"zod": ">=3.22"
 	},
 	"peerDependenciesMeta": {
-		"@ai-sdk/anthropic": {
-			"optional": true
-		},
-		"@ai-sdk/openai-compatible": {
-			"optional": true
-		},
-		"@openrouter/ai-sdk-provider": {
-			"optional": true
-		},
 		"zod": {
 			"optional": true
 		}
