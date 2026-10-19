@@ -17,7 +17,7 @@ A pnpm workspace. Packages reach each other with `workspace:^` and read each oth
 
 - `pnpm verify` is the whole gate: biome, types, every package's tests and the repo-wide checks.
 - Tests sit beside the code as `*.test.ts` and run under `node --test`: `pnpm test` runs them all, `pnpm --filter <pkg> test` one package, `pnpm --filter <pkg> test:watch` on every save.
-- `pnpm test:repo` runs the repo-wide checks: the bot surface stays Worker-safe, and library code writes no raw `console.*`.
+- `pnpm test:repo` runs the repo-wide checks: the bot surface stays Worker-safe, library code writes no raw `console.*`, and every peer range is `^` the version its devDependency tests (raise both in one change).
 - Live checks that call real services are `*.live.ts` and never run in the gate (`pnpm --filter @adriangalilea/llm test:live`).
 - `pnpm consumers <root>...` (or `CONSUMERS_ROOTS`) compiles every program that depends on these packages against the local `src` and lists what would break. Run it before any breaking release.
 

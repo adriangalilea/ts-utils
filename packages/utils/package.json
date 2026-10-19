@@ -1,6 +1,6 @@
 {
 	"name": "@adriangalilea/utils",
-	"version": "13.0.0",
+	"version": "13.0.1",
 	"description": "TypeScript utilities: logger, offensive programming, format, time, url, currency, CLI programs and output",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -104,7 +104,7 @@
 		"linkifyjs": "^4.3.3"
 	},
 	"peerDependencies": {
-		"next": ">=15"
+		"next": "^16.3.8"
 	},
 	"peerDependenciesMeta": {
 		"next": {

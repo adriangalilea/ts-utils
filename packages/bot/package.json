@@ -1,6 +1,6 @@
 {
 	"name": "@adriangalilea/bot",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Telegram bot plugins for GramIO (session, menu, access, language, payments in Stars, LLM replies, Worker cap) and Telegram text (tg-html, tg-md)",
 	"type": "module",
 	"exports": {
@@ -183,11 +183,11 @@
 		"@adriangalilea/utils": "workspace:^"
 	},
 	"peerDependencies": {
-		"@gramio/format": ">=0.8.0",
-		"@gramio/session": ">=0.2.0",
+		"@gramio/format": "^0.12.1",
+		"@gramio/session": "^0.2.0",
 		"@gramio/split": "^0.0.1",
-		"@gramio/storage": ">=2.0.0",
-		"gramio": "^0.15.0"
+		"@gramio/storage": "^2.0.1",
+		"gramio": "^0.15.1"
 	},
 	"peerDependenciesMeta": {
 		"@gramio/format": {
