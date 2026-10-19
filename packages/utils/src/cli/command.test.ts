@@ -119,6 +119,13 @@ const refused2 = (
 	if (g.command === "send")
 		assert.deepEqual(g.values, { json: true, self: true });
 	assert.deepEqual(run("send", "--", "--odd").args, ["--odd"]);
+	// a lone dash is a word (stdin, by convention), as an argument or a value
+	assert.deepEqual(run("send", "-").args, ["-"]);
+	const h = run("inbox", "--dir", "-");
+	if (h.command === "inbox") assert.equal(h.values.dir, "-");
+	// a flag given twice keeps its last value, unless it is a list
+	const i = run("inbox", "-d", "/a", "--dir=/b");
+	if (i.command === "inbox") assert.equal(i.values.dir, "/b");
 	// each command's values are its own flags and the global ones, typed
 	if (g.command === "send") {
 		const to: string | undefined = g.values.to;
@@ -144,6 +151,9 @@ refused(["inbox", "-x"], /^-x is no flag of eid inbox: eid help inbox$/);
 refused(["sned"], /^No command "sned": eid send\?$/);
 refused(["inbox", "--wacth"], /--watch\?$/);
 refused(["inbox", "--dir"], /--dir needs a value: -d, --dir <path>/);
+// a flag where its value should be is no value: the value is missing
+refused(["inbox", "--dir", "--watch"], /--dir needs a value: -d, --dir <path>/);
+refused(["inbox", "-d", "-w"], /--dir needs a value: -d, --dir <path>/);
 refused(["inbox", "--watch=yes"], /--watch takes no value/);
 
 // arguments counted from `args`
