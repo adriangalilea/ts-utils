@@ -9,8 +9,8 @@
 		"includes": [
 			"**",
 			"!**/dist",
-			"!src/universal/url/tidy-rules.ts",
-			"!src/universal/currency/crypto-symbols-data.ts"
+			"!packages/utils/src/universal/url/tidy-rules.ts",
+			"!packages/utils/src/universal/currency/crypto-symbols-data.ts"
 		]
 	},
 	"formatter": {

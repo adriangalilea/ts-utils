@@ -1,0 +1,239 @@
+{
+	"name": "@adriangalilea/bot",
+	"version": "1.0.0",
+	"description": "Telegram bot plugins for GramIO (session, menu, access, language, payments in Stars, LLM replies, Worker cap) and Telegram text (tg-html, tg-md)",
+	"type": "module",
+	"exports": {
+		"./access-control": {
+			"adriangalilea-source": "./src/access-control.ts",
+			"types": "./dist/access-control.d.ts",
+			"default": "./dist/access-control.js"
+		},
+		"./admin": {
+			"adriangalilea-source": "./src/admin.ts",
+			"types": "./dist/admin.d.ts",
+			"default": "./dist/admin.js"
+		},
+		"./allow-list": {
+			"adriangalilea-source": "./src/allow-list.ts",
+			"types": "./dist/allow-list.d.ts",
+			"default": "./dist/allow-list.js"
+		},
+		"./announce": {
+			"adriangalilea-source": "./src/announce.ts",
+			"types": "./dist/announce.d.ts",
+			"default": "./dist/announce.js"
+		},
+		"./callbacks": {
+			"adriangalilea-source": "./src/callbacks.ts",
+			"types": "./dist/callbacks.d.ts",
+			"default": "./dist/callbacks.js"
+		},
+		"./coalesce": {
+			"adriangalilea-source": "./src/coalesce.ts",
+			"types": "./dist/coalesce.d.ts",
+			"default": "./dist/coalesce.js"
+		},
+		"./create": {
+			"adriangalilea-source": "./src/create.ts",
+			"types": "./dist/create.d.ts",
+			"default": "./dist/create.js"
+		},
+		"./ctx": {
+			"adriangalilea-source": "./src/ctx.ts",
+			"types": "./dist/ctx.d.ts",
+			"default": "./dist/ctx.js"
+		},
+		"./draft": {
+			"adriangalilea-source": "./src/draft.ts",
+			"types": "./dist/draft.d.ts",
+			"default": "./dist/draft.js"
+		},
+		"./flags": {
+			"adriangalilea-source": "./src/flags.ts",
+			"types": "./dist/flags.d.ts",
+			"default": "./dist/flags.js"
+		},
+		"./groups": {
+			"adriangalilea-source": "./src/groups.ts",
+			"types": "./dist/groups.d.ts",
+			"default": "./dist/groups.js"
+		},
+		"./inline-feedback": {
+			"adriangalilea-source": "./src/inline-feedback.ts",
+			"types": "./dist/inline-feedback.d.ts",
+			"default": "./dist/inline-feedback.js"
+		},
+		"./keys": {
+			"adriangalilea-source": "./src/keys.ts",
+			"types": "./dist/keys.d.ts",
+			"default": "./dist/keys.js"
+		},
+		"./kit": {
+			"adriangalilea-source": "./src/kit.ts",
+			"types": "./dist/kit.d.ts",
+			"default": "./dist/kit.js"
+		},
+		"./language": {
+			"adriangalilea-source": "./src/language.ts",
+			"types": "./dist/language.d.ts",
+			"default": "./dist/language.js"
+		},
+		"./llm": {
+			"adriangalilea-source": "./src/llm.ts",
+			"types": "./dist/llm.d.ts",
+			"default": "./dist/llm.js"
+		},
+		"./menu": {
+			"adriangalilea-source": "./src/menu.ts",
+			"types": "./dist/menu.d.ts",
+			"default": "./dist/menu.js"
+		},
+		"./notify": {
+			"adriangalilea-source": "./src/notify.ts",
+			"types": "./dist/notify.d.ts",
+			"default": "./dist/notify.js"
+		},
+		"./payments": {
+			"adriangalilea-source": "./src/payments/index.ts",
+			"types": "./dist/payments/index.d.ts",
+			"default": "./dist/payments/index.js"
+		},
+		"./profile": {
+			"adriangalilea-source": "./src/profile.ts",
+			"types": "./dist/profile.d.ts",
+			"default": "./dist/profile.js"
+		},
+		"./reactions": {
+			"adriangalilea-source": "./src/reactions.ts",
+			"types": "./dist/reactions.d.ts",
+			"default": "./dist/reactions.js"
+		},
+		"./session": {
+			"adriangalilea-source": "./src/session.ts",
+			"types": "./dist/session.d.ts",
+			"default": "./dist/session.js"
+		},
+		"./storage": {
+			"adriangalilea-source": "./src/storage.ts",
+			"types": "./dist/storage.d.ts",
+			"default": "./dist/storage.js"
+		},
+		"./storage-d1": {
+			"adriangalilea-source": "./src/storage-d1.ts",
+			"types": "./dist/storage-d1.d.ts",
+			"default": "./dist/storage-d1.js"
+		},
+		"./text": {
+			"adriangalilea-source": "./src/text.ts",
+			"types": "./dist/text.d.ts",
+			"default": "./dist/text.js"
+		},
+		"./update-identity": {
+			"adriangalilea-source": "./src/update-identity.ts",
+			"types": "./dist/update-identity.d.ts",
+			"default": "./dist/update-identity.js"
+		},
+		"./updates": {
+			"adriangalilea-source": "./src/updates.ts",
+			"types": "./dist/updates.d.ts",
+			"default": "./dist/updates.js"
+		},
+		"./urls": {
+			"adriangalilea-source": "./src/urls.ts",
+			"types": "./dist/urls.d.ts",
+			"default": "./dist/urls.js"
+		},
+		"./user": {
+			"adriangalilea-source": "./src/user.ts",
+			"types": "./dist/user.d.ts",
+			"default": "./dist/user.js"
+		},
+		"./worker": {
+			"adriangalilea-source": "./src/worker.ts",
+			"types": "./dist/worker.d.ts",
+			"default": "./dist/worker.js"
+		},
+		"./tg-html": {
+			"adriangalilea-source": "./src/tg-html/index.ts",
+			"types": "./dist/tg-html/index.d.ts",
+			"default": "./dist/tg-html/index.js"
+		},
+		"./tg-md": {
+			"adriangalilea-source": "./src/tg-md/index.ts",
+			"types": "./dist/tg-md/index.d.ts",
+			"default": "./dist/tg-md/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"sideEffects": false,
+	"scripts": {
+		"build": "rm -rf dist && tsc -p tsconfig.build.json",
+		"typecheck": "tsc --noEmit",
+		"test": "node --conditions=adriangalilea-source --import tsx --test 'src/**/*.test.ts'",
+		"test:watch": "node --conditions=adriangalilea-source --import tsx --test --watch 'src/**/*.test.ts'",
+		"verify": "pnpm run typecheck && pnpm run test",
+		"demo:bot": "tsx --conditions=adriangalilea-source examples/create-demo.ts",
+		"demo:bot-integration": "tsx --conditions=adriangalilea-source examples/bot-integration.ts"
+	},
+	"dependencies": {
+		"@adriangalilea/llm": "workspace:^",
+		"@adriangalilea/utils": "workspace:^"
+	},
+	"peerDependencies": {
+		"@gramio/format": ">=0.8.0",
+		"@gramio/session": ">=0.2.0",
+		"@gramio/split": "^0.0.1",
+		"@gramio/storage": ">=2.0.0",
+		"gramio": "^0.15.0"
+	},
+	"peerDependenciesMeta": {
+		"@gramio/format": {
+			"optional": true
+		},
+		"@gramio/session": {
+			"optional": true
+		},
+		"@gramio/split": {
+			"optional": true
+		},
+		"@gramio/storage": {
+			"optional": true
+		},
+		"gramio": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@gramio/format": "^0.12.1",
+		"@gramio/session": "^0.2.0",
+		"@gramio/split": "^0.0.1",
+		"@gramio/storage": "^2.0.1",
+		"ai": "^7.0.130",
+		"gramio": "^0.15.1",
+		"zod": "^4.4.3"
+	},
+	"keywords": [
+		"telegram",
+		"bot",
+		"gramio",
+		"cloudflare-workers"
+	],
+	"author": "Adrian Galilea <adriangalilea@gmail.com>",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/adriangalilea/ts-utils.git",
+		"directory": "packages/bot"
+	},
+	"homepage": "https://github.com/adriangalilea/ts-utils/tree/main/packages/bot#readme",
+	"bugs": {
+		"url": "https://github.com/adriangalilea/ts-utils/issues"
+	},
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org/"
+	}
+}

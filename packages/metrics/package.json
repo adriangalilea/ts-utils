@@ -1,0 +1,81 @@
+{
+	"name": "@adriangalilea/metrics",
+	"version": "1.0.0",
+	"description": "Declared product metrics on SQLite (libSQL, D1): counters, timings, audiences, self-describing stores and generic reports",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"adriangalilea-source": "./src/index.ts",
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		},
+		"./sqlite": {
+			"adriangalilea-source": "./src/sqlite.ts",
+			"types": "./dist/sqlite.d.ts",
+			"default": "./dist/sqlite.js"
+		},
+		"./libsql": {
+			"adriangalilea-source": "./src/libsql.ts",
+			"types": "./dist/libsql.d.ts",
+			"default": "./dist/libsql.js"
+		},
+		"./d1": {
+			"adriangalilea-source": "./src/d1.ts",
+			"types": "./dist/d1.d.ts",
+			"default": "./dist/d1.js"
+		},
+		"./d1-rest": {
+			"adriangalilea-source": "./src/d1-rest.ts",
+			"types": "./dist/d1-rest.d.ts",
+			"default": "./dist/d1-rest.js"
+		},
+		"./report": {
+			"adriangalilea-source": "./src/report.ts",
+			"types": "./dist/report.d.ts",
+			"default": "./dist/report.js"
+		},
+		"./cli": {
+			"adriangalilea-source": "./src/cli.ts",
+			"types": "./dist/cli.d.ts",
+			"default": "./dist/cli.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"sideEffects": false,
+	"scripts": {
+		"build": "rm -rf dist && tsc -p tsconfig.build.json",
+		"typecheck": "tsc --noEmit",
+		"test": "node --conditions=adriangalilea-source --import tsx --test 'src/**/*.test.ts'",
+		"test:watch": "node --conditions=adriangalilea-source --import tsx --test --watch 'src/**/*.test.ts'",
+		"verify": "pnpm run typecheck && pnpm run test"
+	},
+	"dependencies": {
+		"@adriangalilea/utils": "workspace:^"
+	},
+	"keywords": [
+		"metrics",
+		"sqlite",
+		"libsql",
+		"d1",
+		"turso"
+	],
+	"author": "Adrian Galilea <adriangalilea@gmail.com>",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/adriangalilea/ts-utils.git",
+		"directory": "packages/metrics"
+	},
+	"homepage": "https://github.com/adriangalilea/ts-utils/tree/main/packages/metrics#readme",
+	"bugs": {
+		"url": "https://github.com/adriangalilea/ts-utils/issues"
+	},
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org/"
+	}
+}

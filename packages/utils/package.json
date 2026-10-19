@@ -1,0 +1,141 @@
+{
+	"name": "@adriangalilea/utils",
+	"version": "13.0.0",
+	"description": "TypeScript utilities: logger, offensive programming, format, time, url, currency, CLI programs and output",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"type": "module",
+	"exports": {
+		".": {
+			"adriangalilea-source": "./src/index.ts",
+			"types": "./dist/index.d.ts",
+			"browser": "./dist/browser.js",
+			"node": "./dist/index.js",
+			"default": "./dist/index.js"
+		},
+		"./browser": {
+			"adriangalilea-source": "./src/browser.ts",
+			"types": "./dist/browser.d.ts",
+			"default": "./dist/browser.js"
+		},
+		"./runtime": {
+			"adriangalilea-source": "./src/runtime.ts",
+			"types": "./dist/runtime.d.ts",
+			"default": "./dist/runtime.js"
+		},
+		"./offensive": {
+			"adriangalilea-source": "./src/offensive.ts",
+			"types": "./dist/offensive.d.ts",
+			"default": "./dist/offensive.js"
+		},
+		"./kev": {
+			"adriangalilea-source": "./src/platform/kev.ts",
+			"types": "./dist/platform/kev.d.ts",
+			"default": "./dist/platform/kev.js"
+		},
+		"./ansi": {
+			"adriangalilea-source": "./src/universal/ansi.ts",
+			"types": "./dist/universal/ansi.d.ts",
+			"default": "./dist/universal/ansi.js"
+		},
+		"./format": {
+			"adriangalilea-source": "./src/universal/format.ts",
+			"types": "./dist/universal/format.d.ts",
+			"default": "./dist/universal/format.js"
+		},
+		"./time": {
+			"adriangalilea-source": "./src/universal/time.ts",
+			"types": "./dist/universal/time.d.ts",
+			"default": "./dist/universal/time.js"
+		},
+		"./url": {
+			"adriangalilea-source": "./src/universal/url/index.ts",
+			"types": "./dist/universal/url/index.d.ts",
+			"default": "./dist/universal/url/index.js"
+		},
+		"./url/sites": {
+			"adriangalilea-source": "./src/universal/url/sites.ts",
+			"types": "./dist/universal/url/sites.d.ts",
+			"default": "./dist/universal/url/sites.js"
+		},
+		"./log": {
+			"adriangalilea-source": "./src/universal/log.ts",
+			"types": "./dist/universal/log.d.ts",
+			"default": "./dist/universal/log.js"
+		},
+		"./log/next": {
+			"adriangalilea-source": "./src/next/log.ts",
+			"types": "./dist/next/log.d.ts",
+			"default": "./dist/next/log.js"
+		},
+		"./cli": {
+			"adriangalilea-source": "./src/cli/index.ts",
+			"types": "./dist/cli/index.d.ts",
+			"default": "./dist/cli/index.js"
+		},
+		"./currency": {
+			"adriangalilea-source": "./src/universal/currency/index.ts",
+			"types": "./dist/universal/currency/index.d.ts",
+			"default": "./dist/universal/currency/index.js"
+		},
+		"./say": {
+			"adriangalilea-source": "./src/say/index.ts",
+			"types": "./dist/say/index.d.ts",
+			"default": "./dist/say/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"sideEffects": false,
+	"scripts": {
+		"build": "rm -rf dist && tsc -p tsconfig.build.json",
+		"typecheck": "tsc --noEmit",
+		"test": "node --conditions=adriangalilea-source --import tsx --test 'src/**/*.test.ts'",
+		"test:watch": "node --conditions=adriangalilea-source --import tsx --test --watch 'src/**/*.test.ts'",
+		"verify": "pnpm run typecheck && pnpm run test",
+		"update-crypto": "tsx scripts/update-crypto-list.ts",
+		"update-url-rules": "tsx scripts/update-url-rules.ts",
+		"example": "tsx examples/example.ts",
+		"demo:cli": "tsx examples/cli-demo.ts",
+		"demo:live": "tsx examples/live-demo.ts"
+	},
+	"dependencies": {
+		"linkifyjs": "^4.3.3"
+	},
+	"peerDependencies": {
+		"next": ">=15"
+	},
+	"peerDependenciesMeta": {
+		"next": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"next": "^16.3.8",
+		"react": "^19.3.0",
+		"react-dom": "^19.3.0"
+	},
+	"keywords": [
+		"typescript",
+		"utils",
+		"log",
+		"cli",
+		"format"
+	],
+	"author": "Adrian Galilea <adriangalilea@gmail.com>",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/adriangalilea/ts-utils.git",
+		"directory": "packages/utils"
+	},
+	"homepage": "https://github.com/adriangalilea/ts-utils/tree/main/packages/utils#readme",
+	"bugs": {
+		"url": "https://github.com/adriangalilea/ts-utils/issues"
+	},
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org/"
+	}
+}

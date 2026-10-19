@@ -7,20 +7,29 @@ settings:
 importers:
 
   .:
-    dependencies:
-      linkifyjs:
-        specifier: ^4.3.3
-        version: 4.3.3
     devDependencies:
-      '@ai-sdk/anthropic':
-        specifier: ^4.0.74
-        version: 4.0.74(zod@4.4.3)
-      '@ai-sdk/openai-compatible':
-        specifier: ^3.0.65
-        version: 3.0.65(zod@4.4.3)
       '@biomejs/biome':
         specifier: 2.4.15
         version: 2.4.15
+      '@types/node':
+        specifier: ^24.3.0
+        version: 24.3.0
+      tsx:
+        specifier: ^4.20.4
+        version: 4.20.4
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.2
+
+  packages/bot:
+    dependencies:
+      '@adriangalilea/llm':
+        specifier: workspace:^
+        version: link:../llm
+      '@adriangalilea/utils':
+        specifier: workspace:^
+        version: link:../utils
+    devDependencies:
       '@gramio/format':
         specifier: ^0.12.1
         version: 0.12.1(marked@15.0.12)
@@ -33,18 +42,50 @@ importers:
       '@gramio/storage':
         specifier: ^2.0.1
         version: 2.0.1
-      '@openrouter/ai-sdk-provider':
-        specifier: ^3.1.0
-        version: 3.1.0(ai@7.0.130(zod@4.4.3))(zod@4.4.3)
-      '@types/node':
-        specifier: ^24.3.0
-        version: 24.3.0
       ai:
         specifier: ^7.0.130
         version: 7.0.130(zod@4.4.3)
       gramio:
         specifier: ^0.15.1
         version: 0.15.1(inspectable@3.0.2)(marked@15.0.12)
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+
+  packages/llm:
+    dependencies:
+      '@adriangalilea/utils':
+        specifier: workspace:^
+        version: link:../utils
+    devDependencies:
+      '@ai-sdk/anthropic':
+        specifier: ^4.0.74
+        version: 4.0.74(zod@4.4.3)
+      '@ai-sdk/openai-compatible':
+        specifier: ^3.0.65
+        version: 3.0.65(zod@4.4.3)
+      '@openrouter/ai-sdk-provider':
+        specifier: ^3.1.0
+        version: 3.1.0(ai@7.0.130(zod@4.4.3))(zod@4.4.3)
+      ai:
+        specifier: ^7.0.130
+        version: 7.0.130(zod@4.4.3)
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+
+  packages/metrics:
+    dependencies:
+      '@adriangalilea/utils':
+        specifier: workspace:^
+        version: link:../utils
+
+  packages/utils:
+    dependencies:
+      linkifyjs:
+        specifier: ^4.3.3
+        version: 4.3.3
+    devDependencies:
       next:
         specifier: ^16.3.8
         version: 16.3.8(@types/node@24.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -54,15 +95,6 @@ importers:
       react-dom:
         specifier: ^19.3.0
         version: 19.3.0(react@19.3.0)
-      tsx:
-        specifier: ^4.20.4
-        version: 4.20.4
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.2
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
 
 packages:
 

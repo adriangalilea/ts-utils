@@ -1,3 +1,11 @@
+# One repo, one package per audience: utils (the core every program uses),
+# llm, bot, metrics. Each has its own version and npm name; inside the repo
+# they reach each other through workspace:^ and read each other's src via the
+# adriangalilea-source export condition, so no build stands between an edit
+# and a test.
+packages:
+  - packages/*
+
 allowBuilds:
   esbuild: false
 

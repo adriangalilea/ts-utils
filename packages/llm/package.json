@@ -1,0 +1,80 @@
+{
+	"name": "@adriangalilea/llm",
+	"version": "1.0.0",
+	"description": "Multi-provider LLM caller on the Vercel AI SDK: failover, per-key circuit breaker, billed-cost accounting, tool loops, structured output",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"adriangalilea-source": "./src/index.ts",
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"sideEffects": false,
+	"scripts": {
+		"build": "rm -rf dist && tsc -p tsconfig.build.json",
+		"typecheck": "tsc --noEmit",
+		"test": "node --conditions=adriangalilea-source --import tsx --test 'src/**/*.test.ts'",
+		"test:watch": "node --conditions=adriangalilea-source --import tsx --test --watch 'src/**/*.test.ts'",
+		"test:live": "node --conditions=adriangalilea-source --import tsx src/index.live.ts",
+		"verify": "pnpm run typecheck && pnpm run test"
+	},
+	"dependencies": {
+		"@adriangalilea/utils": "workspace:^"
+	},
+	"peerDependencies": {
+		"@ai-sdk/anthropic": "^4.0.0",
+		"@ai-sdk/openai-compatible": "^3.0.0",
+		"@openrouter/ai-sdk-provider": "^3.0.0",
+		"ai": "^7.0.0",
+		"zod": ">=3.22"
+	},
+	"peerDependenciesMeta": {
+		"@ai-sdk/anthropic": {
+			"optional": true
+		},
+		"@ai-sdk/openai-compatible": {
+			"optional": true
+		},
+		"@openrouter/ai-sdk-provider": {
+			"optional": true
+		},
+		"zod": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@ai-sdk/anthropic": "^4.0.74",
+		"@ai-sdk/openai-compatible": "^3.0.65",
+		"@openrouter/ai-sdk-provider": "^3.1.0",
+		"ai": "^7.0.130",
+		"zod": "^4.4.3"
+	},
+	"keywords": [
+		"llm",
+		"ai-sdk",
+		"failover",
+		"openrouter",
+		"anthropic"
+	],
+	"author": "Adrian Galilea <adriangalilea@gmail.com>",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/adriangalilea/ts-utils.git",
+		"directory": "packages/llm"
+	},
+	"homepage": "https://github.com/adriangalilea/ts-utils/tree/main/packages/llm#readme",
+	"bugs": {
+		"url": "https://github.com/adriangalilea/ts-utils/issues"
+	},
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org/"
+	}
+}
