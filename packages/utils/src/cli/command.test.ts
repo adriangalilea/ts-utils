@@ -8,7 +8,7 @@ import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
 import { stripAnsi } from "../universal/ansi.js";
 import { localDay, parseDeadline, parseWhen } from "../universal/time.js";
-import { CliError, program } from "./index.js";
+import { armedAt, CliError, program } from "./index.js";
 
 /** A domain's own words, as a consumer keeps them. */
 const FOLDERS = ["inbox", "junk", "trash"] as const;
@@ -936,6 +936,17 @@ bad(
 	`);
 	assert.equal(none.status, 2, none.stderr);
 	assert.match(none.stderr, /deadline reached: no match/);
+}
+
+// a watch is armed when its process started, before anything it waited on, or
+// at --since; a since that names no time is a usage error
+{
+	const started = armedAt();
+	assert.equal(started.getTime(), Math.trunc(performance.timeOrigin));
+	assert.ok(started.getTime() <= Date.now());
+	const twoHours = Date.now() - armedAt("2h").getTime();
+	assert.ok(Math.abs(twoHours - 7_200_000) < 5_000, String(twoHours));
+	assert.throws(() => armedAt("soon"), /--since:/);
 }
 
 console.log("command: ok");

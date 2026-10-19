@@ -533,12 +533,20 @@ const password = await askHidden('password: ', '--password <words>')
 
 ### Watching (`cli`)
 
-Every `watch` command keeps one contract, so an agent that learned one has learned them all: it streams every match until Ctrl-C; `--once` (`-o`) exits 0 at the first; `--until <t>` exits at the deadline, 0 if anything matched and 2 if nothing; exit 1 is a real failure. Matches go to stdout (one JSON line each under `--json`), everything else to stderr, so an agent backgrounds the watch and branches on its exit code.
+Every `watch` command keeps one contract, so an agent that learned one has learned them all: it streams every match until Ctrl-C; `--once` (`-o`) exits 0 at the first; `--until <t>` exits at the deadline, 0 if anything matched and 2 if nothing; `--since <t>` first considers what arrived after t; exit 1 is a real failure. Matches go to stdout (one JSON line each under `--json`), everything else to stderr, so an agent backgrounds the watch and branches on its exit code.
+
+An exit 2 is read as "it did not happen", so the transport behind every watch owes four guarantees:
+
+- **Concurrent watches each see every event.** A transport that admits one live subscriber (an MTProto auth key's update stream) is owned by one daemon writing a local log, and watches read the log.
+- **Nothing between start and live is lost.** `armedAt(values.since)` is the moment the process started (or `--since`); every event after it belongs to the watch, and a poller's baseline is that instant, never its first poll.
+- **`--since` works in every scope.** A supervisor re-arming a watch after a reboot appends `--since <armed>`, and the watch covers what arrived while nothing was watching; a transport that cannot reach that far back exits 1 saying so.
+- **A dead source is exit 1**, never a deadline with no match.
 
 ```typescript
-import { deadlineFlag, matchFlag, WATCH_FLAGS, WatchClock } from '@adriangalilea/utils/cli'
+import { armedAt, deadlineFlag, matchFlag, WATCH_FLAGS, WatchClock } from '@adriangalilea/utils/cli'
 
 // flags: { ...WATCH_FLAGS, match: { type: 'string', value: '<re>', says: '…' } }
+const from = armedAt(values.since)   // everything after this is the watch's
 const clock = new WatchClock({
   once: values.once === true,
   until: values.until ? deadlineFlag(values.until) : undefined,
