@@ -29,7 +29,7 @@ const ALLOWED: Record<string, { count: number; reason: string }> = {
 	"packages/utils/src/universal/log.ts": {
 		count: 2,
 		reason:
-			"the logger's sink: Node writes every event through console.error (cli/live patches it), browsers and Workers through the level's console method",
+			"the logger's sink: Node writes every event through console.error (a cli/live region holds stderr and prints it above itself), browsers and Workers through the level's console method",
 	},
 	"packages/utils/src/runtime.ts": {
 		count: 2,
@@ -37,9 +37,9 @@ const ALLOWED: Record<string, { count: number; reason: string }> = {
 			"runtime.stdout/stderr.write fall back to console.log/error where no stream exists (browser, Worker); the logger's Node sink is built on them",
 	},
 	"packages/utils/src/cli/live.ts": {
-		count: 10,
+		count: 1,
 		reason:
-			"the live region reroutes console.log/warn/error above itself and restores them, and spinner() under an active region prints its final line through console.error, routed above it: terminal rendering, not diagnostics",
+			"spinner() under an active region prints its final line through console.error, which the region's hold on stderr prints above it: terminal rendering, not diagnostics",
 	},
 	"packages/utils/src/cli/run.ts": {
 		count: 4,
