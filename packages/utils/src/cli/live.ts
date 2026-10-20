@@ -8,9 +8,13 @@
  * inside it unchanged, and widgets are plain string functions.
  *
  * The hard problem this solves is interleaving: while a region is active,
- * `console.log/warn/error` — and therefore the logger, which writes through
- * console — are rerouted to print ABOVE the region (erase → write → repaint).
- * Logging never tears the UI, and there is no new logging API to learn.
+ * everything written to process.stdout or process.stderr while that stream is
+ * a TTY — console.*, the logger (which writes through console), a library's
+ * raw `process.stdout.write` — prints ABOVE the region (erase → write →
+ * repaint), a complete line at a time. Nothing tears the UI, and there is no
+ * new API to learn. A stream piped to a file is left alone: that is data.
+ * The twin of go-utils' cli.Live, which holds os.Stdout and os.Stderr the
+ * same way.
  *
  * Non-TTY (pipe / CI / log file): nothing animates, nothing repaints.
  * `done(final)` prints the final frame once; the opt-in `heartbeat` prints
@@ -20,6 +24,8 @@
  * exit, and fatal signals. Signals are handled politely — if the app has its
  * own SIGINT handler (graceful shutdown), we restore the cursor and stay out
  * of the way; if we are the only listener, default die-on-signal is preserved.
+ * Node can count a signal's listeners, which is what makes this safe; Go
+ * cannot, so go-utils keeps the cursor visible and never touches signals.
  *
  * Exactly one region can be active: two pinned regions can't share the bottom
  * of one screen. Compose everything into a single `render()` — that's the
@@ -63,32 +69,47 @@ export interface Live {
 
 let active: LiveRegion | null = null;
 
-type ConsoleMethods = Pick<Console, "log" | "warn" | "error">;
 type Signal = "SIGINT" | "SIGTERM";
 const SIGNALS: Signal[] = ["SIGINT", "SIGTERM"];
+
+type Write = NodeJS.WriteStream["write"];
+
+/** One stream the region holds: its own write (to put back), that write bound
+ *  (to print with), and the part of a line not yet ended. */
+interface Held {
+	stream: NodeJS.WriteStream;
+	prev: Write;
+	write: (s: string) => boolean;
+	pending: string;
+}
 
 class LiveRegion implements Live {
 	private render: () => string;
 	private readonly stream: NodeJS.WriteStream;
 	private readonly tty: boolean;
+	/** The region's own writes, bound before any hold so they never route back
+	 *  through it. */
+	private readonly out: (s: string) => boolean;
 	private painted = 0;
 	private stopped = false;
 	private timer: ReturnType<typeof setInterval> | undefined;
-	private orig: ConsoleMethods | undefined;
+	private held: Held[] = [];
 	private sigHandlers = new Map<Signal, () => void>();
 	private onExit = (): void => {
-		this.stream.write(SHOW_CURSOR);
+		this.out(SHOW_CURSOR);
 	};
 
 	constructor(render: () => string, opts: LiveOpts = {}) {
 		this.render = render;
 		this.stream = opts.stream ?? process.stderr;
 		this.tty = this.stream.isTTY === true;
+		const write = this.stream.write.bind(this.stream);
+		this.out = (s) => write(s);
 
 		if (!this.tty) {
 			if (opts.heartbeat) {
 				this.timer = setInterval(() => {
-					this.stream.write(`${this.render()}\n`);
+					this.out(`${this.render()}\n`);
 				}, opts.heartbeat);
 				this.timer.unref();
 			}
@@ -100,9 +121,11 @@ class LiveRegion implements Live {
 			"one live region at a time — compose into a single render()",
 		);
 		active = this;
-		this.patchConsole();
+		for (const s of [process.stdout, process.stderr]) {
+			if (s.isTTY) this.hold(s);
+		}
 		this.installGuards();
-		this.stream.write(HIDE_CURSOR);
+		this.out(HIDE_CURSOR);
 		this.paint();
 		this.timer = setInterval(() => this.paint(), 1000 / (opts.fps ?? 12.5));
 		this.timer.unref();
@@ -122,12 +145,12 @@ class LiveRegion implements Live {
 		if (!this.tty) {
 			this.stopped = true;
 			clearInterval(this.timer);
-			this.stream.write(`${final ?? this.render()}\n`);
+			this.out(`${final ?? this.render()}\n`);
 			return;
 		}
 		const frame = final ?? this.render();
 		this.stop();
-		this.stream.write(`${wipe(this.painted)}${frame}\n${SHOW_CURSOR}`);
+		this.out(`${wipe(this.painted)}${frame}\n${SHOW_CURSOR}`);
 	}
 
 	clear(): void {
@@ -138,7 +161,7 @@ class LiveRegion implements Live {
 			return;
 		}
 		this.stop();
-		this.stream.write(wipe(this.painted) + SHOW_CURSOR);
+		this.out(wipe(this.painted) + SHOW_CURSOR);
 	}
 
 	// --- internals (TTY path) ---
@@ -155,41 +178,67 @@ class LiveRegion implements Live {
 			.map((l) => clip(l, cols - 1));
 		const frame =
 			lines.length < rows ? lines : lines.slice(lines.length - (rows - 1));
-		this.stream.write(
-			`${SYNC_ON}${wipe(this.painted)}${frame.join("\n")}\n${SYNC_OFF}`,
-		);
+		this.out(`${SYNC_ON}${wipe(this.painted)}${frame.join("\n")}\n${SYNC_OFF}`);
 		this.painted = frame.length;
 	}
 
 	/**
-	 * Erase the region, run a write (a console call), repaint underneath it.
-	 * The wipe opens a sync block; paint() re-asserts SYNC_ON (a no-op set)
-	 * and its SYNC_OFF closes the whole erase→log→repaint atomically.
+	 * Erase the region, run a write, repaint underneath it. The wipe opens a
+	 * sync block; paint() re-asserts SYNC_ON (a no-op set) and its SYNC_OFF
+	 * closes the whole erase→write→repaint atomically.
 	 */
 	private above(write: () => void): void {
-		this.stream.write(SYNC_ON + wipe(this.painted));
+		this.out(SYNC_ON + wipe(this.painted));
 		this.painted = 0;
 		write();
 		this.paint();
 	}
 
-	private patchConsole(): void {
-		const orig: ConsoleMethods = {
-			log: console.log.bind(console),
-			warn: console.warn.bind(console),
-			error: console.error.bind(console),
-		};
-		this.orig = orig;
-		console.log = (...a: unknown[]) => this.above(() => orig.log(...a));
-		console.warn = (...a: unknown[]) => this.above(() => orig.warn(...a));
-		console.error = (...a: unknown[]) => this.above(() => orig.error(...a));
+	/**
+	 * Take over `stream.write`: text gathers until a line ends, and every
+	 * complete line prints above the region through the stream's own write. A
+	 * line written in pieces prints whole; a last line with no newline prints
+	 * at release. The callback a caller passed is honoured.
+	 */
+	private hold(stream: NodeJS.WriteStream): void {
+		const prev = stream.write;
+		const bound = prev.bind(stream);
+		const h: Held = { stream, prev, write: (s) => bound(s), pending: "" };
+		stream.write = ((
+			chunk: string | Uint8Array,
+			encoding?: BufferEncoding | ((err?: Error | null) => void),
+			cb?: (err?: Error | null) => void,
+		): boolean => {
+			const enc = typeof encoding === "string" ? encoding : "utf8";
+			h.pending +=
+				typeof chunk === "string" ? chunk : Buffer.from(chunk).toString(enc);
+			const end = h.pending.lastIndexOf("\n");
+			if (end >= 0) {
+				const lines = h.pending.slice(0, end + 1);
+				h.pending = h.pending.slice(end + 1);
+				this.above(() => h.write(lines));
+			}
+			const done = typeof encoding === "function" ? encoding : cb;
+			if (done) process.nextTick(done);
+			return true;
+		}) as Write;
+		this.held.push(h);
+	}
+
+	/** Give every held stream its write back, the unended line printed first. */
+	private release(): void {
+		for (const h of this.held) {
+			if (h.pending) this.above(() => h.write(`${h.pending}\n`));
+			h.stream.write = h.prev;
+		}
+		this.held = [];
 	}
 
 	private installGuards(): void {
 		process.on("exit", this.onExit);
 		for (const sig of SIGNALS) {
 			const h = (): void => {
-				this.stream.write(SHOW_CURSOR);
+				this.out(SHOW_CURSOR);
 				// Only listener (count includes us) → preserve default semantics:
 				// re-raise and die. Otherwise the app owns shutdown; cursor is
 				// restored and its handler proceeds over a still-painting region
@@ -205,13 +254,9 @@ class LiveRegion implements Live {
 	}
 
 	private stop(): void {
+		this.release();
 		this.stopped = true;
 		clearInterval(this.timer);
-		const orig = this.orig;
-		assert(orig !== undefined, "stop() before patchConsole()");
-		console.log = orig.log;
-		console.warn = orig.warn;
-		console.error = orig.error;
 		process.removeListener("exit", this.onExit);
 		for (const [sig, h] of this.sigHandlers) process.removeListener(sig, h);
 		active = null;
@@ -316,7 +361,7 @@ export function elapsed(since: number): string {
  *
  * Non-TTY prints just the final line. Started while a live region is active
  * (a helper deep in a call stack, under a dashboard), it degrades the same
- * way — the final line lands ABOVE the region via the console routing. Only
+ * way — the final line lands ABOVE the region through the held stderr. Only
  * a second live() region screams; a nested spinner is legitimate composition.
  * Every line it writes goes to stderr: stdout stays data for pipes / --json.
  */
