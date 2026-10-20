@@ -251,6 +251,52 @@ export function bar(
 	return style("█".repeat(fill)) + dim("░".repeat(width - fill));
 }
 
+export interface Rate {
+	/** Record the running total now. A total below the last one is a restart
+	 *  from zero (a download sent again from the start): the window begins again. */
+	add(total: number): void;
+	/** Count per second across the window, measured to now rather than to the
+	 *  last sample: silence pulls it down. 0 until two samples exist. */
+	perSecond(): number;
+}
+
+/**
+ * A running count (bytes, items) per second over a moving window (default
+ * 5 s), so a stall reads as a falling speed instead of a frozen one. Feed it
+ * the running total; read `perSecond()` inside `render()`. The twin of
+ * go-utils' `cli.Rate`.
+ */
+export function rate(windowMs = 5000): Rate {
+	let samples: { at: number; total: number }[] = [];
+	return {
+		add(total) {
+			const now = Date.now();
+			const last = samples.at(-1);
+			if (last && total < last.total) samples = [];
+			samples.push({ at: now, total });
+			let cut = 0;
+			while (
+				cut < samples.length - 1 &&
+				now - (samples[cut]?.at ?? now) > windowMs
+			)
+				cut++;
+			samples = samples.slice(cut);
+		},
+		perSecond() {
+			const first = samples[0];
+			const last = samples.at(-1);
+			if (!first || !last || samples.length < 2) return 0;
+			const dt = (Date.now() - first.at) / 1000;
+			return dt > 0 ? (last.total - first.total) / dt : 0;
+		},
+	};
+}
+
+/** Milliseconds `left` takes at `perSecond` (0 when the speed is unknown), for `duration()`-style display. */
+export function eta(left: number, perSecond: number): number {
+	return left <= 0 || perSecond < 1 ? 0 : (left / perSecond) * 1000;
+}
+
 /** Compact elapsed time since a `Date.now()` timestamp: 0.4s · 12s · 1m05s · 1h02m. */
 export function elapsed(since: number): string {
 	const s = (Date.now() - since) / 1000;

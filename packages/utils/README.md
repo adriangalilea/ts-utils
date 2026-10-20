@@ -418,7 +418,7 @@ Run the demo: `FORCE_COLOR=1 pnpm --filter @adriangalilea/utils demo:cli`.
 
 ### Live output (`cli`) — pinned region, spinner, progress
 
-A pinned, self-repainting region at the bottom of the terminal for progress UIs. You own the state; the region is a `render: () => string` repainted on a timer — a frame is just a string, so `table()` / `kv()` / `ui` and the widgets (`spin()`, `bar()`, `elapsed()`) compose inside it unchanged.
+A pinned, self-repainting region at the bottom of the terminal for progress UIs. You own the state; the region is a `render: () => string` repainted on a timer — a frame is just a string, so `table()` / `kv()` / `ui` and the widgets (`spin()`, `bar()`, `rate()` / `eta()`, `elapsed()`) compose inside it unchanged.
 
 ```typescript
 import { live, spinner, spin, bar, elapsed, table, ui } from '@adriangalilea/utils/cli'
@@ -453,6 +453,11 @@ region.done()   // full aligned table persists (a pipe gets exactly this, once)
 
 // State-dependent bar color — style hook on the filled part
 bar(done, total, 18, ui.warn)   // amber: throttled/cooling
+
+// Speed over a moving window (5 s default): a stall reads as a falling number
+const speed = rate()
+onProgress((done) => speed.add(done))       // the running total
+live(() => `${bar(done, total)} ${bytes(speed.perSecond())}/s · ${Math.round(eta(total - done, speed.perSecond()) / 1000)}s left`)
 ```
 
 What makes it hold up:
