@@ -144,5 +144,13 @@ export const gracefulStart = async (
 		);
 	}
 
-	poll = await longPoll(bot);
+	// A bot that cannot start (no network, a revoked token) says so in one log
+	// line and exits for its supervisor to restart, never as a raw crash: the
+	// runtime prints an uncaught error with every field it holds.
+	try {
+		poll = await longPoll(bot);
+	} catch (err) {
+		log.error("start failed", { err });
+		process.exit(1);
+	}
 };

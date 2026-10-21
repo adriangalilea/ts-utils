@@ -46,6 +46,7 @@ import { type BotPaymentsConfig, botPayments } from "./payments/index.js";
 import { longPoll } from "./poll.js";
 import { botSession } from "./session.js";
 import { type D1Like, d1Storage } from "./storage-d1.js";
+import { guardToken } from "./token-safe.js";
 import { type BotWorkerRuntime, botWorkerFetch } from "./worker.js";
 
 const log = root.scope("bot");
@@ -219,6 +220,7 @@ export function createBot<
 		built ??= (async () => {
 			const e = env ?? (runtime.isNode ? (process.env as EnvLike) : {});
 			const bot = new Bot(resolveToken(e));
+			guardToken(bot);
 			const { storage, kind, flush } = await resolveStorage(e);
 			log.info("session storage", { kind });
 

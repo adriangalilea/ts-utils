@@ -18,6 +18,7 @@
  * never retried silently.
  */
 import { SourcedError } from "@adriangalilea/utils/offensive";
+import { telegramFailure } from "./token-safe.js";
 
 /** A raw Bot API update. Only `update_id` is load-bearing here; everything else passes through. */
 export interface TelegramUpdate {
@@ -59,11 +60,16 @@ export function updateQueue(options: UpdateQueueOptions) {
 		method: string,
 		params?: Record<string, unknown>,
 	): Promise<T> => {
-		const res = await doFetch(`${root}/bot${options.token}/${method}`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(params ?? {}),
-		});
+		let res: Response;
+		try {
+			res = await doFetch(`${root}/bot${options.token}/${method}`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(params ?? {}),
+			});
+		} catch (err) {
+			throw telegramFailure(method, err);
+		}
 		const body = (await res.json()) as {
 			ok: boolean;
 			result?: T;

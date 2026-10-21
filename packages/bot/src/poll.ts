@@ -36,6 +36,7 @@ import {
 	detectOptInUpdates,
 	type TelegramUpdate,
 } from "gramio";
+import { guardToken, telegramFailure } from "./token-safe.js";
 
 const log = root.scope("bot").scope("poll");
 
@@ -78,6 +79,8 @@ export async function longPoll(
 			? [...AllowedUpdatesFilter.default.add(...optIn)]
 			: undefined;
 
+	// Before the first request: getMe at start must not fail with the token in it.
+	guardToken(bot);
 	// gramio's "updates arrive from outside" mode: init, getMe, onStart hooks,
 	// and no poll of its own (no setWebhook either: `true` registers nothing).
 	await bot.start({ webhook: true });
@@ -93,18 +96,22 @@ export async function longPoll(
 	): Promise<BotApiResponse> => {
 		const headers = new Headers(api.fetchOptions?.headers);
 		headers.set("content-type", "application/json");
-		const response = await fetch(url + method, {
-			...api.fetchOptions,
-			method: "POST",
-			headers,
-			body: JSON.stringify(params),
-			// One signal for the whole exchange, body included: the deadline, or stop().
-			signal: AbortSignal.any([
-				AbortSignal.timeout(deadlineMs),
-				stopping.signal,
-			]),
-		});
-		return (await response.json()) as BotApiResponse;
+		try {
+			const response = await fetch(url + method, {
+				...api.fetchOptions,
+				method: "POST",
+				headers,
+				body: JSON.stringify(params),
+				// One signal for the whole exchange, body included: the deadline, or stop().
+				signal: AbortSignal.any([
+					AbortSignal.timeout(deadlineMs),
+					stopping.signal,
+				]),
+			});
+			return (await response.json()) as BotApiResponse;
+		} catch (err) {
+			throw telegramFailure(method, err);
+		}
 	};
 
 	const wait = (ms: number) =>
