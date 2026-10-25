@@ -135,14 +135,21 @@ export function alertAdminOnErrors(
 			return;
 		}
 		last.set(key, { at: now, repeats: 0 });
-		const where = [event.service, ...scope].join(" · ");
+		// service · scope: msg, each part once: a span named for its scope in a
+		// service of the same name ("unfurl · unfurl: unfurl") reads "unfurl".
+		const parts = [event.service, ...scope, event.msg].filter(
+			(part, index, all) => part !== all[index - 1],
+		);
+		const head =
+			parts.length > 1
+				? `${parts.slice(0, -1).join(" · ")}: ${parts.at(-1)}`
+				: parts[0];
 		const again = seen?.repeats
 			? `\n(${seen.repeats} more since the last alert)`
 			: "";
 		const text =
-			[`🚨 ${where}: ${event.msg}`, err, details(event.fields)]
-				.filter(Boolean)
-				.join("\n") + again;
+			[`🚨 ${head}`, err, details(event.fields)].filter(Boolean).join("\n") +
+			again;
 		void (
 			typeof adminIds === "function" ? adminIds() : Promise.resolve(adminIds)
 		).then((ids) =>

@@ -34,7 +34,7 @@ assert.equal(sent.length, 1);
 assert.equal(sent[0].chat_id, 7);
 assert.match(
 	sent[0].text,
-	/^🚨 notify\.test · unfurl: unfurl\nError: Reddit post failed: 403\nurl: https:\/\/redd\.it\/x$/,
+	/^🚨 notify\.test: unfurl\nError: Reddit post failed: 403\nurl: https:\/\/redd\.it\/x$/,
 );
 
 log.error("unfurl", {
@@ -64,6 +64,11 @@ await log
 await settle();
 assert.equal(sent.length, 3, "a failed span is an error event");
 assert.match(sent[2].text, /Error: rich post refused/);
+assert.match(
+	sent[2].text,
+	/^🚨 notify\.test: unfurl\n/,
+	"a span named for its scope says it once",
+);
 
 root.scope("bot").scope("notify").error("admin DM failed", { admin: 7 });
 await settle();
