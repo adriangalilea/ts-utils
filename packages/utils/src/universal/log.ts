@@ -92,6 +92,12 @@
  *     awaits it first. Shipping never throws and never blocks a write: a
  *     refused or lost batch is one warnOnce, scope ["ship"].
  *
+ * Listeners
+ *     onLog(listener) hands every event that passes its threshold to a
+ *     function in the same process, as the wire shape ships it, and returns
+ *     the unsubscribe: how a program acts on its own log (a bot DMs its admins
+ *     each error, @adriangalilea/bot/notify alertAdminOnErrors).
+ *
  * The wire shape is exported as LogEvent, and parseEvent(line) reads one back.
  */
 
@@ -703,6 +709,31 @@ function emit(d: Draft): void {
 	// What ships is the stream's json line, whatever the console renders.
 	if (target !== undefined)
 		ship(target, format === "json" ? text : json(d, now));
+	if (listeners.size > 0) {
+		const event = parseEvent(format === "json" ? text : json(d, now));
+		assert(event !== null, "the logger wrote an event parseEvent cannot read");
+		for (const listener of listeners) listener(event);
+	}
+}
+
+// --- listeners ---------------------------------------------------------------
+
+type LogListener = (event: LogEvent) => void;
+
+const listeners = new Set<LogListener>();
+
+/**
+ * Hand every event that passes its threshold to `listener`, in process, as the
+ * wire shape ships it; returns the unsubscribe. For a program that acts on its
+ * own log (a bot DMs its admins each error). The listener runs inside the
+ * write and must not throw; an event it logs itself reaches it again, so a
+ * listener that logs filters out its own scope.
+ */
+export function onLog(listener: LogListener): () => void {
+	listeners.add(listener);
+	return () => {
+		listeners.delete(listener);
+	};
 }
 
 // --- shipping ----------------------------------------------------------------
