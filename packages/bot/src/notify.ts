@@ -9,21 +9,18 @@
  * visible in a Worker tail and a Node terminal alike) and swallowed.
  *
  *   `notifyAdmins(bot, adminIds, text, extra?)` — DM each admin.
- *   `alertAdminError(bot, adminIds, label, error, throttle?)` — DM a
- *     truncated `🚨 label\nName: message`, rate-limited through a
- *     caller-owned throttle so a failure storm can't flood anyone.
- *   `alertThrottle(ms?)` — make that throttle (per-process on Node,
- *     per-isolate on a Worker; own one per subsystem if you want
- *     independent budgets).
  *   `alertAdminOnErrors(bot, adminIds, { ms? })` — DM every error the
  *     process LOGS (utils/log `onLog`), handled or not, one per distinct
- *     error per window, repeats counted. Call once at startup.
+ *     error per window, repeats counted. Call once at startup (`bot/worker`
+ *     does it for a Worker bot with `adminIds`).
+ *   `alertsSettled()` — resolves when every alert DM sent so far settled:
+ *     what a Worker keeps alive with `waitUntil` or an alarm's await.
  *
  * @example
- * import { alertAdminError, alertThrottle, notifyAdmins } from '@adriangalilea/bot/notify'
+ * import { alertAdminOnErrors, notifyAdmins } from '@adriangalilea/bot/notify'
  *
- * const errorAlerts = alertThrottle()          // 60s budget, module-level
- * bot.onError(({ kind, error }) => void alertAdminError(bot, adminIds, `error [${kind}]`, error, errorAlerts))
+ * alertAdminOnErrors(bot, adminIds)            // once; an error is alerted by logging it
+ * bot.onError(({ kind, error }) => log.error("update failed", { kind, err: error }))
  * await notifyAdmins(bot, adminIds, `@${bot.info.username} deployed.`)
  */
 import { type JsonValue, onLog, log as root } from "@adriangalilea/utils/log";
@@ -65,41 +62,6 @@ export async function notifyAdmins(
 					.catch((err) => log.error("admin DM failed", { admin: id, err })),
 			),
 	);
-}
-
-/**
- * Rate-limit state for {@link alertAdminError}, owned by the CALLER so
- * scope is explicit (per-process on Node, per-isolate on a Worker) and
- * independent subsystems can hold independent budgets.
- */
-export type AlertThrottle = { ms: number; lastAt: number };
-
-/** A fresh throttle: at most one alert per `ms` (default 60s). */
-export const alertThrottle = (ms = 60_000): AlertThrottle => ({
-	ms,
-	lastAt: 0,
-});
-
-/**
- * DM the admins a truncated error (`🚨 label\nName: message`), gated by
- * `throttle` so a failure storm sends one alert per window, not one per
- * failure. No throttle = every call sends.
- */
-export async function alertAdminError(
-	bot: NotifyBot,
-	adminIds: readonly number[],
-	label: string,
-	error: unknown,
-	throttle?: AlertThrottle,
-): Promise<void> {
-	if (throttle) {
-		const now = Date.now();
-		if (now - throttle.lastAt < throttle.ms) return;
-		throttle.lastAt = now;
-	}
-	const message =
-		error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-	await notifyAdmins(bot, adminIds, `🚨 ${label}\n${message}`);
 }
 
 /** The admins, as a list or resolved per alert (a Worker reading them from D1). */
@@ -150,14 +112,30 @@ export function alertAdminOnErrors(
 		const text =
 			[`🚨 ${head}`, err, details(event.fields)].filter(Boolean).join("\n") +
 			again;
-		void (
+		const sending = (
 			typeof adminIds === "function" ? adminIds() : Promise.resolve(adminIds)
-		).then((ids) =>
-			notifyAdmins(bot, ids, text, {
-				link_preview_options: { is_disabled: true },
-			}),
-		);
+		)
+			.then((ids) =>
+				notifyAdmins(bot, ids, text, {
+					link_preview_options: { is_disabled: true },
+				}),
+			)
+			.catch((err) => log.error("admin ids unavailable for an alert", { err }))
+			.finally(() => inFlight.delete(sending));
+		inFlight.add(sending);
 	});
+}
+
+/** Alert DMs on their way, until each settles. */
+const inFlight = new Set<Promise<void>>();
+
+/**
+ * Resolves once every alert DM sent so far has settled. A Worker hands it to
+ * `waitUntil` (or awaits it in an alarm) so a DM is not frozen with the
+ * isolate; `bot/worker` does this wherever it holds a lifetime open.
+ */
+export async function alertsSettled(): Promise<void> {
+	while (inFlight.size > 0) await Promise.allSettled([...inFlight]);
 }
 
 // An event's error as "Type: message" (its stack stays in the log).

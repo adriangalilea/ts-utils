@@ -5,7 +5,7 @@
 // themselves. Run: pnpm test
 import assert from "node:assert/strict";
 import { log as root, setLogConsole } from "@adriangalilea/utils/log";
-import { alertAdminOnErrors } from "./notify.js";
+import { alertAdminOnErrors, alertsSettled } from "./notify.js";
 
 setLogConsole(false);
 const sent: { chat_id: number; text: string }[] = [];
@@ -78,7 +78,11 @@ assert.equal(
 	"the module's own failures never alert about themselves",
 );
 
+log.error("waited for", { err: new Error("a DM a Worker must not freeze") });
+await alertsSettled();
+assert.equal(sent.length, 4, "alertsSettled resolves after the DM went out");
+
 stop();
 log.error("after stop", {});
 await settle();
-assert.equal(sent.length, 3, "unsubscribed");
+assert.equal(sent.length, 4, "unsubscribed");

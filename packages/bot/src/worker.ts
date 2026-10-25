@@ -8,7 +8,9 @@
  *
  *   POST /                webhook — `X-Telegram-Bot-Api-Secret-Token` checked,
  *                         acked immediately; the update (+ storage flush) rides
- *                         `ctx.waitUntil`, errors DM the admins (throttled).
+ *                         `ctx.waitUntil`. Every error the isolate logs DMs
+ *                         the admins (`alertAdminOnErrors`), and every lifetime
+ *                         this cap holds open waits for those DMs.
  *                         With `durableUpdates` set, the update is instead
  *                         PERSISTED into a per-conversation TelegramUpdateRunner
  *                         Durable Object BEFORE the ack, and a DO alarm owns the
@@ -48,12 +50,7 @@
 
 import { log as root } from "@adriangalilea/utils/log";
 import { buildAllowedUpdates } from "gramio";
-import {
-	type AlertThrottle,
-	alertAdminError,
-	alertThrottle,
-	notifyAdmins,
-} from "./notify.js";
+import { alertAdminOnErrors, alertsSettled, notifyAdmins } from "./notify.js";
 import { escapeHtml } from "./tg-html/index.js";
 import {
 	telegramUpdateId,
@@ -61,6 +58,18 @@ import {
 } from "./update-identity.js";
 
 const log = root.scope("bot").scope("worker");
+
+// --- error alerts ------------------------------------------------------------
+
+/** The bots whose isolate already DMs its admins every logged error. */
+const alerting = new WeakSet<object>();
+
+/** Every error this isolate logs reaches the runtime's admins; subscribed once per bot. */
+function alertErrors(rt: BotWorkerRuntime): void {
+	if (!rt.adminIds || alerting.has(rt.bot)) return;
+	alerting.add(rt.bot);
+	alertAdminOnErrors(rt.bot, rt.adminIds);
+}
 
 // --- work after the update -------------------------------------------------
 
@@ -196,7 +205,12 @@ export type BotWorkerRuntime = {
 	operatorSecret?: string;
 	/** Deployment label echoed in responses/DMs (e.g. the wrangler env name). */
 	mode?: string;
-	/** Live admin resolver for the lifecycle DMs + error alerts. Default: nobody (DMs off). */
+	/**
+	 * Live admin resolver for the lifecycle DMs and the error alerts: every
+	 * error the isolate logs reaches them (`alertAdminOnErrors`, subscribed once
+	 * per isolate), and every Worker lifetime this cap holds open waits for
+	 * those DMs. Default: nobody (DMs off).
+	 */
 	adminIds?: () => Promise<readonly number[]>;
 	/** Awaited inside waitUntil after each update — hand `d1Storage`'s flush here. */
 	flush?: () => Promise<void>;
@@ -208,8 +222,6 @@ export type BotWorkerRuntime = {
 		url: URL,
 		ctx: WaitUntilCtx,
 	) => Promise<Response | null> | Response | null;
-	/** Error-alert throttle (share one to share its budget). Default: own 60s window. */
-	errorThrottle?: AlertThrottle;
 	/** Durable webhook ingress: persist-before-ack into per-conversation runner DOs. */
 	durableUpdates?: DurableUpdates;
 };
@@ -222,15 +234,14 @@ export type BotWorkerRuntime = {
 export function botWorkerFetch<Env>(
 	resolve: (env: Env) => Promise<BotWorkerRuntime> | BotWorkerRuntime,
 ): (request: Request, env: Env, ctx: WaitUntilCtx) => Promise<Response> {
-	const fallbackThrottle = alertThrottle();
 	return async (request, env, ctx) => {
 		const url = new URL(request.url);
 		try {
 			const rt = await resolve(env);
+			alertErrors(rt);
 			const { bot } = rt;
 			const mode = rt.mode ?? "?";
 			const adminIds = rt.adminIds ?? (async () => []);
-			const throttle = rt.errorThrottle ?? fallbackThrottle;
 			const webhookSecret = rt.webhookSecret?.trim();
 
 			// Consumer routes first — the escape hatch for bot-specific endpoints.
@@ -294,18 +305,14 @@ export function botWorkerFetch<Env>(
 				// Ack Telegram immediately, then keep the Worker alive for the slow
 				// work (avoids GramIO's 30s webhook timeout).
 				const { done, after } = dispatchUpdate(bot, rt.flush, update);
-				ctx.waitUntil(after.then((work) => Promise.all(work)));
 				ctx.waitUntil(
-					done.catch(async (error) => {
+					after.then((work) => Promise.all(work)).then(alertsSettled),
+				);
+				ctx.waitUntil(
+					done.catch((error) => {
 						log.error("update failed", { err: error });
-						// awaited so the DM rides the same waitUntil, not a frozen isolate
-						await alertAdminError(
-							bot,
-							await adminIds(),
-							"webhook update failed",
-							error,
-							throttle,
-						);
+						// the error's DM rides this waitUntil, not a frozen isolate
+						return alertsSettled();
 					}),
 				);
 				return new Response("OK");
@@ -596,7 +603,6 @@ export function telegramUpdateRunner<Env>(
 	const dedupeLimit = options.dedupeLimit ?? 512;
 	const attemptTimeoutMs = options.attemptTimeoutMs ?? 180_000;
 	const afterWorkMs = options.afterWorkMs ?? 600_000;
-	const fallbackThrottle = alertThrottle();
 
 	return class TelegramUpdateRunner {
 		/** Attempts still running in this instance, by update id; a timed-out one stays until it settles. */
@@ -727,6 +733,7 @@ export function telegramUpdateRunner<Env>(
 			let timer: ReturnType<typeof setTimeout> | undefined;
 			try {
 				rt = await resolve(this.env);
+				alertErrors(rt);
 				// Bounded attempt (see attemptTimeoutMs): the race rejects into the ordinary
 				// retry/drop machinery, and the retry joins the timed-out work (see work).
 				await Promise.race([
@@ -751,20 +758,7 @@ export function telegramUpdateRunner<Env>(
 					max_attempts: maxAttempts,
 					err: error,
 				});
-				if (rt) {
-					const runtime = rt;
-					await (runtime.adminIds?.() ?? Promise.resolve([]))
-						.then((ids) =>
-							alertAdminError(
-								runtime.bot,
-								ids,
-								`queued Telegram update ${job.updateId} failed`,
-								error,
-								runtime.errorThrottle ?? fallbackThrottle,
-							),
-						)
-						.catch(() => {});
-				}
+				await alertsSettled();
 				if (job.attempts >= maxAttempts) {
 					await this.finish(sequence, job.updateId);
 					await this.scheduleNext();
@@ -790,6 +784,7 @@ export function telegramUpdateRunner<Env>(
 			});
 			await this.scheduleNext();
 			await this.holdForHandedOff();
+			await alertsSettled();
 		}
 
 		/** Retire the head job and retain a bounded completed-id window for webhook de-duplication. */
