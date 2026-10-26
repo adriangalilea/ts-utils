@@ -32,7 +32,8 @@
 
 import { argsOf } from "./grammar.js";
 import { flagText, helpOf } from "./help.js";
-import { CliError, emit } from "./run.js";
+import { beforeDash, CliError, emit, USAGE_EXIT } from "./run.js";
+import { skillOf } from "./skill.js";
 import { tokenize } from "./tokens.js";
 import { nearest } from "./words.js";
 
@@ -83,6 +84,16 @@ export interface CommandSpec {
 	/** What `--json` prints. */
 	readonly json?: string;
 	/**
+	 * What follows `--` is the command's own, handed over untouched as
+	 * `call.passthrough` (`--help` and `--json` in it never read), and the usage
+	 * shows it: `"command [args…]"` reads `ship run -- command [args…]`. A
+	 * command without it takes what follows `--` as arguments.
+	 */
+	readonly passthrough?: string;
+	/** The program's declared exits (`ProgramSpec.exits`) this command can end
+	 *  with, by code; its help lists them. 0, 1 and 64 go without saying. */
+	readonly exits?: readonly number[];
+	/**
 	 * Other words it answers to (`msg` for `message`), shown beside it. Input only:
 	 * the handler, the help, the JSON and every message name the command itself.
 	 * Their cost is two spellings in scripts and docs, so examples and skills use
@@ -126,6 +137,38 @@ export interface ProgramSpec {
 		readonly command: string;
 		readonly claims: (word: string) => boolean;
 	};
+	/**
+	 * The statuses it ends with beyond the three every program has (0 done, 1
+	 * anything else, 64 a wrong call), by code: `{ 77: "you refused" }`. A
+	 * handler returns one, a `CliError` carries one (`exit`); the overview, each
+	 * command's help and the skill say them all.
+	 */
+	readonly exits?: { readonly [code: number]: string };
+	/** Prose a person reads on request, `help <name>`, listed in the overview and
+	 *  inlined in the skill. */
+	readonly guides?: { readonly [name: string]: Guide };
+	/**
+	 * The program offering itself to agents: `skill` says whether Claude Code's
+	 * and Codex's copy is current, `skill show` prints it (rendered from this
+	 * spec, so it says nothing the help does not), `skill install` writes it,
+	 * `skill remove` takes it out. `useWhen` and `never` lead its description and
+	 * stand under the overview's title.
+	 */
+	readonly skill?: {
+		readonly useWhen: readonly string[];
+		readonly never?: readonly string[];
+	};
+}
+
+/**
+ * A guide: a title, one line for the overview, and a body in Markdown of a
+ * small subset (paragraphs, `- ` bullets, inline code, fenced blocks), folded
+ * for a terminal and inlined as written in the skill.
+ */
+export interface Guide {
+	readonly title: string;
+	readonly says: string;
+	readonly body: string;
 }
 
 type One<S extends FlagSpec> = S["type"] extends "boolean"
@@ -225,19 +268,40 @@ export type ArgsOf<C> = C extends { readonly args: infer S extends string }
 		: Needed<Words<S>, ChoicesOf<C>, []>
 	: [];
 
-/** One command asked for: its name, its arguments and its flags, typed by its own spec. */
+/** What follows `--`, for a command that passes it through: nothing for one that does not. */
+export type PassthroughOf<C> = C extends { readonly passthrough: string }
+	? string[]
+	: [];
+
+/** One command asked for: its name, its arguments, what follows `--` (its
+ *  `passthrough`) and its flags, typed by its own spec. */
 export type Call<P extends ProgramSpec> = {
 	[K in Named<P>]: {
 		kind: "run";
 		command: K;
 		args: ArgsOf<P["commands"][K]>;
+		passthrough: PassthroughOf<P["commands"][K]>;
 		values: ValuesOf<FlagsOf<P["commands"][K]> & GlobalOf<P>>;
 	};
 }[Named<P>];
 
-/** Something to print and nothing to run: the help, or the version. `data` is
- *  the same as JSON, for `--json`. */
+/** Something to print and nothing to run: the help, a guide, or the version.
+ *  `data` is the same as JSON, for `--json`. */
 export type Print = { kind: "print"; text: string; data: unknown };
+
+/** The skill asked for (a program with `skill`): `run` answers it with
+ *  `skill(action)`; a program that routes its own calls does the same. */
+export type SkillCall = {
+	kind: "skill";
+	action: "status" | "show" | "install" | "remove";
+};
+
+/** A skill call, for a program with a `skill`; none for one without. */
+export type SkillOf<P extends ProgramSpec> = P extends {
+	readonly skill: object;
+}
+	? SkillCall
+	: never;
 
 /** One command's call, by its name. */
 export type CallOf<P extends ProgramSpec, K extends Named<P>> = Extract<
@@ -246,19 +310,30 @@ export type CallOf<P extends ProgramSpec, K extends Named<P>> = Extract<
 >;
 
 /** What runs each command: one handler per command, no more, each given its own
- *  call (its flags typed by its spec) and what `context` built for them all. */
+ *  call (its flags typed by its spec) and what `context` built for them all. A
+ *  handler may return the status it ends with: 0, or one of its `exits`. */
 export type Handlers<P extends ProgramSpec, Ctx = undefined> = {
-	[K in Named<P>]: (call: CallOf<P, K>, ctx: Ctx) => void | Promise<void>;
+	[K in Named<P>]: Handler<CallOf<P, K>, Ctx>;
 };
+
+/** One handler: it ends the command with nothing to say (status 0) or with a
+ *  status, now or once it resolves. */
+export type Handler<C, Ctx> =
+	| ((call: C, ctx: Ctx) => void)
+	| ((call: C, ctx: Ctx) => Promise<void>)
+	| ((call: C, ctx: Ctx) => number)
+	| ((call: C, ctx: Ctx) => Promise<number>);
 
 export interface Program<P extends ProgramSpec> {
 	readonly spec: P;
-	/** `argv` read: the command asked for, or what to print instead. A mistake in
-	 *  it throws `CliError` (code "usage") saying what to type. */
-	parse(argv?: readonly string[]): Call<P> | Print;
+	/** `argv` read: the command asked for, what to print instead, or the skill.
+	 *  A mistake in it throws `CliError` (code "usage", exit 64) saying what to
+	 *  type. */
+	parse(argv?: readonly string[]): Call<P> | Print | SkillOf<P>;
 	/**
-	 * `argv` read and answered: help and the version printed (their data as JSON
-	 * under `--json`), any other command given to its handler.
+	 * `argv` read and answered: help, guides and the version printed (their data
+	 * as JSON under `--json`), the skill answered, any other command given to its
+	 * handler, the status it returns the program's.
 	 */
 	run(handlers: Handlers<P>, argv?: readonly string[]): Promise<void>;
 	/**
@@ -274,14 +349,32 @@ export interface Program<P extends ProgramSpec> {
 	overview(): string;
 	/** One command in full. */
 	detail(name: Named<P> | "help"): string;
+	/** One guide, as `help <guide>` prints it. */
+	guide(name: string): string;
 	/** Every command as data: what `help --json` prints. */
 	describe(): unknown;
+	/** The skill as agents read it (a program with `skill`). */
+	skillMarkdown(): string;
+	/** A skill call answered: what to print. Throws `CliError` when a file could
+	 *  not be written or removed. */
+	skill(action: SkillCall["action"]): string;
 }
 
 const HELP: CommandSpec = {
 	args: "[command]",
-	says: "these words, or one command's in full",
+	says: "these words, one command's in full, or a guide",
 	more: "With --json, every command as data: its arguments, flags, words and what its --json prints.",
+};
+const SKILL: { readonly [name: string]: CommandSpec } = {
+	skill: { says: "whether Claude Code's and Codex's skill is this program's" },
+	"skill show": { says: "the skill, as agents read it" },
+	"skill install": { says: "write the skill for Claude Code and Codex" },
+	"skill remove": { says: "take the skill out of Claude Code and Codex" },
+};
+const BUILT_IN_EXITS: { readonly [code: number]: string } = {
+	0: "done",
+	1: "anything else",
+	[USAGE_EXIT]: "a wrong call",
 };
 const HELP_FLAG: FlagSpecs = {
 	help: { type: "boolean", short: "h", says: "this help" },
@@ -300,9 +393,54 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 	const commands: Record<string, CommandSpec> = {
 		...spec.commands,
 		help: HELP,
+		...(spec.skill ? SKILL : {}),
 	};
-	if ("help" in spec.commands)
-		throw new Error(`cli: "help" is built in, ${spec.name} cannot declare it`);
+	for (const name of ["help", ...(spec.skill ? Object.keys(SKILL) : [])])
+		if (name in spec.commands)
+			throw new Error(
+				`cli: "${name}" is built in, ${spec.name} cannot declare it`,
+			);
+
+	// The exits: declared beyond the three every program has, each with its
+	// words, and a command ends only with the program's.
+	const exits: Record<number, string> = { ...BUILT_IN_EXITS };
+	for (const [key, says] of Object.entries(spec.exits ?? {})) {
+		const code = Number(key);
+		if (
+			!Number.isInteger(code) ||
+			code < 2 ||
+			code > 255 ||
+			code === USAGE_EXIT
+		)
+			throw new Error(
+				`cli: ${spec.name}'s exit ${key}: a status from 2 to 255, never 64 (a wrong call, built in)`,
+			);
+		if (!says) throw new Error(`cli: ${spec.name}'s exit ${code} says nothing`);
+		exits[code] = says;
+	}
+	for (const [name, c] of Object.entries(spec.commands))
+		for (const code of c.exits ?? [])
+			if (!(code in exits) || code in BUILT_IN_EXITS)
+				throw new Error(
+					`cli: ${spec.name} ${name} exits ${code}, which ${spec.name}'s exits do not declare`,
+				);
+	for (const [name, g] of Object.entries(spec.guides ?? {})) {
+		if (!/^[a-z][a-z0-9-]*$/.test(name))
+			throw new Error(`cli: guide "${name}": lower case, digits and hyphens`);
+		if (
+			name in commands ||
+			Object.values(commands).some((c) => c.aliases?.includes(name))
+		)
+			throw new Error(
+				`cli: guide "${name}" is also a command: help ${name} would mean both`,
+			);
+		if (!g.title || !g.says || !g.body)
+			throw new Error(`cli: guide "${name}" needs a title, a line and a body`);
+	}
+	if (spec.skill && spec.skill.useWhen.length === 0)
+		throw new Error(
+			`cli: ${spec.name}'s skill says nothing it is for (useWhen)`,
+		);
 	const global = spec.global ?? {};
 	const BUILT_IN: FlagSpecs =
 		spec.version === undefined ? HELP_FLAG : { ...HELP_FLAG, ...VERSION_FLAG };
@@ -441,22 +579,30 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 			throw new Error(`cli: ${missing.join(", ")} in no section`);
 	}
 
-	const { typed, overview, detail, describe } = helpOf({
+	const { typed, overview, detail, guide, describe } = helpOf({
 		spec,
 		commands,
 		global,
 		sections,
+		exits,
 	});
+	const skill = skillOf({ spec, commands, global, sections, exits });
 
 	function parse(
 		argv: readonly string[] = process.argv.slice(2),
-	): Call<P> | Print {
+	): Call<P> | Print | SkillOf<P> {
 		const tokens = tokenize(argv, every, shortOf);
 
-		// A word no command answers: the nearest spelling where one is near, with
-		// the default's reading when it claims the word too; else what the word
-		// is not, the default's argument named, and where the list is.
+		// A word no command answers: a guide's name said where `help` belongs; the
+		// nearest spelling where one is near, with the default's reading when it
+		// claims the word too; else what the word is not, the default's argument
+		// named, and where the list is.
 		const noCommand = (word: string) => {
+			if (spec.guides && word in spec.guides)
+				return new CliError(
+					`"${word}" is a guide: ${spec.name} help ${word}`,
+					"usage",
+				);
 			const guess = nearest(word, Object.keys(commands));
 			const d = spec.default;
 			if (guess)
@@ -472,7 +618,16 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 				"usage",
 			);
 		};
-		const words = tokens.flatMap((t) => (t.kind === "word" ? [t.value] : []));
+		// The command is named before `--`; what follows is its passthrough when
+		// it has one, else more of its arguments. Named only after it, every word
+		// is a word.
+		const said = tokens.flatMap((t) =>
+			t.kind === "word" && !t.passed ? [t.value] : [],
+		);
+		const passed = tokens.flatMap((t) =>
+			t.kind === "word" && t.passed ? [t.value] : [],
+		);
+		const words = said.length ? said : passed;
 		const first = words[0];
 		const found =
 			spelled(words.length ? words : ["help"]) ??
@@ -483,7 +638,14 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 				? { name: spec.default.command, rest: words }
 				: null);
 		if (!found) throw noCommand(first as string);
-		const { name, rest } = found;
+		const { name } = found;
+		const passthrough: string[] = [];
+		const rest = [...found.rest];
+		if (said.length) {
+			if (commands[name]?.passthrough !== undefined)
+				passthrough.push(...passed);
+			else rest.push(...passed);
+		}
 		// Under a command with actions (`invoice create`), an argument a typo away
 		// from an action is the action misspelt, never a value: run as one, `bank
 		// invoice crate` looked up an invoice named "crate" and asked for credentials.
@@ -591,12 +753,37 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 		if (asked.help || name === "help") {
 			if (!(asked.help && name !== "help") && rest.length === 0)
 				return { kind: "print", text: overview(), data: describe() };
+			const topic = rest[0] as string;
+			if (
+				name === "help" &&
+				rest.length === 1 &&
+				spec.guides &&
+				topic in spec.guides
+			)
+				return {
+					kind: "print",
+					text: guide(topic),
+					data: { guide: topic, ...spec.guides[topic] },
+				};
 			const about = asked.help && name !== "help" ? name : spelled(rest)?.name;
 			if (about === undefined) throw noCommand(rest[0] as string);
 			const data = (describe().commands as { name: string }[]).find(
 				(c) => c.name === about,
 			);
 			return { kind: "print", text: detail(about), data };
+		}
+		if (name === "skill" || name.startsWith("skill ")) {
+			if (rest.length)
+				throw new CliError(
+					`${spec.name} ${name} takes no arguments; "${rest[0]}" is one too many`,
+					"usage",
+				);
+			const action = name === "skill" ? "status" : name.slice("skill ".length);
+			// Only a program with a skill has these commands to spell.
+			return {
+				kind: "skill",
+				action: action as SkillCall["action"],
+			} as SkillOf<P>;
 		}
 
 		const shape = argsOf(commands[name]);
@@ -635,7 +822,13 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 					`${spec.name} ${name} needs ${flagText(flag, f)}: ${f.says}`,
 					"usage",
 				);
-		return { kind: "run", command: name, args: rest, values } as Call<P>;
+		return {
+			kind: "run",
+			command: name,
+			args: rest,
+			passthrough,
+			values,
+		} as Call<P>;
 	}
 
 	/** The one dispatch `run` and `context(…).run` share. */
@@ -660,17 +853,33 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 			);
 		const call = parse(argv);
 		if (call.kind === "print")
-			return emit(argv.includes("--json"), call.data, () =>
+			return emit(beforeDash(argv).includes("--json"), call.data, () =>
 				process.stdout.write(call.text),
 			);
+		if (call.kind === "skill") {
+			process.stdout.write(skill.answer(call.action));
+			return;
+		}
 		const ctx = build ? await build(call) : undefined;
 		// A call and its handler name one command; TypeScript cannot follow a
 		// union through an index, so the pairing is this one line's.
 		const handler = (handlers as Record<string, unknown>)[call.command] as (
 			c: Call<P>,
 			x: unknown,
-		) => void | Promise<void>;
-		await handler(call, ctx);
+		) => unknown;
+		const status = await handler(call, ctx);
+		if (status === undefined || status === 0) return;
+		if (typeof status !== "number")
+			throw new Error(
+				`cli: ${spec.name} ${call.command}'s handler returned ${String(status)}: nothing, or a status`,
+			);
+		// A status the command did not declare is the program's bug, never the
+		// person's: its help would have lied about how it ends.
+		if (!commands[call.command]?.exits?.includes(status))
+			throw new Error(
+				`cli: ${spec.name} ${call.command} returned ${status}, which its exits do not list`,
+			);
+		process.exitCode = status;
 	}
 
 	const argvOf = (argv: readonly string[] | undefined) =>
@@ -685,6 +894,9 @@ export function program<const P extends ProgramSpec>(spec: P): Program<P> {
 		}),
 		overview,
 		detail: detail as Program<P>["detail"],
+		guide,
 		describe,
+		skillMarkdown: skill.markdown,
+		skill: skill.answer,
 	};
 }

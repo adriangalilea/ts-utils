@@ -680,6 +680,7 @@ bad(
 		kind: "run",
 		command: "pull",
 		args: ["owner/repo"],
+		passthrough: [],
 		values: { rev: "v2" },
 	});
 	const named = hf.parse(["pull", "owner/repo"]);
@@ -947,6 +948,162 @@ bad(
 	const twoHours = Date.now() - armedAt("2h").getTime();
 	assert.ok(Math.abs(twoHours - 7_200_000) < 5_000, String(twoHours));
 	assert.throws(() => armedAt("soon"), /--since:/);
+}
+
+// what the Swift twin (swift-utils TerminalPrograms) added, the same here: a
+// command's passthrough after `--`, declared exits, guides, the skill, and a
+// help column that never runs past the reading measure
+{
+	const ship = program({
+		name: "ship",
+		says: "run things once approved",
+		global: { json: { type: "boolean", says: "the answer as JSON" } },
+		exits: { 77: "you refused", 75: "nobody answered" },
+		commands: {
+			run: {
+				args: "[title]",
+				passthrough: "command [args…]",
+				says: "run a command once you say yes",
+				exits: [77, 75],
+			},
+			note: { args: "[words...]", says: "a note" },
+			"a-command-with-a-very-long-name-indeed": {
+				args: "<and-a-long-argument> [another-long-one]",
+				says: "shows where a long usage puts its words",
+			},
+		},
+		guides: {
+			waiting: {
+				title: "Waiting for an answer",
+				says: "how long a run waits",
+				body: "A run waits five minutes.\n\n- `--minutes` changes it\n\n```sh\nship run -- make\n```",
+			},
+		},
+		skill: {
+			useWhen: ["running a deploy someone approves"],
+			never: ["approve your own run"],
+		},
+	});
+
+	// After `--`: the command's own, --help and --json in it never read.
+	const run = ship.parse(["run", "deploy", "--", "make", "--help", "--json"]);
+	assert.ok(run.kind === "run" && run.command === "run");
+	assert.deepEqual(run.args, ["deploy"]);
+	assert.deepEqual(run.passthrough, ["make", "--help", "--json"]);
+	// Without a passthrough, what follows `--` is more arguments.
+	const note = ship.parse(["note", "--", "-x", "y"]);
+	assert.ok(note.kind === "run");
+	assert.deepEqual(note.args, ["-x", "y"]);
+	assert.deepEqual(note.passthrough, []);
+
+	// A wrong call ends 64; a refusal carries a declared exit.
+	assert.throws(
+		() => ship.parse(["run", "--nope"]),
+		(e: unknown) => e instanceof CliError && e.status === 64,
+	);
+	assert.equal(new CliError("refused", "denied", undefined, 77).status, 77);
+	assert.equal(new CliError("broke").status, 1);
+	assert.throws(
+		() =>
+			program({
+				name: "x",
+				says: "x",
+				exits: { 64: "taken" },
+				commands: { a: { says: "a" } },
+			}),
+		/never 64/,
+	);
+	assert.throws(
+		() =>
+			program({
+				name: "x",
+				says: "x",
+				commands: { a: { says: "a", exits: [9] } },
+			}),
+		/do not declare/,
+	);
+
+	// Guides: listed, read by `help <name>`, never a command.
+	const overview = stripAnsi(ship.overview());
+	assert.match(overview, /guides\n\s+waiting\s+how long a run waits/);
+	assert.match(overview, /exits\n(.*\n)*\s+77\s+you refused/);
+	assert.match(overview, /use it for\s+running a deploy someone approves/);
+	assert.match(overview, /ship help <guide> to read one/);
+	const waiting = ship.parse(["help", "waiting"]);
+	assert.ok(waiting.kind === "print");
+	assert.match(
+		stripAnsi(waiting.text),
+		/Waiting for an answer\n\n\s+A run waits five minutes\.\n\n\s+- `--minutes` changes it/,
+	);
+	assert.throws(() => ship.parse(["waiting"]), /is a guide: ship help waiting/);
+	assert.throws(
+		() =>
+			program({
+				name: "x",
+				says: "x",
+				commands: { a: { says: "a" } },
+				guides: { a: { title: "A", says: "a", body: "a" } },
+			}),
+		/also a command/,
+	);
+
+	// One command's help: its passthrough and its exits.
+	const detail = stripAnsi(ship.detail("run"));
+	assert.match(detail, /ship run \[title\] -- command \[args…\]/);
+	assert.match(detail, /exits\n\s+77\s+you refused\n\s+75\s+nobody answered/);
+
+	// The column stops at the reading measure: a long usage puts its words on
+	// the next line, and the short ones stay near their usage.
+	const columns = process.stdout.columns;
+	process.stdout.columns = 80;
+	try {
+		const lines = stripAnsi(ship.overview()).split("\n");
+		const long = lines.findIndex((l) =>
+			l.includes("a-command-with-a-very-long-name-indeed"),
+		);
+		assert.ok(!lines[long]?.includes("shows where"), lines[long]);
+		assert.match(
+			lines[long + 1] ?? "",
+			/^\s{20,40}shows where a long usage puts its words$/,
+		);
+		const short = lines.find((l) => l.includes("ship note")) ?? "";
+		assert.ok(short.indexOf("a note") <= 40, short);
+	} finally {
+		process.stdout.columns = columns;
+	}
+
+	// The skill: asked for by its words, rendered from the same spec.
+	assert.deepEqual(ship.parse(["skill"]), { kind: "skill", action: "status" });
+	assert.deepEqual(ship.parse(["skill", "show"]), {
+		kind: "skill",
+		action: "show",
+	});
+	const skill = ship.skillMarkdown();
+	assert.match(
+		skill,
+		/^---\nname: ship\ndescription: "Run things once approved\. Use it for: running a deploy someone approves\. Never approve your own run\."/,
+	);
+	assert.match(
+		skill,
+		/## Waiting for an answer\n\n\*how long a run waits\*\n\nA run waits five minutes\./,
+	);
+	assert.match(skill, /## `ship run \[title\] -- command \[args…\]`/);
+	assert.match(skill, /Exits: 77 you refused, 75 nobody answered\./);
+	assert.match(
+		skill,
+		/## Exit status\n\n- `0`: done\n- `1`: anything else\n- `64`: a wrong call\n- `75`: nobody answered\n- `77`: you refused/,
+	);
+	assert.throws(() => eid.parse(["skill"]), /No command "skill"/);
+	assert.throws(
+		() =>
+			program({
+				name: "x",
+				says: "x",
+				commands: { skill: { says: "mine" } },
+				skill: { useWhen: ["x"] },
+			}),
+		/built in/,
+	);
 }
 
 console.log("command: ok");

@@ -62,16 +62,66 @@ const hang = (left: string, column: number, text: string): string =>
 const heading = (s: string) => `  ${ui.accent(s)}`;
 
 /** Rows in one column whatever group they stand in, so every group's words
- *  start at one edge. */
+ *  start at one edge. The column leaves the words 40 columns of a reading
+ *  measure (80 at most), never under 20: a long usage puts its words on the
+ *  next line, under the column, rather than pushing every row's words right. */
 function aligned(groups: [string, [string, string][]][]): string[] {
-	const column =
+	const widest =
 		Math.max(0, ...groups.flatMap(([, rows]) => rows.map(([l]) => width(l)))) +
 		6;
+	const columns = Math.min(80, process.stdout.columns || 80);
+	const column = Math.min(widest, Math.max(columns - 40, 20));
 	return groups.flatMap(([title, rows]) => [
 		"",
 		heading(title),
-		...rows.map(([l, r]) => hang(`    ${l}`, column, r)),
+		...rows.map(([l, r]) => {
+			const cell = `    ${l}`;
+			return width(cell) + 2 <= column
+				? hang(cell, column, r)
+				: `${cell}\n${wrap(r, column)}`;
+		}),
 	]);
+}
+
+/** Markdown of the small subset a guide is written in, for a terminal:
+ *  paragraphs folded, bullets folded under their marker, fenced blocks kept as
+ *  written. */
+function markdown(text: string, indent: number): string {
+	const lead = " ".repeat(indent);
+	const out: string[] = [];
+	let paragraph: string[] = [];
+	let fenced = false;
+	const flush = () => {
+		if (!paragraph.length) return;
+		const joined = paragraph.join(" ");
+		out.push(
+			joined.startsWith("- ")
+				? hang(`${lead}- `, indent + 2, joined.slice(2))
+				: wrap(joined, indent),
+		);
+		paragraph = [];
+	};
+	for (const line of text.split("\n")) {
+		if (line.startsWith("```")) {
+			flush();
+			fenced = !fenced;
+			continue;
+		}
+		if (fenced) {
+			out.push(`${lead}  ${ui.muted(line)}`);
+			continue;
+		}
+		if (!line.trim()) {
+			flush();
+			if (out.at(-1) !== "") out.push("");
+			continue;
+		}
+		if (line.startsWith("- ")) flush();
+		paragraph.push(line.trim());
+	}
+	flush();
+	while (out.at(-1) === "") out.pop();
+	return out.join("\n");
 }
 
 /** The program as the help reads it: its spec, every command (`help` among
@@ -81,9 +131,27 @@ export type HelpModel = {
 	commands: Readonly<Record<string, CommandSpec>>;
 	global: FlagSpecs;
 	sections: readonly (readonly [string, readonly string[]])[];
+	/** Every status it ends with, the built-in three among them, by code. */
+	exits: Readonly<Record<number, string>>;
 };
 
-export function helpOf({ spec, commands, global, sections }: HelpModel) {
+/** A command's tail as typed after its name: its arguments, then `-- <its
+ *  passthrough>`. */
+const tailOf = (c: CommandSpec | undefined): string =>
+	[c?.args, c?.passthrough === undefined ? undefined : `-- ${c.passthrough}`]
+		.filter(Boolean)
+		.join(" ");
+
+/** The exits as rows, by code. */
+export const exitRows = (
+	exits: Readonly<Record<number, string>>,
+): [string, string][] =>
+	Object.entries(exits)
+		.map(([code, says]): [number, string] => [Number(code), says])
+		.sort(([a], [b]) => a - b)
+		.map(([code, says]) => [String(code), says]);
+
+export function helpOf({ spec, commands, global, sections, exits }: HelpModel) {
 	// A command as typed: `discord message|msg <ref>`, its aliases quiet beside it;
 	// the default's name in brackets, as it may go unsaid: `hf-get [pull] <repo>`.
 	const usageOf = (name: string) => {
@@ -95,11 +163,18 @@ export function helpOf({ spec, commands, global, sections }: HelpModel) {
 			name === spec.default?.command
 				? `${ui.muted("[")}${ui.head(name)}${aliases}${ui.muted("]")}`
 				: `${ui.head(name)}${aliases}`;
-		return `${ui.muted(spec.name)} ${said}${c?.args ? ` ${ui.muted(c.args)}` : ""}`;
+		const tail = tailOf(c);
+		return `${ui.muted(spec.name)} ${said}${tail ? ` ${ui.muted(tail)}` : ""}`;
 	};
-	/** A command as plain text, for the words of a refusal. */
-	const typed = (name: string) =>
-		`${spec.name} ${name}${commands[name]?.args ? ` ${commands[name]?.args}` : ""}`;
+	/** A command as plain text, for the words of a refusal and the skill. */
+	const typed = (name: string) => {
+		const tail = tailOf(commands[name]);
+		return `${spec.name} ${name}${tail ? ` ${tail}` : ""}`;
+	};
+	/** The built-in skill commands, shown in a group of their own. */
+	const agentCommands = Object.keys(commands).filter(
+		(n) => n === "skill" || n.startsWith("skill "),
+	);
 
 	function overview(): string {
 		const rows = sections.map(
@@ -124,20 +199,58 @@ export function helpOf({ spec, commands, global, sections }: HelpModel) {
 			n,
 			says,
 		]);
+		const guides: [string, string][] = Object.entries(spec.guides ?? {}).map(
+			([n, g]) => [n, g.says],
+		);
+		const agents: [string, string][] = agentCommands.map((n) => [
+			usageOf(n),
+			commands[n]?.says ?? "",
+		]);
 		const groups: [string, [string, string][]][] = [
 			...rows,
+			...(guides.length ? [["guides", guides] as const] : []),
+			...(agents.length ? [["for agents", agents] as const] : []),
 			...(always.length ? [["on every command", always] as const] : []),
 			...(env.length ? [["environment", env] as const] : []),
+			["exits", exitRows(exits)] as const,
 		].map(([t, r]) => [t, [...r]]);
+		const skill = spec.skill
+			? [
+					"",
+					hang(
+						`  ${ui.muted("use it for")}`,
+						14,
+						spec.skill.useWhen.join("; "),
+					),
+					...(spec.skill.never?.length
+						? [hang(`  ${ui.muted("never")}`, 14, spec.skill.never.join("; "))]
+						: []),
+				]
+			: [];
+		const foot = [
+			`${spec.name} help <command> for one in full`,
+			...(guides.length ? [`${spec.name} help <guide> to read one`] : []),
+			spec.foot,
+		];
 		return [
 			"",
 			`  ${ui.head(spec.name)}${spec.version === undefined ? "" : ` ${ui.muted(spec.version)}`}  ${spec.says}`,
 			...(spec.about ?? []).map((l) => ui.muted(wrap(l, 2))),
+			...skill,
 			...aligned(groups),
 			"",
-			`  ${ui.muted([`${spec.name} help <command> for one in full`, spec.foot].filter(Boolean).join(" · "))}`,
+			`  ${ui.muted(foot.filter(Boolean).join(" · "))}`,
 			"",
 		].join("\n");
+	}
+
+	/** One guide, as `help <guide>` prints it. */
+	function guide(name: string): string {
+		const g = spec.guides?.[name];
+		if (!g) throw new Error(`cli: guide "${name}", which ${spec.name} lacks`);
+		return ["", `  ${ui.head(g.title)}`, "", markdown(g.body, 2), ""].join(
+			"\n",
+		);
 	}
 
 	function detail(name: string): string {
@@ -145,8 +258,6 @@ export function helpOf({ spec, commands, global, sections }: HelpModel) {
 		if (!c)
 			throw new Error(`cli: detail of "${name}", which ${spec.name} lacks`);
 		const flags = Object.entries(c.flags ?? {});
-		const column =
-			Math.max(0, ...flags.map(([n, f]) => width(flagText(n, f)))) + 2;
 		// Words an argument takes that its usage does not show (`<env>`, not `<a|b>`).
 		const listed = argsOf(c).filter((a) => a.choices && !a.name.includes("|"));
 		// The commands whose name begins with this one's: `invoice create` under `invoice`.
@@ -179,23 +290,31 @@ export function helpOf({ spec, commands, global, sections }: HelpModel) {
 					])
 				: []),
 			...(flags.length
-				? [
-						"",
-						heading("flags"),
-						...flags.map(([n, f]) =>
-							hang(
-								`    ${flagText(n, f)}`,
-								column + 4,
+				? aligned([
+						[
+							"flags",
+							flags.map(([n, f]): [string, string] => [
+								flagText(n, f),
 								`${f.says}${
 									// choices a placeholder hides are said after the words
 									f.choices && f.value
 										? ui.muted(` (${f.choices.join(", ")})`)
 										: ""
 								}${f.required ? ui.muted(" (required)") : ""}`,
-							),
-						),
-					]
+							]),
+						],
+					])
 				: []),
+			...(c.passthrough === undefined
+				? []
+				: [
+						"",
+						heading("after --"),
+						wrap(
+							`${c.passthrough}: handed to the command as it is typed; --help and --json there are its own`,
+							4,
+						),
+					]),
 			...(c.examples?.length
 				? [
 						"",
@@ -204,6 +323,17 @@ export function helpOf({ spec, commands, global, sections }: HelpModel) {
 					]
 				: []),
 			...(c.json ? ["", heading("--json"), wrap(c.json, 4)] : []),
+			...(c.exits?.length
+				? aligned([
+						[
+							"exits",
+							c.exits.map((code): [string, string] => [
+								String(code),
+								exits[code] ?? "",
+							]),
+						],
+					])
+				: []),
 			"",
 		].join("\n");
 	}
@@ -228,10 +358,23 @@ export function helpOf({ spec, commands, global, sections }: HelpModel) {
 				...(c.more && { more: c.more }),
 				...(c.examples && { examples: c.examples }),
 				...(c.json && { json: c.json }),
+				...(c.passthrough !== undefined && { passthrough: c.passthrough }),
+				...(c.exits?.length && { exits: c.exits }),
 			})),
 			global: flagsData(global),
+			exits: exitRows(exits).map(([code, says]) => ({
+				code: Number(code),
+				says,
+			})),
+			...(spec.guides && {
+				guides: Object.entries(spec.guides).map(([name, g]) => ({
+					name,
+					...g,
+				})),
+			}),
+			...(spec.skill && { skill: spec.skill }),
 		};
 	}
 
-	return { usageOf, typed, overview, detail, describe };
+	return { usageOf, typed, overview, detail, guide, describe };
 }

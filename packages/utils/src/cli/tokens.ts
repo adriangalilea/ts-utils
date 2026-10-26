@@ -18,7 +18,9 @@ import type { FlagSpec } from "./command.js";
 
 /** One piece of argv as the program reads it. */
 export type Token =
-	| { kind: "word"; value: string }
+	/** `passed`: after `--`, where a command that passes them through takes them
+	 *  untouched, and any other takes them as arguments. */
+	| { kind: "word"; value: string; passed?: true }
 	| {
 			kind: "flag";
 			/** The long name, or the letter itself for a letter no flag has. */
@@ -54,7 +56,8 @@ export function tokenize(
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i] as string;
 		if (a === "--") {
-			for (const w of argv.slice(i + 1)) out.push({ kind: "word", value: w });
+			for (const w of argv.slice(i + 1))
+				out.push({ kind: "word", value: w, passed: true });
 			break;
 		}
 		if (isWord(a)) {
