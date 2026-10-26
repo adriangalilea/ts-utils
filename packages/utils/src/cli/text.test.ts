@@ -45,10 +45,11 @@ assert.equal(
 );
 assert.throws(() => osc8("x", "https://a\x1b]8;;b"), /control character/);
 
-// colorAsked: node's rule, FORCE_COLOR deciding when set
+// colorAsked: the one rule (utils' README), FORCE_COLOR deciding when not empty
 assert.equal(colorAsked({}), undefined);
 assert.equal(colorAsked({ FORCE_COLOR: "1" }), true);
-assert.equal(colorAsked({ FORCE_COLOR: "" }), true);
+assert.equal(colorAsked({ FORCE_COLOR: "" }), undefined);
+assert.equal(colorAsked({ NO_COLOR: "" }), undefined);
 assert.equal(colorAsked({ FORCE_COLOR: "0" }), false);
 assert.equal(colorAsked({ FORCE_COLOR: "false" }), false);
 assert.equal(colorAsked({ FORCE_COLOR: "1", NO_COLOR: "1" }), true);
