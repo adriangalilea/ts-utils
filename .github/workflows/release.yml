@@ -21,7 +21,7 @@ permissions: {}
 
 jobs:
   build-utils:
-    uses: adriangalilea/ci/.github/workflows/node.yml@33b31195b1eba5d1b5c78f9e09c3e3aa8ab97d24 # v1.6.0
+    uses: adriangalilea/ci/.github/workflows/node.yml@5afd9365125449d69deb51e9e5ab2980260832fe # v1.10.1
     with:
       directory: packages/utils
       verify: verify:utils
@@ -37,13 +37,13 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: adriangalilea/ci/.github/actions/npm-publish@33b31195b1eba5d1b5c78f9e09c3e3aa8ab97d24 # v1.6.0
+      - uses: adriangalilea/ci/.github/actions/npm-publish@5afd9365125449d69deb51e9e5ab2980260832fe # v1.10.1
         with:
           artifact: utils
 
   release-utils:
     needs: [build-utils, publish-utils]
-    uses: adriangalilea/ci/.github/workflows/release.yml@33b31195b1eba5d1b5c78f9e09c3e3aa8ab97d24 # v1.6.0
+    uses: adriangalilea/ci/.github/workflows/release.yml@5afd9365125449d69deb51e9e5ab2980260832fe # v1.10.1
     with:
       tag: ${{ needs.build-utils.outputs.tag }}
       paths: packages/utils/**
@@ -51,7 +51,7 @@ jobs:
       contents: write
 
   build-llm:
-    uses: adriangalilea/ci/.github/workflows/node.yml@33b31195b1eba5d1b5c78f9e09c3e3aa8ab97d24 # v1.6.0
+    uses: adriangalilea/ci/.github/workflows/node.yml@5afd9365125449d69deb51e9e5ab2980260832fe # v1.10.1
     with:
       directory: packages/llm
       tag-prefix: llm-
@@ -68,13 +68,13 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: adriangalilea/ci/.github/actions/npm-publish@33b31195b1eba5d1b5c78f9e09c3e3aa8ab97d24 # v1.6.0
+      - uses: adriangalilea/ci/.github/actions/npm-publish@5afd9365125449d69deb51e9e5ab2980260832fe # v1.10.1
         with:
           artifact: llm
 
   release-llm:
     needs: [build-llm, publish-llm]
-    uses: adriangalilea/ci/.github/workflows/release.yml@33b31195b1eba5d1b5c78f9e09c3e3aa8ab97d24 # v1.6.0
+    uses: adriangalilea/ci/.github/workflows/release.yml@5afd9365125449d69deb51e9e5ab2980260832fe # v1.10.1
     with:
       tag: ${{ needs.build-llm.outputs.tag }}
       tag-prefix: llm-
@@ -83,7 +83,7 @@ jobs:
       contents: write
 
   build-bot:
-    uses: adriangalilea/ci/.github/workflows/node.yml@33b31195b1eba5d1b5c78f9e09c3e3aa8ab97d24 # v1.6.0
+    uses: adriangalilea/ci/.github/workflows/node.yml@5afd9365125449d69deb51e9e5ab2980260832fe # v1.10.1
     with:
       directory: packages/bot
       tag-prefix: bot-
@@ -100,13 +100,13 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: adriangalilea/ci/.github/actions/npm-publish@33b31195b1eba5d1b5c78f9e09c3e3aa8ab97d24 # v1.6.0
+      - uses: adriangalilea/ci/.github/actions/npm-publish@5afd9365125449d69deb51e9e5ab2980260832fe # v1.10.1
         with:
           artifact: bot
 
   release-bot:
     needs: [build-bot, publish-bot]
-    uses: adriangalilea/ci/.github/workflows/release.yml@33b31195b1eba5d1b5c78f9e09c3e3aa8ab97d24 # v1.6.0
+    uses: adriangalilea/ci/.github/workflows/release.yml@5afd9365125449d69deb51e9e5ab2980260832fe # v1.10.1
     with:
       tag: ${{ needs.build-bot.outputs.tag }}
       tag-prefix: bot-
@@ -115,7 +115,7 @@ jobs:
       contents: write
 
   build-metrics:
-    uses: adriangalilea/ci/.github/workflows/node.yml@33b31195b1eba5d1b5c78f9e09c3e3aa8ab97d24 # v1.6.0
+    uses: adriangalilea/ci/.github/workflows/node.yml@5afd9365125449d69deb51e9e5ab2980260832fe # v1.10.1
     with:
       directory: packages/metrics
       tag-prefix: metrics-
@@ -132,13 +132,13 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: adriangalilea/ci/.github/actions/npm-publish@33b31195b1eba5d1b5c78f9e09c3e3aa8ab97d24 # v1.6.0
+      - uses: adriangalilea/ci/.github/actions/npm-publish@5afd9365125449d69deb51e9e5ab2980260832fe # v1.10.1
         with:
           artifact: metrics
 
   release-metrics:
     needs: [build-metrics, publish-metrics]
-    uses: adriangalilea/ci/.github/workflows/release.yml@33b31195b1eba5d1b5c78f9e09c3e3aa8ab97d24 # v1.6.0
+    uses: adriangalilea/ci/.github/workflows/release.yml@5afd9365125449d69deb51e9e5ab2980260832fe # v1.10.1
     with:
       tag: ${{ needs.build-metrics.outputs.tag }}
       tag-prefix: metrics-
